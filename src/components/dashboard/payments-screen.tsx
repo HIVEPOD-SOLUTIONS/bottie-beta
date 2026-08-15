@@ -1,6 +1,6 @@
 "use client";
 
-import { usePayments } from "@/hooks/use-payments";
+import { usePaymentsContext } from "@/contexts/payments-context";
 import { useWeeklyInsight } from "@/hooks/use-weekly-insight";
 
 // ── Icons for every payment type ─────────────────────────────────────────────
@@ -61,7 +61,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function PaymentsScreen() {
-  const { payments, loading, error, refetch } = usePayments();
+  const { allPayments: payments, loading, error, refetch } = usePaymentsContext();
   const {
     insight,
     isLoading: insightLoading,

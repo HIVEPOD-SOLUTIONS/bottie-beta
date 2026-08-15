@@ -8,7 +8,7 @@ import { arcKit, AGENT_CHAIN, SOLANA_ARC_CHAIN } from "@/lib/arc-kit";
 import { Blockchain } from "@circle-fin/app-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { useDemoState } from "@/contexts/demo-state-context";
-import { usePayments } from "@/hooks/use-payments";
+import { usePaymentsContext } from "@/contexts/payments-context";
 import { useChatSheet } from "@/contexts/chat-context";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
@@ -2407,7 +2407,7 @@ function BitrefillDetail() {
   const [purchasedIds, setPurchasedIds]       = useState<Set<string>>(new Set());
 
   // Count completed bill purchases from the DB (includes AI-initiated purchases)
-  const { payments: billPayments } = usePayments("bill");
+  const { billPayments } = usePaymentsContext();
 
   // Persist country preference
   const handleCountryChange = useCallback((c: CountryEntry) => {
@@ -2701,7 +2701,7 @@ export function BillsScreen() {
   const [bitrefillOpen, setBitrefillOpen] = useState(false);
 
   // Count completed purchases from DB — includes AI-initiated ones, not just UI purchases
-  const { payments: billPayments, loading: billsLoading } = usePayments("bill");
+  const { billPayments, loading: billsLoading } = usePaymentsContext();
   const dbCompletedCount = billPayments.filter((p) => p.status === "completed").length;
   const totalPurchased = Math.max(paidBillIds.length, dbCompletedCount);
 

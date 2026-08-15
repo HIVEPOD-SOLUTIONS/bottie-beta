@@ -19,7 +19,7 @@
  * last known good values while retrying on the next 30-second interval.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { EVM_BALANCE_CHAINS, SOLANA_BALANCE_CHAIN } from "@/hooks/use-unified-balance";
 
@@ -292,6 +292,7 @@ export function useStablecoinBalances(): StablecoinBalances {
   const userId = user?.id;
 
   // ── Live refresh (three-tier) ───────────────────────────────────────────────
+  const privyTierLoggedRef = useRef(false);
   const refresh = useCallback(async () => {
     if (!evmAddress && !solAddress) {
       if (userId) setIsLoading(false);
@@ -301,13 +302,17 @@ export function useStablecoinBalances(): StablecoinBalances {
       // Tier 1: Privy balance API
       const tier1 = await fetchViaPrivy(evmPrivyWalletId, solPrivyWalletId);
       if (tier1) {
+        privyTierLoggedRef.current = false; // reset so we log if it breaks again
         setBalances(tier1);
         persistSnapshot(evmAddress, solAddress, tier1);
         return;
       }
 
       // Tier 2: viem + @solana/web3.js
-      console.warn("[balances] Privy API unavailable, trying viem/web3.js");
+      if (!privyTierLoggedRef.current) {
+        privyTierLoggedRef.current = true;
+        console.info("[balances] Privy balance API unavailable — using viem/web3.js fallback. Set PRIVY_APP_SECRET to enable tier-1.");
+      }
       const tier2 = await fetchViaLibraries(evmAddress, solAddress);
       if (tier2) {
         setBalances(tier2);

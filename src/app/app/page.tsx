@@ -6,6 +6,7 @@ import { useChatSheet } from "@/contexts/chat-context";
 import { useDemoState } from "@/contexts/demo-state-context";
 import { BillsScreen } from "@/components/dashboard/bills-screen";
 import { PaymentsScreen } from "@/components/dashboard/payments-screen";
+import { PaymentsProvider, usePaymentsContext } from "@/contexts/payments-context";
 
 function ComingSoon({ icon, title, description }: { icon: string; title: string; description: string }) {
   return (
@@ -26,7 +27,6 @@ function ComingSoon({ icon, title, description }: { icon: string; title: string;
 import { FundWalletSheet } from "@/components/dashboard/fund-wallet-sheet";
 import { LOW_BALANCE_THRESHOLD_USD } from "@/hooks/use-usdc-balance";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
-import { usePayments } from "@/hooks/use-payments";
 import { ASSET_PRICES } from "@/lib/demo-data";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
 
@@ -93,7 +93,7 @@ function DashboardInner() {
 
   // Pull completed bill count from DB — includes AI-initiated purchases,
   // not just ones made through the Bills UI (which paidBillIds tracks).
-  const { payments: billPayments } = usePayments("bill");
+  const { billPayments } = usePaymentsContext();
   const dbBillCount = billPayments.filter((p) => p.status === "completed").length;
   const purchasedCount = Math.max(paidBillIds.length, dbBillCount);
 
@@ -289,5 +289,9 @@ function DashboardInner() {
 }
 
 export default function DashboardPage() {
-  return <DashboardInner />;
+  return (
+    <PaymentsProvider>
+      <DashboardInner />
+    </PaymentsProvider>
+  );
 }

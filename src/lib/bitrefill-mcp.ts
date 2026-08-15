@@ -49,19 +49,38 @@ interface CliCache {
 let _cachedToken: { token: string; expiresAt: number } | null = null;
 
 /**
- * Read the CLI's cached client_id, or register a new anonymous client.
- * The registration endpoint supports Dynamic Client Registration (RFC 7591)
- * with grant_type=client_credentials and no secret.
+ * In-process client_id cache.
+ * On Vercel each cold start is a fresh process, so the CLI cache file is never
+ * present. Without this, every token refresh re-registers a new anonymous client
+ * which quickly hits the 429 rate limit on the registration endpoint.
+ *
+ * Resolution order:
+ *   1. BITREFILL_CLIENT_ID env var  (stable across Vercel deployments)
+ *   2. In-process module variable   (stable for the lifetime of one warm instance)
+ *   3. CLI cache file               (only present when running locally with @bitrefill/cli)
+ *   4. Dynamic client registration  (last resort — may 429 under load)
  */
+let _cachedClientId: string | null = null;
+
 async function getClientId(): Promise<string> {
-  // 1. Prefer CLI's registered client_id
+  // 1. Env var — best on Vercel: set BITREFILL_CLIENT_ID in Vercel dashboard
+  const envClientId = process.env.BITREFILL_CLIENT_ID;
+  if (envClientId) return envClientId;
+
+  // 2. In-process cache (survives token refreshes within the same warm instance)
+  if (_cachedClientId) return _cachedClientId;
+
+  // 3. CLI cache file (local dev with @bitrefill/cli installed)
   try {
     const raw = fs.readFileSync(CLI_CACHE_FILE, "utf-8");
     const cache: CliCache = JSON.parse(raw);
-    if (cache.clientInfo?.client_id) return cache.clientInfo.client_id;
+    if (cache.clientInfo?.client_id) {
+      _cachedClientId = cache.clientInfo.client_id;
+      return _cachedClientId;
+    }
   } catch { /* file not found or unreadable — fall through */ }
 
-  // 2. Dynamic client registration (no secret required)
+  // 4. Dynamic client registration (no secret required)
   const res = await fetch(BITREFILL_REGISTER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -70,11 +89,13 @@ async function getClientId(): Promise<string> {
       grant_types: ["client_credentials"],
       token_endpoint_auth_method: "none",
       scope: "mcp",
+      redirect_uris: [process.env.NEXT_PUBLIC_APP_URL ?? "https://www.bluvfi.xyz"],
     }),
   });
   if (!res.ok) throw new Error(`Bitrefill client registration failed: ${res.status}`);
   const data = await res.json() as { client_id: string };
-  return data.client_id;
+  _cachedClientId = data.client_id;
+  return _cachedClientId;
 }
 
 /**
