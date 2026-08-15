@@ -10,6 +10,20 @@ const withSerwist = withSerwistInit({
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   turbopack: {},
+
+  // De-duplicate nested viem copies bundled inside @walletconnect/utils.
+  // When webpack resolves viem's ESM build from a nested node_modules it hits
+  // missing files (parseAvatarRecord.js, recoverAuthorizationAddress.js) that
+  // only exist in the root viem install. Aliasing forces all importers to use
+  // the same copy.
+  webpack(config) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      viem: require.resolve("viem"),
+    };
+    return config;
+  },
+
   serverExternalPackages: [
     "@solana/pay-kit",
     "@solana-program/token",
