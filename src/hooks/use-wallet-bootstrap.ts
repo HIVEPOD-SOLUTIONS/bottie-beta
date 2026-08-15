@@ -63,7 +63,7 @@ export function useWalletBootstrap() {
       })),
       connectedWallets: wallets.map((wallet) => ({
         address: Boolean(wallet.address),
-        chainType: wallet.chainType,
+        chainType: wallet.type, // ConnectedWallet uses `type` not `chainType`
         walletClientType: wallet.walletClientType,
       })),
     });
@@ -117,7 +117,7 @@ export function useWalletBootstrap() {
           walletClientType: account.walletClientType,
         })),
         connectedWallets: wallets.map((wallet) => ({
-          chainType: wallet.chainType,
+          chainType: wallet.type, // ConnectedWallet uses `type` not `chainType`
           walletClientType: wallet.walletClientType,
         })),
       });
