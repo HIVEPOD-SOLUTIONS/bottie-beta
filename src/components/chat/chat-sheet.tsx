@@ -81,7 +81,7 @@ function RoasterBondCard({
 }: {
   toolCallId: string;
   output: { pendingRoasterBond: true; battle_id: string; bond_transaction: string; solanaAddress: string };
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -156,7 +156,7 @@ function RoasterBackCard({
 }: {
   toolCallId: string;
   output: { pendingRoasterBack: true; battle_id: string; side: number; amount_usdc: number; platform_fee_usdc: number; time_weight: number; transaction: string; solanaAddress: string };
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -275,7 +275,7 @@ function BitrefillPaymentCard({
     isTopup?: boolean;
     expiresInMinutes?: number;
   };
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { wallets } = useWallets();
   const { client: smartWalletClient } = useSmartWallets();
@@ -447,7 +447,7 @@ function VelvetTxApprovalCard({
 }: {
   toolCallId: string;
   output: Record<string, unknown>;
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { wallets } = useWallets();
   const [busy, setBusy] = useState(false);
@@ -543,7 +543,7 @@ function FlashTxApprovalCard({
 }: {
   toolCallId: string;
   output: { pendingFlashTx: true; action: string; args: Record<string, unknown>; transaction: string; solanaAddress: string };
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -657,7 +657,7 @@ function FlashSessionApprovalCard({
 }: {
   toolCallId: string;
   output: { pendingFlashSession: true; action: string; args: { durationHours: number }; solanaAddress: string };
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -757,7 +757,7 @@ function FlashRevokeSessionCard({
 }: {
   toolCallId: string;
   output: { pendingFlashRevoke: true; solanaAddress: string };
-  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+  addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
