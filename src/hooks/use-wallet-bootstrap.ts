@@ -32,7 +32,7 @@ export function useWalletBootstrap() {
   const { createWallet: createEthereumWallet } = useCreateWallet();
   const { createWallet: createSolanaWallet } = useCreateSolanaWallet();
   const startedRef = useRef(false);
-  const lastUserIdRef = useRef<string | undefined>();
+  const lastUserIdRef = useRef<string | undefined>(undefined);
   const [status, setStatus] = useState<WalletBootstrapStatus>("idle");
   const [error, setError] = useState<string | undefined>();
   const [createdEvmAddress, setCreatedEvmAddress] = useState<string | undefined>();
