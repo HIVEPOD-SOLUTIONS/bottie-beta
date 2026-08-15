@@ -21,7 +21,6 @@ Bluvfi is a mobile-first AI financial assistant that lets you manage recurring s
 ## Features
 
 
-
 - **AI agent** — Chat with OpenAI GPT-4o-mini via Vercel AI SDK. Agent can list bills, queue payments, queue investment purchases, check nanopay balance, deposit/withdraw from Circle Gateway, and pay x402-protected URLs.
 - **Voice input** — OpenAI Whisper transcribes voice messages to text.
 - **Gasless payments** — All bill and investment payments use `arcKit.send()` which sponsors gas via Circle's infrastructure. Users only need USDC — no ETH required.
