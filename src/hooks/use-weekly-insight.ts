@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { AuthTokenUnavailableError, authFetch } from "@/lib/api-auth-fetch";
+import { AuthServiceUnavailableError, AuthTokenUnavailableError, authFetch } from "@/lib/api-auth-fetch";
 
 export type WeeklyInsight = {
   id: string;
@@ -57,7 +57,7 @@ export function useWeeklyInsight() {
       if (!res.ok) throw new Error(json.error ?? "Generation failed");
       setState((s) => ({ ...s, insight: json.insight, isGenerating: false }));
     } catch (err: any) {
-      if (err instanceof AuthTokenUnavailableError) {
+      if (err instanceof AuthTokenUnavailableError || err instanceof AuthServiceUnavailableError) {
         setState((s) => ({ ...s, isGenerating: false }));
         return;
       }
@@ -95,7 +95,7 @@ export function useWeeklyInsight() {
           if (!cancelled) generate();
         }
       } catch (err) {
-        if (err instanceof AuthTokenUnavailableError) {
+        if (err instanceof AuthTokenUnavailableError || err instanceof AuthServiceUnavailableError) {
           if (!cancelled) setState((s) => ({ ...s, isLoading: false, error: null }));
           return;
         }

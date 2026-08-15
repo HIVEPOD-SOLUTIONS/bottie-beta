@@ -9,8 +9,37 @@ export class AuthTokenUnavailableError extends Error {
   }
 }
 
+export class AuthServiceUnavailableError extends Error {
+  constructor() {
+    super("Privy server authentication is not configured");
+    this.name = "AuthServiceUnavailableError";
+  }
+}
+
+let authServiceConfigured: boolean | undefined;
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureAuthServiceConfigured() {
+  if (authServiceConfigured !== undefined) {
+    if (!authServiceConfigured) throw new AuthServiceUnavailableError();
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/auth/status", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000),
+    });
+    const json = await res.json().catch(() => ({}));
+    authServiceConfigured = json?.privyServerAuthConfigured === true;
+  } catch {
+    authServiceConfigured = true;
+  }
+
+  if (!authServiceConfigured) throw new AuthServiceUnavailableError();
 }
 
 async function getAccessTokenWithRetry(getAccessToken: GetAccessToken) {
@@ -27,6 +56,7 @@ export async function authFetch(
   init: RequestInit | undefined,
   getAccessToken: GetAccessToken,
 ) {
+  await ensureAuthServiceConfigured();
   const token = await getAccessTokenWithRetry(getAccessToken);
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);

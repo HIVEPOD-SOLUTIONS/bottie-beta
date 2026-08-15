@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { AuthTokenUnavailableError, authFetch } from "@/lib/api-auth-fetch";
+import { AuthServiceUnavailableError, AuthTokenUnavailableError, authFetch } from "@/lib/api-auth-fetch";
 
 export interface Payment {
   id: string;
@@ -62,7 +62,7 @@ export function usePayments(type?: "bill" | "investment") {
       const data = await res.json();
       setPayments(data.payments ?? []);
     } catch (err: any) {
-      if (err instanceof AuthTokenUnavailableError) {
+      if (err instanceof AuthTokenUnavailableError || err instanceof AuthServiceUnavailableError) {
         setError(null);
         return;
       }

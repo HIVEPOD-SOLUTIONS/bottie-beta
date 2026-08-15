@@ -22,7 +22,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { EVM_BALANCE_CHAINS, SOLANA_BALANCE_CHAIN } from "@/hooks/use-unified-balance";
-import { authFetch } from "@/lib/api-auth-fetch";
+import { AuthServiceUnavailableError, authFetch } from "@/lib/api-auth-fetch";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ?? "";
@@ -93,7 +93,8 @@ async function fetchViaPrivy(
       typeof json.solUsdt !== "number"
     ) return null;
     return { evmUsdc: json.evmUsdc, evmUsdt: json.evmUsdt, solUsdc: json.solUsdc, solUsdt: json.solUsdt };
-  } catch {
+  } catch (err) {
+    if (err instanceof AuthServiceUnavailableError) return null;
     return null;
   }
 }
@@ -158,7 +159,8 @@ async function fetchViaLibraries(
     }
 
     return { evmUsdc, evmUsdt, solUsdc, solUsdt };
-  } catch {
+  } catch (err) {
+    if (err instanceof AuthServiceUnavailableError) return null;
     return null;
   }
 }
@@ -311,7 +313,7 @@ export function useStablecoinBalances(): StablecoinBalances {
       }
 
       // Tier 2: viem + @solana/web3.js
-      if (!privyTierLoggedRef.current) {
+      if (!privyTierLoggedRef.current && process.env.NODE_ENV !== "production") {
         privyTierLoggedRef.current = true;
         console.info("[balances] Privy balance API unavailable — using viem/web3.js fallback. Set PRIVY_APP_SECRET to enable tier-1.");
       }
@@ -382,5 +384,7 @@ function persistSnapshot(
       solAddress: solAddress ?? null,
       ...b,
     }),
-  }, getAccessToken).catch(() => {});
+  }, getAccessToken).catch((err) => {
+    if (err instanceof AuthServiceUnavailableError) return;
+  });
 }
