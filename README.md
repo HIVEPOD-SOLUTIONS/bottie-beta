@@ -18,7 +18,6 @@ Bluvfi is a mobile-first AI financial assistant that lets you manage recurring s
 
 ---
 
-
 ## Features
 
 
