@@ -69,14 +69,39 @@ export type StablecoinBalances = {
 };
 
 type Balances = Omit<StablecoinBalances, "isLoading">;
+type PrivyBalanceResult =
+  | { balances: Balances; unavailableReason?: never }
+  | { balances: null; unavailableReason: string };
+type LiveBalanceResult = {
+  balances: Balances;
+  source: "privy" | "libraries" | "alchemy";
+  privyUnavailableReason?: string;
+};
+
+let lastSnapshotInflight: Promise<Balances | null> | undefined;
+let lastPersistedSnapshotKey = "";
+let lastPersistedSnapshotAt = 0;
+let liveBalanceInflightKey = "";
+let liveBalanceInflight: Promise<LiveBalanceResult> | undefined;
+
+function shouldDebugBalances() {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem("debug:balances") === "1";
+  } catch {
+    return false;
+  }
+}
 
 // ── Tier 1: Privy balance API (server-side proxy) ─────────────────────────────
 async function fetchViaPrivy(
   evmWalletId: string | null | undefined,
   solWalletId: string | null | undefined,
   getAccessToken: () => Promise<string | null>,
-): Promise<Balances | null> {
-  if (!evmWalletId && !solWalletId) return null;
+): Promise<PrivyBalanceResult> {
+  if (!evmWalletId && !solWalletId) {
+    return { balances: null, unavailableReason: "missing delegated Privy wallet IDs" };
+  }
+
   try {
     const params = new URLSearchParams();
     if (evmWalletId) params.set("evmWalletId", evmWalletId);
@@ -84,18 +109,34 @@ async function fetchViaPrivy(
     const res = await authFetch(`/api/balances/privy?${params}`, {
       signal: AbortSignal.timeout(15_000),
     }, getAccessToken);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const message = typeof json?.error === "string" ? json.error : `HTTP ${res.status}`;
+      return { balances: null, unavailableReason: message };
+    }
     const json = await res.json();
     if (
       typeof json.evmUsdc !== "number" ||
       typeof json.evmUsdt !== "number" ||
       typeof json.solUsdc !== "number" ||
       typeof json.solUsdt !== "number"
-    ) return null;
-    return { evmUsdc: json.evmUsdc, evmUsdt: json.evmUsdt, solUsdc: json.solUsdc, solUsdt: json.solUsdt };
+    ) {
+      return { balances: null, unavailableReason: "unexpected response shape" };
+    }
+    return {
+      balances: {
+        evmUsdc: json.evmUsdc,
+        evmUsdt: json.evmUsdt,
+        solUsdc: json.solUsdc,
+        solUsdt: json.solUsdt,
+      },
+    };
   } catch (err) {
-    if (err instanceof AuthServiceUnavailableError) return null;
-    return null;
+    if (err instanceof AuthServiceUnavailableError) {
+      return { balances: null, unavailableReason: "Privy server auth is not configured" };
+    }
+    const message = err instanceof Error ? err.message : "request failed";
+    return { balances: null, unavailableReason: message };
   }
 }
 
@@ -239,10 +280,75 @@ async function fetchViaAlchemyRPC(
   return { evmUsdc, evmUsdt, solUsdc, solUsdt };
 }
 
+async function fetchLiveBalances(params: {
+  evmAddress: string | undefined;
+  solAddress: string | undefined;
+  evmPrivyWalletId: string | null | undefined;
+  solPrivyWalletId: string | null | undefined;
+  getAccessToken: () => Promise<string | null>;
+}): Promise<LiveBalanceResult> {
+  const key = JSON.stringify({
+    evmAddress: params.evmAddress ?? null,
+    solAddress: params.solAddress ?? null,
+    evmPrivyWalletId: params.evmPrivyWalletId ?? null,
+    solPrivyWalletId: params.solPrivyWalletId ?? null,
+  });
+
+  if (liveBalanceInflight && liveBalanceInflightKey === key) return liveBalanceInflight;
+
+  liveBalanceInflightKey = key;
+  liveBalanceInflight = fetchLiveBalancesOnce(params).finally(() => {
+    liveBalanceInflight = undefined;
+    liveBalanceInflightKey = "";
+  });
+  return liveBalanceInflight;
+}
+
+async function fetchLiveBalancesOnce({
+  evmAddress,
+  solAddress,
+  evmPrivyWalletId,
+  solPrivyWalletId,
+  getAccessToken,
+}: {
+  evmAddress: string | undefined;
+  solAddress: string | undefined;
+  evmPrivyWalletId: string | null | undefined;
+  solPrivyWalletId: string | null | undefined;
+  getAccessToken: () => Promise<string | null>;
+}): Promise<LiveBalanceResult> {
+  const tier1 = await fetchViaPrivy(evmPrivyWalletId, solPrivyWalletId, getAccessToken);
+  if (tier1.balances) return { balances: tier1.balances, source: "privy" };
+
+  const tier2 = await fetchViaLibraries(evmAddress, solAddress);
+  if (tier2) {
+    return {
+      balances: tier2,
+      source: "libraries",
+      privyUnavailableReason: tier1.unavailableReason,
+    };
+  }
+
+  return {
+    balances: await fetchViaAlchemyRPC(evmAddress, solAddress),
+    source: "alchemy",
+    privyUnavailableReason: tier1.unavailableReason,
+  };
+}
+
 // ── DB snapshot loader ────────────────────────────────────────────────────────
 // Reads the most recent balance snapshot from the database.
 // Used to seed the UI instantly on mount (stale-while-revalidate).
 async function loadLastSnapshot(getAccessToken: () => Promise<string | null>): Promise<Balances | null> {
+  if (lastSnapshotInflight) return lastSnapshotInflight;
+
+  lastSnapshotInflight = loadLastSnapshotOnce(getAccessToken).finally(() => {
+    lastSnapshotInflight = undefined;
+  });
+  return lastSnapshotInflight;
+}
+
+async function loadLastSnapshotOnce(getAccessToken: () => Promise<string | null>): Promise<Balances | null> {
   try {
     const res = await authFetch("/api/balances?limit=1", {
       signal: AbortSignal.timeout(5_000),
@@ -265,7 +371,7 @@ async function loadLastSnapshot(getAccessToken: () => Promise<string | null>): P
 // ── Hook ──────────────────────────────────────────────────────────────────────
 export function useStablecoinBalances(): StablecoinBalances {
   const { user, ready, authenticated, getAccessToken } = usePrivy();
-  const { wallets } = useWallets();
+  const { ready: walletsReady, wallets } = useWallets();
 
   // EVM address: prefer smart wallet, fall back to embedded EOA
   const smartWalletAddr = (user as any)?.smartWallet?.address as string | undefined;
@@ -283,8 +389,11 @@ export function useStablecoinBalances(): StablecoinBalances {
   const solAddress = solWallet?.address ?? solWalletFromAccounts?.address as string | undefined;
 
   // Privy wallet IDs for the server-side balance API
-  const evmPrivyWalletId = (user?.wallet as any)?.id as string | null | undefined;
-  const solPrivyWalletId = (solWalletFromAccounts ?? solWallet as any)?.id as string | null | undefined;
+  const evmWalletFromAccounts = accounts.find(
+    (a: any) => a.type === "wallet" && a.chainType === "ethereum" && a.walletClientType === "privy",
+  );
+  const evmPrivyWalletId = ((user?.wallet as any)?.id ?? (evmWalletFromAccounts as any)?.id ?? (eoaWallet as any)?.id) as string | null | undefined;
+  const solPrivyWalletId = ((solWalletFromAccounts as any)?.id ?? (solWallet as any)?.id) as string | null | undefined;
 
   const [balances, setBalances] = useState<Balances>({
     evmUsdc: 0, evmUsdt: 0, solUsdc: 0, solUsdt: 0,
@@ -298,50 +407,55 @@ export function useStablecoinBalances(): StablecoinBalances {
   // ── Live refresh (three-tier) ───────────────────────────────────────────────
   const privyTierLoggedRef = useRef(false);
   const refresh = useCallback(async () => {
+    if (!walletsReady) return;
+
     if (!evmAddress && !solAddress) {
       if (userId) setIsLoading(false);
       return;
     }
     try {
-      // Tier 1: Privy balance API
-      const tier1 = await fetchViaPrivy(evmPrivyWalletId, solPrivyWalletId, getAccessToken);
-      if (tier1) {
+      const result = await fetchLiveBalances({
+        evmAddress,
+        solAddress,
+        evmPrivyWalletId,
+        solPrivyWalletId,
+        getAccessToken,
+      });
+
+      if (result.source === "privy") {
         privyTierLoggedRef.current = false; // reset so we log if it breaks again
-        setBalances(tier1);
-        persistSnapshot(evmAddress, solAddress, tier1, getAccessToken);
-        return;
-      }
-
-      // Tier 2: viem + @solana/web3.js
-      if (!privyTierLoggedRef.current && process.env.NODE_ENV !== "production") {
+      } else if (!privyTierLoggedRef.current && shouldDebugBalances()) {
         privyTierLoggedRef.current = true;
-        console.info("[balances] Privy balance API unavailable — using viem/web3.js fallback. Set PRIVY_APP_SECRET to enable tier-1.");
-      }
-      const tier2 = await fetchViaLibraries(evmAddress, solAddress);
-      if (tier2) {
-        setBalances(tier2);
-        persistSnapshot(evmAddress, solAddress, tier2, getAccessToken);
-        return;
+        console.info("[balances] Privy balance API unavailable; using viem/web3.js fallback.", {
+          reason: result.privyUnavailableReason,
+          source: result.source,
+          hasEvmAddress: Boolean(evmAddress),
+          hasSolAddress: Boolean(solAddress),
+          hasEvmPrivyWalletId: Boolean(evmPrivyWalletId),
+          hasSolPrivyWalletId: Boolean(solPrivyWalletId),
+        });
       }
 
-      // Tier 3: Raw Alchemy JSON-RPC
-      console.warn("[balances] viem/web3.js failed, falling back to raw Alchemy RPC");
-      const tier3 = await fetchViaAlchemyRPC(evmAddress, solAddress);
-      setBalances(tier3);
-      persistSnapshot(evmAddress, solAddress, tier3, getAccessToken);
+      if (result.source === "alchemy") {
+        console.warn("[balances] viem/web3.js failed, falling back to raw Alchemy RPC");
+      }
+
+      setBalances(result.balances);
+      persistSnapshot(evmAddress, solAddress, result.balances, getAccessToken);
+      return;
     } catch {
       // keep previous values on unexpected error
     } finally {
       setIsLoading(false);
     }
-  }, [evmAddress, solAddress, userId, evmPrivyWalletId, solPrivyWalletId, getAccessToken]);
+  }, [walletsReady, evmAddress, solAddress, userId, evmPrivyWalletId, solPrivyWalletId, getAccessToken]);
 
   // ── Mount: seed from DB, then fetch live in background ─────────────────────
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
-      if (!ready) return;
+      if (!ready || !walletsReady) return;
       if (!authenticated || !userId) {
         setIsLoading(false);
         return;
@@ -358,13 +472,13 @@ export function useStablecoinBalances(): StablecoinBalances {
     }
 
     init();
-    const id = ready && authenticated && userId ? setInterval(refresh, 30_000) : undefined;
+    const id = ready && walletsReady && authenticated && userId ? setInterval(refresh, 30_000) : undefined;
     return () => {
       cancelled = true;
       if (id) clearInterval(id);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh, ready, authenticated, userId, getAccessToken]);
+  }, [refresh, ready, walletsReady, authenticated, userId, getAccessToken]);
 
   return { ...balances, isLoading };
 }
@@ -376,14 +490,20 @@ function persistSnapshot(
   b: Balances,
   getAccessToken: () => Promise<string | null>,
 ) {
+  const key = JSON.stringify({
+    evmAddress: evmAddress ?? null,
+    solAddress: solAddress ?? null,
+    ...b,
+  });
+  const now = Date.now();
+  if (key === lastPersistedSnapshotKey && now - lastPersistedSnapshotAt < 10_000) return;
+  lastPersistedSnapshotKey = key;
+  lastPersistedSnapshotAt = now;
+
   authFetch("/api/balances", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      evmAddress: evmAddress ?? null,
-      solAddress: solAddress ?? null,
-      ...b,
-    }),
+    body: key,
   }, getAccessToken).catch((err) => {
     if (err instanceof AuthServiceUnavailableError) return;
   });

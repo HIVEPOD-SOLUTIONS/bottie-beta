@@ -17,6 +17,7 @@ export class AuthServiceUnavailableError extends Error {
 }
 
 let authServiceConfigured: boolean | undefined;
+let authServiceConfiguredPromise: Promise<void> | undefined;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,6 +29,21 @@ async function ensureAuthServiceConfigured() {
     return;
   }
 
+  if (authServiceConfiguredPromise) {
+    await authServiceConfiguredPromise;
+    if (!authServiceConfigured) throw new AuthServiceUnavailableError();
+    return;
+  }
+
+  authServiceConfiguredPromise = checkAuthServiceConfigured().finally(() => {
+    authServiceConfiguredPromise = undefined;
+  });
+  await authServiceConfiguredPromise;
+
+  if (!authServiceConfigured) throw new AuthServiceUnavailableError();
+}
+
+async function checkAuthServiceConfigured() {
   try {
     const res = await fetch("/api/auth/status", {
       cache: "no-store",
@@ -38,8 +54,6 @@ async function ensureAuthServiceConfigured() {
   } catch {
     authServiceConfigured = true;
   }
-
-  if (!authServiceConfigured) throw new AuthServiceUnavailableError();
 }
 
 async function getAccessTokenWithRetry(getAccessToken: GetAccessToken) {

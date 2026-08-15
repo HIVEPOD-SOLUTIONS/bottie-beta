@@ -4,6 +4,7 @@ export type ServerEnvDiagnostic = {
   name: string;
   configured: boolean;
   source: EnvSource | null;
+  resolvedNameMatchesRequested: boolean | null;
   direct: {
     present: boolean;
     nonEmpty: boolean;
@@ -61,13 +62,21 @@ function parseSecretStore(envName: "secrets" | "SECRETS") {
   return { raw, parsed: undefined };
 }
 
+function resolveObjectKey(source: Record<string, unknown>, name: string): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(source, name)) return name;
+  const lowerName = name.toLowerCase();
+  return Object.keys(source).find((key) => key.toLowerCase() === lowerName);
+}
+
 export function getServerEnv(name: string): string | undefined {
-  const direct = normalizeValue(process.env[name]);
+  const directName = resolveObjectKey(process.env, name);
+  const direct = directName ? normalizeValue(process.env[directName]) : undefined;
   if (direct) return direct;
 
   for (const envName of ["secrets", "SECRETS"] as const) {
     const { parsed } = parseSecretStore(envName);
-    const value = parsed ? normalizeValue(parsed[name]) : undefined;
+    const key = parsed ? resolveObjectKey(parsed, name) : undefined;
+    const value = parsed && key ? normalizeValue(parsed[key]) : undefined;
     if (value) return value;
   }
 
@@ -75,13 +84,15 @@ export function getServerEnv(name: string): string | undefined {
 }
 
 export function getServerEnvDiagnostic(name: string): ServerEnvDiagnostic {
-  const directValue = process.env[name] ?? "";
+  const directName = resolveObjectKey(process.env, name);
+  const directValue = directName ? process.env[directName] ?? "" : "";
   const directTrimmed = directValue.trim();
   const directUsable = normalizeValue(directValue);
 
   const secretStores = (["secrets", "SECRETS"] as const).map((envName) => {
     const { raw, parsed } = parseSecretStore(envName);
-    const value = parsed?.[name];
+    const key = parsed ? resolveObjectKey(parsed, name) : undefined;
+    const value = key ? parsed?.[key] : undefined;
     const stringValue = typeof value === "string" ? value : "";
     const trimmed = stringValue.trim();
 
@@ -89,7 +100,7 @@ export function getServerEnvDiagnostic(name: string): ServerEnvDiagnostic {
       envName,
       present: Boolean(raw),
       parses: Boolean(parsed),
-      containsKey: Boolean(parsed && Object.prototype.hasOwnProperty.call(parsed, name)),
+      containsKey: Boolean(key),
       keys: parsed ? safeKeys(parsed) : [],
       valueNonEmpty: stringValue.length > 0,
       valueTrimmedNonEmpty: trimmed.length > 0,
@@ -101,6 +112,11 @@ export function getServerEnvDiagnostic(name: string): ServerEnvDiagnostic {
   });
 
   const store = secretStores.find((entry) => entry.valueTrimmedNonEmpty);
+  const storeName = store
+    ? parseSecretStore(store.envName).parsed
+      ? resolveObjectKey(parseSecretStore(store.envName).parsed!, name) ?? null
+      : null
+    : null;
   const source: EnvSource | null = directUsable
     ? "process.env"
     : store
@@ -113,8 +129,13 @@ export function getServerEnvDiagnostic(name: string): ServerEnvDiagnostic {
     name,
     configured: Boolean(directUsable || store),
     source,
+    resolvedNameMatchesRequested: directUsable
+      ? directName === name
+      : storeName
+        ? storeName === name
+        : null,
     direct: {
-      present: Object.prototype.hasOwnProperty.call(process.env, name),
+      present: Boolean(directName),
       nonEmpty: directValue.length > 0,
       trimmedNonEmpty: directTrimmed.length > 0,
       length: directValue.length,

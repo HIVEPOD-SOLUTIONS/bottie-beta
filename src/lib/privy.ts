@@ -8,14 +8,14 @@ export const privyConfig: PrivyClientConfig = {
     theme: "light",
     accentColor: "#8FAE82",
     walletChainType: "ethereum-and-solana",
-    walletList: ["metamask", "coinbase_wallet", "rainbow", "wallet_connect"],
+    walletList: ["metamask", "coinbase_wallet", "rainbow"],
   },
   embeddedWallets: {
     ethereum: {
       createOnLogin: "users-without-wallets",
     },
     solana: {
-      createOnLogin: "all-users",
+      createOnLogin: "users-without-wallets",
     },
     showWalletUIs: false,
   },

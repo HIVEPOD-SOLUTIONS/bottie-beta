@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { usePrivy, useLogout } from "@privy-io/react-auth";
+import { usePrivy, useLogout, useWallets } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -9,14 +9,11 @@ import type { ReactNode } from "react";
 import { formatUsd } from "@/lib/format";
 import { getUserFirstName } from "@/lib/user-display-name";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
+import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 
 interface SettingsSidebarProps {
   open: boolean;
   onClose: () => void;
-  /** Total EVM stablecoin balance (USDC + USDT across all EVM chains) */
-  walletBalanceUsd?: number;
-  /** Total Solana stablecoin balance (USDC + USDT) */
-  solanaBalanceUsd?: number;
 }
 
 function CopyableWallet({ address }: { address: string }) {
@@ -52,10 +49,9 @@ function CopyableWallet({ address }: { address: string }) {
 export function SettingsSidebar({
   open,
   onClose,
-  walletBalanceUsd,
-  solanaBalanceUsd,
 }: SettingsSidebarProps) {
   const { user } = usePrivy();
+  const { wallets } = useWallets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { logout } = useLogout({
@@ -65,13 +61,10 @@ export function SettingsSidebar({
     },
   });
 
-  const accounts = (user?.linkedAccounts as any[]) ?? [];
-  const evmAddress = user?.smartWallet?.address ?? user?.wallet?.address;
-  const solanaWallet = accounts.find((a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
-  const solanaAddress = solanaWallet?.address as string | undefined;
-
-  // Per-token breakdown for sub-labels
+  const { evmAddress, solanaAddress, smartWalletAddress } = getPrivyEmbeddedWallets(user as any, wallets);
+  const displayEvmAddress = smartWalletAddress ?? evmAddress;
   const { evmUsdc, evmUsdt, solUsdc, solUsdt, isLoading: sbLoading } = useStablecoinBalances();
+
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
   const initial = firstName.charAt(0).toUpperCase();
@@ -106,13 +99,13 @@ export function SettingsSidebar({
 
       {/* Wallet section */}
       <div className="mt-5 space-y-5">
-        {(evmAddress || solanaAddress) && (
+        {(displayEvmAddress || solanaAddress) && (
           <div className="space-y-3">
-            {evmAddress && (
+            {displayEvmAddress && (
               <div>
                 <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">EVM Wallet</span>
                 <div className="mt-1.5">
-                  <CopyableWallet address={evmAddress} />
+                  <CopyableWallet address={displayEvmAddress} />
                 </div>
               </div>
             )}
@@ -128,11 +121,11 @@ export function SettingsSidebar({
         )}
 
         {/* 4 balance rows — one per token per network */}
-        {(evmAddress || solanaAddress) && (
+        {(displayEvmAddress || solanaAddress) && (
           <div className="space-y-3">
             <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Balances</span>
 
-            {evmAddress && (
+            {displayEvmAddress && (
               <>
                 {/* EVM USDC */}
                 <div className="flex items-center justify-between">

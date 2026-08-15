@@ -31,32 +31,59 @@ const EVM_CHAINS: Record<string, { usdtContract: string }> = {
   avalanche: { usdtContract: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7" },
 };
 
-// ── Solana token mints ────────────────────────────────────────────────────────
-const SOL_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const SOL_USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function makeAuthHeader(appId: string, appSecret: string) {
   return `Basic ${Buffer.from(`${appId}:${appSecret}`).toString("base64")}`;
 }
 
+type PrivyBalanceEntry = {
+  asset?: string;
+  token?: string;
+  formatted_amount?: string;
+  formatted?: string;
+  amount?: string;
+  balance?: string;
+  raw_value?: string;
+  raw_value_decimals?: number;
+  display_values?: Record<string, string | number | undefined>;
+};
+
+function parseEntryAmount(entry: PrivyBalanceEntry, label: string) {
+  const displayValue = entry.display_values?.[label] ?? entry.display_values?.[label.toUpperCase()];
+  const directValue =
+    entry.formatted_amount ??
+    entry.formatted ??
+    entry.amount ??
+    entry.balance ??
+    (displayValue == null ? undefined : String(displayValue));
+  const direct = parseFloat(directValue ?? "");
+  if (Number.isFinite(direct)) return direct;
+
+  if (entry.raw_value && typeof entry.raw_value_decimals === "number") {
+    const raw = BigInt(entry.raw_value);
+    const divisor = 10 ** entry.raw_value_decimals;
+    return Number(raw) / divisor;
+  }
+
+  return 0;
+}
+
 function parseEntries(
-  data: Array<{ asset?: string; token?: string; formatted_amount?: string; amount?: string }>,
+  data: PrivyBalanceEntry[],
   usdtContract?: string,
 ): { usdc: number; usdt: number } {
   let usdc = 0;
   let usdt = 0;
   for (const entry of data) {
-    const amount = parseFloat(entry.formatted_amount ?? entry.amount ?? "0") || 0;
     const label  = (entry.asset ?? entry.token ?? "").toLowerCase();
     if (label === "usdc" || label.includes("usdc")) {
-      usdc += amount;
+      usdc += parseEntryAmount(entry, "usdc");
     } else if (
       label === "usdt" ||
       label.includes("usdt") ||
       (usdtContract && label.includes(usdtContract.toLowerCase()))
     ) {
-      usdt += amount;
+      usdt += parseEntryAmount(entry, "usdt");
     }
   }
   return { usdc, usdt };
@@ -72,16 +99,16 @@ async function fetchEvmChain(
   const { usdtContract } = EVM_CHAINS[chain]!;
   const params = new URLSearchParams();
   params.append("asset", "usdc");
+  params.append("asset", "usdt");
   params.append("chain", chain);
-  params.append("token", `${chain}:${usdtContract}`);
 
   const res = await fetch(
     `${PRIVY_API}/wallets/${encodeURIComponent(walletId)}/balance?${params}`,
     { headers: { Authorization: authHeader, "privy-app-id": appId }, signal: AbortSignal.timeout(8_000) },
   );
-  if (!res.ok) return { usdc: 0, usdt: 0 };
+  if (!res.ok) throw new Error(`Privy EVM balance fetch failed for ${chain}: ${res.status}`);
   const json = await res.json();
-  return parseEntries(json?.data ?? [], usdtContract);
+  return parseEntries(json?.balances ?? json?.data ?? [], usdtContract);
 }
 
 // Fetch Solana USDC + USDT from Privy
@@ -91,25 +118,17 @@ async function fetchSolanaWallet(
   appId: string,
 ): Promise<{ usdc: number; usdt: number }> {
   const params = new URLSearchParams();
-  params.append("token", `solana:${SOL_USDC_MINT}`);
-  params.append("token", `solana:${SOL_USDT_MINT}`);
+  params.append("asset", "usdc");
+  params.append("asset", "usdt");
+  params.append("chain", "solana");
 
   const res = await fetch(
     `${PRIVY_API}/wallets/${encodeURIComponent(walletId)}/balance?${params}`,
     { headers: { Authorization: authHeader, "privy-app-id": appId }, signal: AbortSignal.timeout(8_000) },
   );
-  if (!res.ok) return { usdc: 0, usdt: 0 };
+  if (!res.ok) throw new Error(`Privy Solana balance fetch failed: ${res.status}`);
   const json = await res.json();
-  const data: Array<any> = json?.data ?? [];
-  let usdc = 0;
-  let usdt = 0;
-  for (const entry of data) {
-    const amount = parseFloat(entry.formatted_amount ?? entry.amount ?? "0") || 0;
-    const token  = (entry.token ?? "").toLowerCase();
-    if (token.includes(SOL_USDC_MINT.toLowerCase())) usdc += amount;
-    else if (token.includes(SOL_USDT_MINT.toLowerCase())) usdt += amount;
-  }
-  return { usdc, usdt };
+  return parseEntries(json?.balances ?? json?.data ?? []);
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────

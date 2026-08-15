@@ -9,6 +9,7 @@ import { DemoStateProvider } from "@/contexts/demo-state-context";
 import { GoalsProvider } from "@/contexts/goals-context";
 import { ChatSheet } from "@/components/chat/chat-sheet";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
+import { useWalletBootstrap } from "@/hooks/use-wallet-bootstrap";
 import { VoiceWaveform } from "@/components/chat/voice-waveform";
 import {
   SettingsSidebar,
@@ -48,8 +49,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const { isOpen, sidebarOpen, openSidebar, closeSidebar } = useChatSheet();
-  const { user } = usePrivy();
-  const accounts = (user?.linkedAccounts as any[]) ?? [];
+  const walletBootstrap = useWalletBootstrap();
 
   // Lock body scroll when chat sheet or sidebar is open
   useEffect(() => {
@@ -81,8 +81,46 @@ function AppShell({ children }: { children: React.ReactNode }) {
       {/* Chat panel */}
       <ChatSheet visible={isOpen} />
 
+      {!sidebarOpen && <WalletBootstrapStrip walletBootstrap={walletBootstrap} />}
+
       {/* Input bar */}
       {!sidebarOpen && <ChatInputBar />}
+    </div>
+  );
+}
+
+function WalletBootstrapStrip({
+  walletBootstrap,
+}: {
+  walletBootstrap: ReturnType<typeof useWalletBootstrap>;
+}) {
+  if (!walletBootstrap.missingWallet || walletBootstrap.status === "ready") return null;
+
+  const isError = walletBootstrap.status === "error";
+  const isCreating = walletBootstrap.status === "creating";
+  const label = isError ? "Wallet creation needs a retry" : isCreating ? "Creating your wallet" : "Create your wallet";
+
+  return (
+    <div className="fixed inset-x-0 bottom-[96px] z-[55] px-4">
+      <div className="mx-auto flex max-w-lg items-center justify-between gap-3 rounded-xl border border-[#8FAE82]/30 bg-[#1B1C19]/95 px-4 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.22)] backdrop-blur lg:max-w-3xl">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-[#F2F0E8]">{label}</p>
+          {isError && walletBootstrap.error && (
+            <p className="mt-0.5 truncate text-xs text-[#A7A79A]">{walletBootstrap.error}</p>
+          )}
+        </div>
+        {isCreating ? (
+          <div className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#8FAE82] border-t-transparent" />
+        ) : (
+          <button
+            type="button"
+            onClick={walletBootstrap.createMissingWallets}
+            className="shrink-0 rounded-lg bg-[#8FAE82] px-3 py-1.5 text-xs font-semibold text-[#141513]"
+          >
+            {isError ? "Retry" : "Create"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

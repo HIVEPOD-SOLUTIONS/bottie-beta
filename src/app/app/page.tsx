@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useChatSheet } from "@/contexts/chat-context";
 import { useDemoState } from "@/contexts/demo-state-context";
 import { BillsScreen } from "@/components/dashboard/bills-screen";
@@ -28,6 +28,7 @@ import { FundWalletSheet } from "@/components/dashboard/fund-wallet-sheet";
 import { LOW_BALANCE_THRESHOLD_USD } from "@/hooks/use-usdc-balance";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
 import { ASSET_PRICES } from "@/lib/demo-data";
+import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
 
 type Tab = "bills" | "investments" | "payments" | "banking" | "chat";
@@ -43,18 +44,14 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 function DashboardInner() {
   const { openSidebar, open: openChat, registerDashboardData } = useChatSheet();
   const { user } = usePrivy();
+  const { wallets } = useWallets();
   const [activeTab, setActiveTab] = useState<Tab>("bills");
   const [showFundSheet, setShowFundSheet] = useState(false);
   const { paidBillIds, portfolio } = useDemoState();
 
-  const accounts = (user?.linkedAccounts as any[]) ?? [];
+  const { evmAddress, solanaAddress: solanaAddr, smartWalletAddress } = getPrivyEmbeddedWallets(user as any, wallets);
   // Prefer smart-wallet address; fall back to embedded wallet. Matches settings-sidebar.tsx.
-  const agentAddress = (
-    (user as any)?.smartWallet?.address ?? user?.wallet?.address
-  ) as `0x${string}` | undefined;
-
-  const solanaWallet = accounts.find((a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
-  const solanaAddr = solanaWallet?.address as string | undefined;
+  const agentAddress = (smartWalletAddress ?? evmAddress) as `0x${string}` | undefined;
 
   // All four stablecoin balances — drives sidebar rows, dashboard totals, and the banner
   const {
