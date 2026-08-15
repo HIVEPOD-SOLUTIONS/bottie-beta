@@ -1056,7 +1056,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             args={(tp.input as Record<string, string>) || {}}
                             state={tp.state}
                             result={tp.output}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                             dashboardData={dashboardData}
                           />
                         );
@@ -1072,7 +1072,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
@@ -1087,7 +1087,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
@@ -1102,7 +1102,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
@@ -1117,7 +1117,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
@@ -1132,7 +1132,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
@@ -1147,7 +1147,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as Record<string, unknown>}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
@@ -1164,7 +1164,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
-                            addToolResult={addToolResult}
+                            addToolResult={addToolResult as any}
                           />
                         );
                       }
