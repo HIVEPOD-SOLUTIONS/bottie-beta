@@ -1,18 +1,18 @@
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
+import { getServerEnv } from "@/lib/server-env";
 
 const PRIVY_BASE = "https://auth.privy.io/api/v1";
-const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID!;
-const APP_SECRET = process.env.PRIVY_APP_SECRET!;
 
-function privyBasicAuth() {
-  return Buffer.from(`${APP_ID}:${APP_SECRET}`).toString("base64");
+function privyBasicAuth(appId: string, appSecret: string) {
+  return Buffer.from(`${appId}:${appSecret}`).toString("base64");
 }
 
 export async function GET(req: Request) {
   try {
     await verifyAuth();
-  } catch {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   const { searchParams } = new URL(req.url);
@@ -23,12 +23,18 @@ export async function GET(req: Request) {
     return Response.json({ error: "walletId and token are required" }, { status: 400 });
   }
 
+  const appId = getServerEnv("NEXT_PUBLIC_PRIVY_APP_ID");
+  const appSecret = getServerEnv("PRIVY_APP_SECRET");
+  if (!appId || !appSecret) {
+    return Response.json({ error: "Privy credentials not configured" }, { status: 503 });
+  }
+
   const privyRes = await fetch(
     `${PRIVY_BASE}/wallets/${encodeURIComponent(walletId)}/balance?token=${encodeURIComponent(token)}`,
     {
       headers: {
-        Authorization: `Basic ${privyBasicAuth()}`,
-        "privy-app-id": APP_ID,
+        Authorization: `Basic ${privyBasicAuth(appId, appSecret)}`,
+        "privy-app-id": appId,
         "Content-Type": "application/json",
       },
       next: { revalidate: 0 },

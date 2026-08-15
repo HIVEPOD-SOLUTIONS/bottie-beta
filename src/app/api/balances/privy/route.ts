@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
+import { getServerEnv } from "@/lib/server-env";
 
 const PRIVY_API = "https://api.privy.io/v1";
 
@@ -119,8 +120,8 @@ export async function GET(req: NextRequest) {
     return authErrorResponse(err);
   }
 
-  const appId     = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  const appSecret = process.env.PRIVY_APP_SECRET;
+  const appId     = getServerEnv("NEXT_PUBLIC_PRIVY_APP_ID");
+  const appSecret = getServerEnv("PRIVY_APP_SECRET");
   if (!appId || !appSecret) {
     return NextResponse.json({ error: "Privy credentials not configured" }, { status: 503 });
   }

@@ -1,15 +1,21 @@
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
+import { getServerEnv } from "@/lib/server-env";
 
 const PRIVY_API = "https://auth.privy.io/api/v1";
 
 function privyHeaders() {
+  const appId = getServerEnv("NEXT_PUBLIC_PRIVY_APP_ID");
+  const appSecret = getServerEnv("PRIVY_APP_SECRET");
+  if (!appId || !appSecret) throw new Error("Privy credentials not configured");
+
   const creds = Buffer.from(
-    `${process.env.NEXT_PUBLIC_PRIVY_APP_ID}:${process.env.PRIVY_APP_SECRET}`
+    `${appId}:${appSecret}`
   ).toString("base64");
   return {
     "Content-Type": "application/json",
     Authorization: `Basic ${creds}`,
-    "privy-app-id": process.env.NEXT_PUBLIC_PRIVY_APP_ID!,
+    "privy-app-id": appId,
   };
 }
 
@@ -90,8 +96,8 @@ export async function GET() {
   let userId: string;
   try {
     ({ userId } = await verifyAuth());
-  } catch {
-    return new Response("Unauthorized", { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   try {
@@ -110,8 +116,8 @@ export async function POST(req: Request) {
   let userId: string;
   try {
     ({ userId } = await verifyAuth());
-  } catch {
-    return new Response("Unauthorized", { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   let action: string, address: string;

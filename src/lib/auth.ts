@@ -1,5 +1,6 @@
 import { PrivyClient } from "@privy-io/server-auth";
 import { cookies, headers } from "next/headers";
+import { getServerEnv } from "@/lib/server-env";
 
 let privy: PrivyClient | undefined;
 
@@ -19,8 +20,8 @@ export class AuthError extends Error {
 function getPrivyClient() {
   if (privy) return privy;
 
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  const appSecret = process.env.PRIVY_APP_SECRET;
+  const appId = getServerEnv("NEXT_PUBLIC_PRIVY_APP_ID");
+  const appSecret = getServerEnv("PRIVY_APP_SECRET");
   if (!appId || !appSecret) {
     throw new AuthError("auth_not_configured", "Privy server credentials are not configured");
   }
