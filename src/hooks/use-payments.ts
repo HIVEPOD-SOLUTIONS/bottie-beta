@@ -58,23 +58,26 @@ export function usePayments(type?: "bill" | "investment") {
     fetch_();
   }, [fetch_]);
 
-  // When there are pending bill payments, sync their status against Bitrefill.
-  // Runs once per "wave" of pending rows; resets when rows settle so a new wave triggers again.
+  // When there are pending bill payments, sync their status against Bitrefill
+  // on every poll cycle until they all reach a terminal state.
+  // We use syncedRef only to debounce: skip if a sync is already in-flight.
   useEffect(() => {
     const pendingBills = payments.filter(
       (p) => p.status === "pending" && p.type === "bill",
     );
     if (pendingBills.length === 0) {
-      // All settled — allow sync to run again if new pending rows appear later
       syncedRef.current = false;
       return;
     }
-    if (syncedRef.current) return;
+    if (syncedRef.current) return; // already in-flight
     syncedRef.current = true;
 
     fetch("/api/payments/sync", { method: "POST" })
       .then((res) => res.json())
-      .then(() => fetch_())
+      .then(() => {
+        syncedRef.current = false; // allow next poll cycle to sync again
+        fetch_();
+      })
       .catch(() => {
         syncedRef.current = false; // allow retry on network error
       });
