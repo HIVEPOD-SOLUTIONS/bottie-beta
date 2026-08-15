@@ -81,7 +81,7 @@ function RoasterBondCard({
 }: {
   toolCallId: string;
   output: { pendingRoasterBond: true; battle_id: string; bond_transaction: string; solanaAddress: string };
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -97,16 +97,16 @@ function RoasterBondCard({
       const sig = await conn.sendRawTransaction(signed, { skipPreflight: false });
       await conn.confirmTransaction(sig, "confirmed");
       setDone(true);
-      addToolResult({ toolCallId, result: { success: true, battle_id: output.battle_id, signature: sig } });
+      addToolResult({ toolCallId, output: { success: true, battle_id: output.battle_id, signature: sig } });
     } catch (err: any) {
       const msg = err?.message ?? "Transaction failed";
       setError(msg);
-      addToolResult({ toolCallId, result: { success: false, error: msg } });
+      addToolResult({ toolCallId, output: { success: false, error: msg } });
     } finally { setBusy(false); }
   };
 
   const handleReject = () => {
-    addToolResult({ toolCallId, result: { success: false, error: "User cancelled" } });
+    addToolResult({ toolCallId, output: { success: false, error: "User cancelled" } });
     setDone(true);
   };
 
@@ -156,7 +156,7 @@ function RoasterBackCard({
 }: {
   toolCallId: string;
   output: { pendingRoasterBack: true; battle_id: string; side: number; amount_usdc: number; platform_fee_usdc: number; time_weight: number; transaction: string; solanaAddress: string };
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -172,16 +172,16 @@ function RoasterBackCard({
       const sig = await conn.sendRawTransaction(signed, { skipPreflight: false });
       await conn.confirmTransaction(sig, "confirmed");
       setDone(true);
-      addToolResult({ toolCallId, result: { success: true, battle_id: output.battle_id, side: output.side, amount_usdc: output.amount_usdc, signature: sig } });
+      addToolResult({ toolCallId, output: { success: true, battle_id: output.battle_id, side: output.side, amount_usdc: output.amount_usdc, signature: sig } });
     } catch (err: any) {
       const msg = err?.message ?? "Transaction failed";
       setError(msg);
-      addToolResult({ toolCallId, result: { success: false, error: msg } });
+      addToolResult({ toolCallId, output: { success: false, error: msg } });
     } finally { setBusy(false); }
   };
 
   const handleReject = () => {
-    addToolResult({ toolCallId, result: { success: false, error: "User cancelled" } });
+    addToolResult({ toolCallId, output: { success: false, error: "User cancelled" } });
     setDone(true);
   };
 
@@ -275,7 +275,7 @@ function BitrefillPaymentCard({
     isTopup?: boolean;
     expiresInMinutes?: number;
   };
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { wallets } = useWallets();
   const { client: smartWalletClient } = useSmartWallets();
@@ -355,8 +355,9 @@ function BitrefillPaymentCard({
 
       setState("done");
       addToolResult({
+        tool: "buy_bitrefill_product",
         toolCallId,
-        result: {
+        output: {
           paid: true,
           invoiceId: output.invoiceId,
           isTopup: output.isTopup,
@@ -372,16 +373,18 @@ function BitrefillPaymentCard({
       setErrMsg(friendly);
       setState("error");
       addToolResult({
+        tool: "buy_bitrefill_product",
         toolCallId,
-        result: { paid: false, error: friendly, invoiceId: output.invoiceId },
+        output: { paid: false, error: friendly, invoiceId: output.invoiceId },
       });
     }
   };
 
   const handleCancel = () => {
     addToolResult({
+      tool: "buy_bitrefill_product",
       toolCallId,
-      result: { paid: false, error: "Cancelled by user", invoiceId: output.invoiceId },
+      output: { paid: false, error: "Cancelled by user", invoiceId: output.invoiceId },
     });
   };
 
@@ -444,7 +447,7 @@ function VelvetTxApprovalCard({
 }: {
   toolCallId: string;
   output: Record<string, unknown>;
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { wallets } = useWallets();
   const [busy, setBusy] = useState(false);
@@ -480,18 +483,18 @@ function VelvetTxApprovalCard({
         }],
       });
       setDone(true);
-      addToolResult({ toolCallId, result: { success: true, txHash } });
+      addToolResult({ toolCallId, output: { success: true, txHash } });
     } catch (err: unknown) {
       const msg = (err as Error)?.message ?? "Transaction failed";
       setError(msg);
-      addToolResult({ toolCallId, result: { success: false, error: msg } });
+      addToolResult({ toolCallId, output: { success: false, error: msg } });
     } finally {
       setBusy(false);
     }
   };
 
   const handleReject = () => {
-    addToolResult({ toolCallId, result: { success: false, error: "User cancelled" } });
+    addToolResult({ toolCallId, output: { success: false, error: "User cancelled" } });
     setDone(true);
   };
 
@@ -540,7 +543,7 @@ function FlashTxApprovalCard({
 }: {
   toolCallId: string;
   output: { pendingFlashTx: true; action: string; args: Record<string, unknown>; transaction: string; solanaAddress: string };
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -577,18 +580,18 @@ function FlashTxApprovalCard({
 
       await conn.confirmTransaction(sig, "confirmed");
       setDone(true);
-      addToolResult({ toolCallId, result: { success: true, signature: sig, action: output.action } });
+      addToolResult({ toolCallId, output: { success: true, signature: sig, action: output.action } });
     } catch (err: any) {
       const msg = err?.message ?? "Transaction failed";
       setError(msg);
-      addToolResult({ toolCallId, result: { success: false, error: msg } });
+      addToolResult({ toolCallId, output: { success: false, error: msg } });
     } finally {
       setBusy(false);
     }
   };
 
   const handleReject = () => {
-    addToolResult({ toolCallId, result: { success: false, error: "User rejected" } });
+    addToolResult({ toolCallId, output: { success: false, error: "User rejected" } });
     setDone(true);
   };
 
@@ -654,7 +657,7 @@ function FlashSessionApprovalCard({
 }: {
   toolCallId: string;
   output: { pendingFlashSession: true; action: string; args: { durationHours: number }; solanaAddress: string };
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -695,16 +698,16 @@ function FlashSessionApprovalCard({
       localStorage.setItem(SESSION_KEY, JSON.stringify({ pubkey: sessionPubkey, secretKey: Array.from(sessionKp.secretKey), expiresAt }));
 
       setDone(true);
-      addToolResult({ toolCallId, result: { success: true, signature: sig, sessionPubkey, expiresAt } });
+      addToolResult({ toolCallId, output: { success: true, signature: sig, sessionPubkey, expiresAt } });
     } catch (err: any) {
       const msg = err?.message ?? "Failed";
       setError(msg);
-      addToolResult({ toolCallId, result: { success: false, error: msg } });
+      addToolResult({ toolCallId, output: { success: false, error: msg } });
     } finally { setBusy(false); }
   };
 
   const handleReject = () => {
-    addToolResult({ toolCallId, result: { success: false, error: "User rejected" } });
+    addToolResult({ toolCallId, output: { success: false, error: "User rejected" } });
     setDone(true);
   };
 
@@ -754,7 +757,7 @@ function FlashRevokeSessionCard({
 }: {
   toolCallId: string;
   output: { pendingFlashRevoke: true; solanaAddress: string };
-  addToolResult: (args: { toolCallId: string; result: unknown }) => void;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { signTransaction } = useSignTransaction();
   const [busy, setBusy] = useState(false);
@@ -782,16 +785,16 @@ function FlashRevokeSessionCard({
 
       if (typeof window !== "undefined") localStorage.removeItem(SESSION_KEY);
       setDone(true);
-      addToolResult({ toolCallId, result: { success: true, signature: sig } });
+      addToolResult({ toolCallId, output: { success: true, signature: sig } });
     } catch (err: any) {
       const msg = err?.message ?? "Failed";
       setError(msg);
-      addToolResult({ toolCallId, result: { success: false, error: msg } });
+      addToolResult({ toolCallId, output: { success: false, error: msg } });
     } finally { setBusy(false); }
   };
 
   const handleReject = () => {
-    addToolResult({ toolCallId, result: { success: false, error: "User cancelled" } });
+    addToolResult({ toolCallId, output: { success: false, error: "User cancelled" } });
     setDone(true);
   };
 
