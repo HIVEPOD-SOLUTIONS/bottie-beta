@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS, SOLANA_ARC_MAINNET_ENABLED } from "@/lib/arc-kit";
 import type { BridgeSourceChain } from "@/lib/arc-kit";
 import { UnifiedBalanceCard } from "./unified-balance-card";
 import { useSolanaBalance } from "@/hooks/use-solana-balance";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 // ─── Unified wallet option — merges the user's Privy embedded wallet with any
 // injected (EIP-6963) browser wallets, so funding works with or without a
@@ -236,6 +237,7 @@ function TxResult({ state, onReset }: { state: TxState; onReset: () => void }) {
 // ─── Send tab ─────────────────────────────────────────────────────────────────
 
 function SendTab({ agentAddress }: { agentAddress: string }) {
+  const { getAccessToken } = usePrivy();
   const { options, connected, connect, disconnect, connecting } = useFundingWallets();
   const { copied, copy } = useCopy(agentAddress);
   const [amount, setAmount] = useState("");
@@ -266,7 +268,7 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
 
       // Persist the send to the payments ledger
       if (sendSuccess) {
-        fetch("/api/payments", {
+        authFetch("/api/payments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -278,7 +280,7 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
             txHash: (result as any).hash ?? (result as any).transactionHash ?? null,
             chain: "evm",
           }),
-        }).catch(() => {});
+        }, getAccessToken).catch(() => {});
       }
     } catch (err: any) {
       const msg = err?.message ?? "";
@@ -367,6 +369,7 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
 // ─── Bridge tab ───────────────────────────────────────────────────────────────
 
 function BridgeTab({ agentAddress }: { agentAddress: string }) {
+  const { getAccessToken } = usePrivy();
   const { options, connected, connect, disconnect, connecting } = useFundingWallets();
   const [sourceChain, setSourceChain] = useState<BridgeSourceChain>(
     BRIDGE_SOURCE_OPTIONS[0].value
@@ -405,7 +408,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
 
       // Persist bridge transaction
       if (bridgeSuccess) {
-        fetch("/api/payments", {
+        authFetch("/api/payments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -417,7 +420,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
             txHash: (result as any).hash ?? (result as any).transactionHash ?? null,
             chain: "evm",
           }),
-        }).catch(() => {});
+        }, getAccessToken).catch(() => {});
       }
     } catch (err: any) {
       const msg = err?.message ?? "";

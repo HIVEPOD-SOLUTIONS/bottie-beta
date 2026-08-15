@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { arcKit, AGENT_CHAIN, SOLANA_ARC_CHAIN } from "@/lib/arc-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { useDemoState } from "@/contexts/demo-state-context";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 const EVM_RECEIVER = "0x9404966338eB27aF420a952574d777598Bbb58c4" as const;
 const SOL_RECEIVER = process.env.NEXT_PUBLIC_SOLANA_BILL_RECEIVER ?? "";
@@ -30,6 +31,7 @@ function fmtUsdc(n: number): string {
 }
 
 export function PayBillConfirmCard({ billId, billName, amount, icon, description, network: forcedNetwork }: Props) {
+  const { getAccessToken } = usePrivy();
   const { wallets } = useWallets();
   const { markBillPaid, isBillPaid } = useDemoState();
   const [status, setStatus] = useState<Status>("idle");
@@ -100,7 +102,7 @@ export function PayBillConfirmCard({ billId, billName, amount, icon, description
       markBillPaid(billId, amount, billName, { chain: selectedNetwork });
 
       try {
-        await fetch("/api/payments", {
+        await authFetch("/api/payments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -112,7 +114,7 @@ export function PayBillConfirmCard({ billId, billName, amount, icon, description
             txHash: txHash ?? null,
             chain: selectedNetwork,
           }),
-        });
+        }, getAccessToken);
       } catch { /* non-critical */ }
 
       setStatus("success");
@@ -125,7 +127,7 @@ export function PayBillConfirmCard({ billId, billName, amount, icon, description
       );
       setStatus("error");
     }
-  }, [status, selectedNetwork, paySolana, payEvm, billId, billName, amount, markBillPaid]);
+  }, [status, selectedNetwork, paySolana, payEvm, billId, billName, amount, markBillPaid, getAccessToken]);
 
   if (alreadyPaid || status === "success") {
     return (

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { arcKit, AGENT_CHAIN, SOLANA_ARC_CHAIN } from "@/lib/arc-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 const EVM_RECEIVER = "0x9404966338eB27aF420a952574d777598Bbb58c4" as const;
 const SOL_RECEIVER = process.env.NEXT_PUBLIC_SOLANA_BILL_RECEIVER ?? "";
@@ -41,6 +42,7 @@ export function BuyAssetConfirmCard({
   type,
   network: forcedNetwork,
 }: Props) {
+  const { getAccessToken } = usePrivy();
   const { wallets } = useWallets();
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export function BuyAssetConfirmCard({
 
       // Persist to investments table (position) + payments ledger (transaction)
       // Both are fire-and-forget so they never block the success UI
-      fetch("/api/investments/buy", {
+      authFetch("/api/investments/buy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -115,9 +117,9 @@ export function BuyAssetConfirmCard({
           shares,
           pricePerShare: priceUsd,
         }),
-      }).catch(() => {});
+      }, getAccessToken).catch(() => {});
 
-      fetch("/api/payments", {
+      authFetch("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -129,7 +131,7 @@ export function BuyAssetConfirmCard({
           txHash: txHash ?? null,
           chain: selectedNetwork,
         }),
-      }).catch(() => {});
+      }, getAccessToken).catch(() => {});
 
       setStatus("success");
     } catch (err: unknown) {
@@ -141,7 +143,7 @@ export function BuyAssetConfirmCard({
       );
       setStatus("error");
     }
-  }, [status, selectedNetwork, paySolana, payEvm, symbol, assetName, type, icon, shares, priceUsd]);
+  }, [status, selectedNetwork, paySolana, payEvm, symbol, assetName, shares, priceUsd, totalUsdc, getAccessToken]);
 
   if (status === "success") {
     return (

@@ -11,6 +11,7 @@ import { useDemoState } from "@/contexts/demo-state-context";
 import { usePaymentsContext } from "@/contexts/payments-context";
 import { useChatSheet } from "@/contexts/chat-context";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
+import { authFetch } from "@/lib/api-auth-fetch";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -890,7 +891,7 @@ function CheckoutSheet({
   onPurchased: (invoiceId: string, code: string | null, paymentMethod: string) => void;
 }) {
   const { wallets } = useWallets();
-  const { user } = usePrivy();
+  const { user, getAccessToken } = usePrivy();
   // Smart wallet client — used for gasless EVM payments (paymaster sponsors gas).
   // Falls back to the EOA path inside arcKit if the smart wallet isn't available yet.
   const { client: smartWalletClient } = useSmartWallets();
@@ -1131,7 +1132,7 @@ function CheckoutSheet({
     setPrepayLoading(true);
     setPrepayError(null);
     try {
-      const res = await fetch("/api/bitrefill/prepayment-step", {
+      const res = await authFetch("/api/bitrefill/prepayment-step", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1139,7 +1140,7 @@ function CheckoutSheet({
           step_number: prepayStepNum,
           form_data:   prepayData,
         }),
-      });
+      }, getAccessToken);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Prepayment step failed");
 
@@ -1166,7 +1167,7 @@ function CheckoutSheet({
     } finally {
       setPrepayLoading(false);
     }
-  }, [product.id, prepayData, prepayStepNum]);
+  }, [product.id, prepayData, prepayStepNum, getAccessToken]);
 
   const handleEmailNext = useCallback(() => {
     // Validate phone number for top-ups
@@ -1238,7 +1239,7 @@ function CheckoutSheet({
     setErrMsg(null);
     try {
       const paymentMethod = paymentMethodId;
-      const invRes = await fetch("/api/bitrefill/invoice", {
+      const invRes = await authFetch("/api/bitrefill/invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1262,7 +1263,7 @@ function CheckoutSheet({
             },
           } : {}),
         }),
-      });
+      }, getAccessToken);
       if (!invRes.ok) {
         const err = await invRes.json().catch(() => ({ error: "Order creation failed" }));
         throw new Error(err.error ?? "Order creation failed");
@@ -1414,7 +1415,7 @@ function CheckoutSheet({
       );
       setStep("error");
     }
-  }, [isTopup, phoneNumber, countryCode, isAccountType, isUsernameType, isEmailRecipient, refillInput, paymentMethodId, product, selectedPkg, customValue, isFixed, recipientEmail, billPaymentId, wallets, smartWalletClient, pollInvoice, isGift, giftRecipientName, giftRecipientEmail, giftMessage, giftTheme]);
+  }, [isTopup, phoneNumber, countryCode, isAccountType, isUsernameType, isEmailRecipient, refillInput, paymentMethodId, product, selectedPkg, customValue, isFixed, recipientEmail, billPaymentId, wallets, smartWalletClient, pollInvoice, isGift, giftRecipientName, giftRecipientEmail, giftMessage, giftTheme, getAccessToken]);
 
   const typeLabel = isEsim ? "Data Plan" : isTopup ? "Phone Top-Up" : "Digital Card";
 
@@ -2385,6 +2386,7 @@ function SkeletonList() {
 // ── Bitrefill detail (full product browse + checkout) ─────────────────────────
 
 function BitrefillDetail() {
+  const { getAccessToken } = usePrivy();
   const { paidBillIds } = useDemoState();
   const { open: openChat, sendMessage } = useChatSheet();
 
@@ -2470,7 +2472,7 @@ function BitrefillDetail() {
     const chain = paymentMethod.includes("solana") ? "solana" : "evm";
     // PATCH updates the pending row created by /api/bitrefill/invoice (prevents duplicates).
     // Falls back to POST only if the PATCH finds no existing row (referenceId not yet in DB).
-    fetch("/api/payments", {
+    authFetch("/api/payments", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2481,10 +2483,10 @@ function BitrefillDetail() {
         txHash: null,
         chain,
       }),
-    }).then(async (res) => {
+    }, getAccessToken).then(async (res) => {
       // If no existing row found, insert fresh (invoice creation may have been skipped)
       if (res.status === 404) {
-        return fetch("/api/payments", {
+        return authFetch("/api/payments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2495,13 +2497,13 @@ function BitrefillDetail() {
             status: "completed",
             chain,
           }),
-        });
+        }, getAccessToken);
       }
     }).catch(() => {});
     // Regenerate weekly insight in the background so it reflects this spend immediately
-    fetch("/api/insights/weekly", { method: "POST" }).catch(() => {});
+    authFetch("/api/insights/weekly", { method: "POST" }, getAccessToken).catch(() => {});
     // Also upsert the bitrefill_orders row to complete
-    fetch("/api/bitrefill/orders", {
+    authFetch("/api/bitrefill/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2509,8 +2511,8 @@ function BitrefillDetail() {
         status: "complete",
         redemptionCode: _code ?? undefined,
       }),
-    }).catch(() => {});
-  }, [selectedProduct]);
+    }, getAccessToken).catch(() => {});
+  }, [selectedProduct, getAccessToken]);
 
   // Unique completed bill count: DB rows (AI + UI purchases) + any local-only
   // purchases not yet persisted. De-duplicate by using DB as the source of truth.

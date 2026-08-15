@@ -9,6 +9,8 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 export type WeeklyInsight = {
   id: string;
@@ -38,6 +40,7 @@ function currentWeekStart(): string {
 }
 
 export function useWeeklyInsight() {
+  const { ready, authenticated, getAccessToken } = usePrivy();
   const [state, setState] = useState<State>({
     insight: null,
     isLoading: true,
@@ -46,9 +49,10 @@ export function useWeeklyInsight() {
   });
 
   const generate = useCallback(async () => {
+    if (!ready || !authenticated) return;
     setState((s) => ({ ...s, isGenerating: true, error: null }));
     try {
-      const res = await fetch("/api/insights/weekly", { method: "POST" });
+      const res = await authFetch("/api/insights/weekly", { method: "POST" }, getAccessToken);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Generation failed");
       setState((s) => ({ ...s, insight: json.insight, isGenerating: false }));
@@ -59,16 +63,22 @@ export function useWeeklyInsight() {
         error: err?.message ?? "Could not generate insight",
       }));
     }
-  }, []);
+  }, [ready, authenticated, getAccessToken]);
 
   // Fetch existing insight on mount; auto-generate if none exists for this week
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
+      if (!ready) return;
+      if (!authenticated) {
+        setState((s) => ({ ...s, insight: null, isLoading: false, error: null }));
+        return;
+      }
+
       setState((s) => ({ ...s, isLoading: true, error: null }));
       try {
-        const res = await fetch("/api/insights/weekly");
+        const res = await authFetch("/api/insights/weekly", undefined, getAccessToken);
         const json = await res.json();
         if (cancelled) return;
 
@@ -93,7 +103,7 @@ export function useWeeklyInsight() {
 
     load();
     return () => { cancelled = true; };
-  }, [generate]);
+  }, [generate, ready, authenticated, getAccessToken]);
 
   return { ...state, generate };
 }

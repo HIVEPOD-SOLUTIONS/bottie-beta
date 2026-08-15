@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 export interface Payment {
   id: string;
@@ -19,19 +21,23 @@ export interface Payment {
 // older than this is stale — mark it "failed" so it stops spinning.
 const BITREFILL_EXPIRY_MS = 180 * 60 * 1_000; // 180 min
 
-async function expireStalePayment(referenceId: string) {
+async function expireStalePayment(
+  referenceId: string,
+  getAccessToken: () => Promise<string | null>,
+) {
   try {
-    await fetch("/api/payments", {
+    await authFetch("/api/payments", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ referenceId, status: "failed" }),
-    });
+    }, getAccessToken);
   } catch {
     // best-effort
   }
 }
 
 export function usePayments(type?: "bill" | "investment") {
+  const { ready, authenticated, getAccessToken } = usePrivy();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,10 +46,18 @@ export function usePayments(type?: "bill" | "investment") {
   const syncedRef = useRef(false);
 
   const fetch_ = useCallback(async () => {
+    if (!ready) return;
+    if (!authenticated) {
+      setPayments([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setError(null);
     try {
       const url = type ? `/api/payments?type=${type}` : "/api/payments";
-      const res = await fetch(url);
+      const res = await authFetch(url, undefined, getAccessToken);
       if (!res.ok) throw new Error("Failed to fetch payments");
       const data = await res.json();
       setPayments(data.payments ?? []);
@@ -52,7 +66,7 @@ export function usePayments(type?: "bill" | "investment") {
     } finally {
       setLoading(false);
     }
-  }, [type]);
+  }, [type, ready, authenticated, getAccessToken]);
 
   useEffect(() => {
     fetch_();
@@ -72,7 +86,7 @@ export function usePayments(type?: "bill" | "investment") {
     if (syncedRef.current) return; // already in-flight
     syncedRef.current = true;
 
-    fetch("/api/payments/sync", { method: "POST" })
+    authFetch("/api/payments/sync", { method: "POST" }, getAccessToken)
       .then((res) => res.json())
       .then(() => {
         syncedRef.current = false; // allow next poll cycle to sync again
@@ -81,7 +95,7 @@ export function usePayments(type?: "bill" | "investment") {
       .catch(() => {
         syncedRef.current = false; // allow retry on network error
       });
-  }, [payments, fetch_]);
+  }, [payments, fetch_, getAccessToken]);
 
   // Auto-expire stale pending payments (older than Bitrefill's 180-min invoice window)
   useEffect(() => {
@@ -96,9 +110,9 @@ export function usePayments(type?: "bill" | "investment") {
     );
     for (const p of stale) {
       expiredRef.current.add(p.referenceId!);
-      expireStalePayment(p.referenceId!).then(() => fetch_());
+      expireStalePayment(p.referenceId!, getAccessToken).then(() => fetch_());
     }
-  }, [payments, fetch_]);
+  }, [payments, fetch_, getAccessToken]);
 
   // Auto-poll every 5 s while any payment is still pending/processing.
   // Stops automatically once all settle to a terminal state.

@@ -22,6 +22,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { EVM_BALANCE_CHAINS, SOLANA_BALANCE_CHAIN } from "@/hooks/use-unified-balance";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ?? "";
@@ -73,15 +74,16 @@ type Balances = Omit<StablecoinBalances, "isLoading">;
 async function fetchViaPrivy(
   evmWalletId: string | null | undefined,
   solWalletId: string | null | undefined,
+  getAccessToken: () => Promise<string | null>,
 ): Promise<Balances | null> {
   if (!evmWalletId && !solWalletId) return null;
   try {
     const params = new URLSearchParams();
     if (evmWalletId) params.set("evmWalletId", evmWalletId);
     if (solWalletId) params.set("solWalletId", solWalletId);
-    const res = await fetch(`/api/balances/privy?${params}`, {
+    const res = await authFetch(`/api/balances/privy?${params}`, {
       signal: AbortSignal.timeout(15_000),
-    });
+    }, getAccessToken);
     if (!res.ok) return null;
     const json = await res.json();
     if (
@@ -238,11 +240,11 @@ async function fetchViaAlchemyRPC(
 // ── DB snapshot loader ────────────────────────────────────────────────────────
 // Reads the most recent balance snapshot from the database.
 // Used to seed the UI instantly on mount (stale-while-revalidate).
-async function loadLastSnapshot(): Promise<Balances | null> {
+async function loadLastSnapshot(getAccessToken: () => Promise<string | null>): Promise<Balances | null> {
   try {
-    const res = await fetch("/api/balances?limit=1", {
+    const res = await authFetch("/api/balances?limit=1", {
       signal: AbortSignal.timeout(5_000),
-    });
+    }, getAccessToken);
     if (!res.ok) return null;
     const json = await res.json();
     const snap = json?.snapshots?.[0];
@@ -260,7 +262,7 @@ async function loadLastSnapshot(): Promise<Balances | null> {
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 export function useStablecoinBalances(): StablecoinBalances {
-  const { user } = usePrivy();
+  const { user, ready, authenticated, getAccessToken } = usePrivy();
   const { wallets } = useWallets();
 
   // EVM address: prefer smart wallet, fall back to embedded EOA
@@ -300,11 +302,11 @@ export function useStablecoinBalances(): StablecoinBalances {
     }
     try {
       // Tier 1: Privy balance API
-      const tier1 = await fetchViaPrivy(evmPrivyWalletId, solPrivyWalletId);
+      const tier1 = await fetchViaPrivy(evmPrivyWalletId, solPrivyWalletId, getAccessToken);
       if (tier1) {
         privyTierLoggedRef.current = false; // reset so we log if it breaks again
         setBalances(tier1);
-        persistSnapshot(evmAddress, solAddress, tier1);
+        persistSnapshot(evmAddress, solAddress, tier1, getAccessToken);
         return;
       }
 
@@ -316,7 +318,7 @@ export function useStablecoinBalances(): StablecoinBalances {
       const tier2 = await fetchViaLibraries(evmAddress, solAddress);
       if (tier2) {
         setBalances(tier2);
-        persistSnapshot(evmAddress, solAddress, tier2);
+        persistSnapshot(evmAddress, solAddress, tier2, getAccessToken);
         return;
       }
 
@@ -324,21 +326,26 @@ export function useStablecoinBalances(): StablecoinBalances {
       console.warn("[balances] viem/web3.js failed, falling back to raw Alchemy RPC");
       const tier3 = await fetchViaAlchemyRPC(evmAddress, solAddress);
       setBalances(tier3);
-      persistSnapshot(evmAddress, solAddress, tier3);
+      persistSnapshot(evmAddress, solAddress, tier3, getAccessToken);
     } catch {
       // keep previous values on unexpected error
     } finally {
       setIsLoading(false);
     }
-  }, [evmAddress, solAddress, userId, evmPrivyWalletId, solPrivyWalletId]);
+  }, [evmAddress, solAddress, userId, evmPrivyWalletId, solPrivyWalletId, getAccessToken]);
 
   // ── Mount: seed from DB, then fetch live in background ─────────────────────
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
+      if (!ready) return;
+      if (!authenticated || !userId) {
+        setIsLoading(false);
+        return;
+      }
       // Show last known balance from DB immediately — eliminates the $0 flash.
-      const snapshot = await loadLastSnapshot();
+      const snapshot = await loadLastSnapshot(getAccessToken);
       if (!cancelled && snapshot) {
         setBalances(snapshot);
         setIsLoading(false); // DB value is good enough to show; live fetch runs below
@@ -349,13 +356,13 @@ export function useStablecoinBalances(): StablecoinBalances {
     }
 
     init();
-    const id = setInterval(refresh, 30_000);
+    const id = ready && authenticated && userId ? setInterval(refresh, 30_000) : undefined;
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (id) clearInterval(id);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh]);
+  }, [refresh, ready, authenticated, userId, getAccessToken]);
 
   return { ...balances, isLoading };
 }
@@ -365,8 +372,9 @@ function persistSnapshot(
   evmAddress: string | undefined,
   solAddress: string | undefined,
   b: Balances,
+  getAccessToken: () => Promise<string | null>,
 ) {
-  fetch("/api/balances", {
+  authFetch("/api/balances", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -374,5 +382,5 @@ function persistSnapshot(
       solAddress: solAddress ?? null,
       ...b,
     }),
-  }).catch(() => {});
+  }, getAccessToken).catch(() => {});
 }
