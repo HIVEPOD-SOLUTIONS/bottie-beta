@@ -1,10 +1,20 @@
 import { PrivyClient } from "@privy-io/server-auth";
 import { cookies, headers } from "next/headers";
 
-const privy = new PrivyClient(
-  process.env.NEXT_PUBLIC_PRIVY_APP_ID!,
-  process.env.PRIVY_APP_SECRET!,
-);
+let privy: PrivyClient | undefined;
+
+function getPrivyClient() {
+  if (privy) return privy;
+
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  const appSecret = process.env.PRIVY_APP_SECRET;
+  if (!appId || !appSecret) {
+    throw new Error("Privy server credentials are not configured");
+  }
+
+  privy = new PrivyClient(appId, appSecret);
+  return privy;
+}
 
 export async function verifyAuth(): Promise<{ userId: string }> {
   // 1. Try Authorization: Bearer header first (explicit token from client)
@@ -29,7 +39,7 @@ export async function verifyAuth(): Promise<{ userId: string }> {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await privy.verifyAuthToken(token);
+      const result = await getPrivyClient().verifyAuthToken(token);
       return { userId: result.userId };
     } catch {
       if (attempt === 1) throw new Error("Unauthorized");
