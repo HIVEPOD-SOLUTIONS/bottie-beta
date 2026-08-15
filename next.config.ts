@@ -1,5 +1,6 @@
 import withSerwistInit from "@serwist/next";
 import type { NextConfig } from "next";
+import path from "path";
 
 const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
@@ -10,6 +11,20 @@ const withSerwist = withSerwistInit({
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   turbopack: {},
+
+  // Force every bundler to use the root-level viem package.
+  // @walletconnect/utils bundles its own incomplete viem ESM copy inside
+  // node_modules/@reown/appkit/.../node_modules/viem/ which is missing
+  // parseAvatarRecord.js and recoverAuthorizationAddress.js.
+  // Pointing the alias at the package directory (not the entry file) preserves
+  // the exports map so sub-path imports like `viem/chains` continue to work.
+  webpack(config) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      viem: path.resolve(process.cwd(), "node_modules/viem"),
+    };
+    return config;
+  },
 
   serverExternalPackages: [
     "@solana/pay-kit",
