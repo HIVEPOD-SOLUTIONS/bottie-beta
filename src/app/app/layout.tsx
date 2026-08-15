@@ -14,7 +14,6 @@ import {
   SettingsSidebar,
   ScreenStackWrapper,
 } from "@/components/dashboard/settings-sidebar";
-import { useUsdcBalance } from "@/hooks/use-usdc-balance";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { ready, authenticated } = usePrivy();
@@ -52,10 +51,6 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const { user } = usePrivy();
   const accounts = (user?.linkedAccounts as any[]) ?? [];
 
-  const evmWallet = accounts.find((a: any) => a.chainType === "ethereum" && a.walletClientType === "privy");
-  const privyAddress = (user?.smartWallet?.address ?? user?.wallet?.address) as `0x${string}` | undefined;
-  const { balance } = useUsdcBalance(privyAddress, evmWallet?.id);
-
   // Lock body scroll when chat sheet or sidebar is open
   useEffect(() => {
     if (isOpen || sidebarOpen) {
@@ -74,7 +69,6 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <SettingsSidebar
         open={sidebarOpen}
         onClose={closeSidebar}
-        walletBalanceUsd={balance}
       />
 
       {/* Main content */}
@@ -258,7 +252,7 @@ function ChatInputBar() {
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={voiceError ? "Mic unavailable — type instead" : "Ask Bottie anything…"}
+                  placeholder={voiceError ? "Mic unavailable — type instead" : "Ask Bluvfi anything…"}
                   className="flex-1 bg-transparent font-body text-sm text-ink outline-none placeholder:text-ink-light/40"
                 />
                 <AnimatePresence mode="wait" initial={false}>
@@ -278,7 +272,7 @@ function ChatInputBar() {
             {mode === "idle" && (
               <motion.div key="idle" {...morphProps} className={`${PILL_INNER} gap-3`}>
                 <button onClick={() => open()} className="flex-1 text-left font-body text-sm text-ink-light/50">
-                  Ask Bottie anything…
+                  Ask Bluvfi anything…
                 </button>
                 <button onClick={handleMicTap} className="rounded-full p-1">
                   <MicIcon className="text-ink-light/30" />

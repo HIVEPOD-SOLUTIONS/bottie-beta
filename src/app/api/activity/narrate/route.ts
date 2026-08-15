@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { generateText } from "ai";
-import { deepseek } from "@ai-sdk/deepseek";
 import { eq, desc } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { activities } from "@/lib/db/schema";
 import { VAULT_FRIENDLY_NAMES, TOKEN_DISPLAY_NAMES } from "@/lib/constants";
+import { geminiGenerateText } from "@/lib/gemini";
+import { checkNarrateLimit } from "@/lib/user-rate-limiter";
 
 export async function GET() {
   let userId: string;
@@ -14,6 +14,15 @@ export async function GET() {
     userId = auth.userId;
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Per-user rate limit — each call invokes Gemini Flash.
+  const rateLimit = checkNarrateLimit(userId);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: rateLimit.reason },
+      { status: 429, headers: rateLimit.headers },
+    );
   }
 
   try {
@@ -36,8 +45,7 @@ export async function GET() {
       date: r.createdAt.toISOString().slice(0, 10),
     }));
 
-    const { text } = await generateText({
-      model: deepseek("deepseek-chat"),
+    const text = await geminiGenerateText({
       system:
         "You are a concise financial narrator for a savings app. Summarize the user's recent activity in 2-3 sentences. Be warm, editorial, no DeFi jargon. Mention totals, patterns, and timeframes. Keep it under 50 words. Do not use emojis. Do not use any markdown formatting. Use simple token names: say ETH not WETH, say USD not USDC, say BTC not cbBTC. Never repeat a token name twice in a row.",
       prompt: JSON.stringify(data),

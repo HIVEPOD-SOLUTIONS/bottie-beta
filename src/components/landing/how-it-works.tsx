@@ -11,7 +11,7 @@ const STEPS = [
   },
   {
     number: "02",
-    title: "Tell Bottie what you need",
+    title: "Tell Bluvfi what you need",
     micro: "pay a bill, buy a stock, check your balance — just ask",
   },
   {

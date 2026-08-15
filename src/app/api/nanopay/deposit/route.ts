@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
 import { getBuyerClient } from "@/lib/circle-gateway";
+import { db } from "@/lib/db";
+import { payments } from "@/lib/db/schema";
 
 export async function POST(req: Request) {
+  let userId: string;
   try {
-    await verifyAuth();
+    const auth = await verifyAuth();
+    userId = auth.userId;
   } catch {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -16,7 +20,6 @@ export async function POST(req: Request) {
 
   try {
     const client = getBuyerClient();
-
     const balances = await client.getBalances();
     const needed = BigInt(Math.round(Number(amount) * 1_000_000));
 
@@ -24,24 +27,30 @@ export async function POST(req: Request) {
       return NextResponse.json({
         skipped: true,
         message: "Gateway balance already sufficient",
-        gateway: {
-          available: balances.gateway.formattedAvailable,
-        },
+        gateway: { available: balances.gateway.formattedAvailable },
       });
     }
 
     const result = await client.deposit(String(amount));
+
+    // Persist to DB
+    db.insert(payments).values({
+      userId,
+      type: "deposit",
+      referenceId: result.depositTxHash ?? null,
+      description: `Circle Gateway deposit: ${result.formattedAmount} USDC`,
+      amountUsdc: String(Number(amount)),
+      status: "completed",
+      txHash: result.depositTxHash ?? null,
+      chain: "evm",
+    }).catch(() => {});
+
     return NextResponse.json({
       depositTxHash: result.depositTxHash,
       amount: result.formattedAmount,
-      gateway: {
-        available: (await client.getBalances()).gateway.formattedAvailable,
-      },
+      gateway: { available: (await client.getBalances()).gateway.formattedAvailable },
     });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Deposit failed" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: err?.message ?? "Deposit failed" }, { status: 500 });
   }
 }

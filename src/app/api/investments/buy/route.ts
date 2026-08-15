@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     try {
       const { getBuyerClient } = await import("@/lib/circle-gateway");
       const client = getBuyerClient();
-      const resourceUrl = `https://invest.bottie.app/${sym}/${sharesNum}`;
+      const resourceUrl = `https://invest.bluvfi.app/${sym}/${sharesNum}`;
       const result = await (client as any).pay?.(resourceUrl).catch(() => null);
       if (result?.transaction) txHash = result.transaction;
     } catch {

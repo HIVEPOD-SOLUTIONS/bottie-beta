@@ -4,6 +4,11 @@ import { createTools } from "@/lib/ai/tools";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { windowMessages, extractConversationRecap } from "@/lib/ai/window-messages";
 import { verifyAuth } from "@/lib/auth";
+import { checkChatLimit } from "@/lib/user-rate-limiter";
+
+// Allow streaming responses up to 60s on Vercel Pro/Enterprise.
+// Hobby plan is capped at 10s — upgrade if you hit timeouts on long AI steps.
+export const maxDuration = 60;
 
 /**
  * AI SDK v6 puts all parts from a multi-step round-trip into a single
@@ -89,6 +94,17 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  // ── Per-user rate limiting (burst + daily) ──────────────────────────────
+  // Checked after auth so we rate-limit by user identity, not just IP.
+  // IP-based limits in proxy.ts are still the outer gate for unauthenticated abuse.
+  const rateLimit = checkChatLimit(userId);
+  if (!rateLimit.allowed) {
+    return Response.json(
+      { error: rateLimit.reason },
+      { status: 429, headers: rateLimit.headers },
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -101,8 +117,10 @@ export async function POST(req: Request) {
     walletAddress,
     solanaAddress,
     userName,
-    walletBalance,
-    solanaBalance,
+    evmUsdc,
+    evmUsdt,
+    solUsdc,
+    solUsdt,
     paidBillIds,
     totalBillsDueUsd,
     portfolioValueUsd,
@@ -112,8 +130,10 @@ export async function POST(req: Request) {
     walletAddress?: string;
     solanaAddress?: string;
     userName?: string;
-    walletBalance?: number;
-    solanaBalance?: number;
+    evmUsdc?: number;
+    evmUsdt?: number;
+    solUsdc?: number;
+    solUsdt?: number;
     paidBillIds?: string[];
     totalBillsDueUsd?: number;
     portfolioValueUsd?: number;
@@ -124,7 +144,7 @@ export async function POST(req: Request) {
     return new Response("messages must be an array", { status: 400 });
   }
 
-  const tools = createTools(walletAddress, userId, solanaAddress, Array.isArray(paidBillIds) ? paidBillIds : []);
+  const tools = createTools(walletAddress, userId, solanaAddress, Array.isArray(paidBillIds) ? paidBillIds : [], userName);
   const recap = extractConversationRecap(messages);
   const windowed = windowMessages(messages);
 
@@ -133,7 +153,7 @@ export async function POST(req: Request) {
     modelMessages = repairToolMessages(
       await convertToModelMessages(windowed, { ignoreIncompleteToolCalls: true }),
     );
-    console.log('[chat] modelMessages count:', modelMessages.length, 'roles:', modelMessages.map((m: { role: string }) => m.role).join('->'));
+    console.debug('[chat] modelMessages count:', modelMessages.length, 'roles:', modelMessages.map((m: { role: string }) => m.role).join('->'));
   } catch (err) {
     console.error('[chat] convertToModelMessages failed:', err);
     return new Response('Message conversion failed', { status: 500 });
@@ -146,19 +166,23 @@ export async function POST(req: Request) {
         userName,
         walletAddress,
         solanaAddress,
-        walletBalance,
-        solanaBalance,
+        evmUsdc,
+        evmUsdt,
+        solUsdc,
+        solUsdt,
         totalBillsDueUsd,
         portfolioValueUsd,
         billCount,
         conversationRecap: recap || undefined,
+        currentDate: new Date().toISOString().slice(0, 10),
       }),
       messages: modelMessages,
       tools,
-      stopWhen: stepCountIs(5),
+      stopWhen: stepCountIs(10),
       onError: (err) => console.error('[chat] streamText error:', err),
     });
-    return result.toUIMessageStreamResponse();
+    // Forward quota headers so the client can display remaining message counts.
+    return result.toUIMessageStreamResponse({ headers: rateLimit.headers });
   } catch (err) {
     console.error('[chat] streamText setup error:', err);
     return new Response('AI service error', { status: 503 });

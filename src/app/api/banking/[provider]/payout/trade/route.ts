@@ -1,11 +1,14 @@
 import { verifyAuth } from "@/lib/auth";
 import { getProvider } from "@/lib/banking/registry";
+import { db } from "@/lib/db";
+import { payments } from "@/lib/db/schema";
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ provider: string }> },
 ) {
-  try { await verifyAuth(); } catch {
+  let userId: string;
+  try { const auth = await verifyAuth(); userId = auth.userId; } catch {
     return new Response("Unauthorized", { status: 401 });
   }
   const { provider: providerId } = await params;
@@ -24,6 +27,19 @@ export async function POST(
     if (typeof provider.initiateTrade !== "function")
       return Response.json({ error: "Trades not supported" }, { status: 501 });
     const data = await provider.initiateTrade({ from_currency, to_currency, from_amount, sub_account_id, merchant_trade_id });
+
+    // Record the trade in the payments ledger
+    const tradeId = data?.data?.trade_id ?? data?.trade_id ?? merchant_trade_id ?? null;
+    db.insert(payments).values({
+      userId,
+      type: "transfer",
+      referenceId: tradeId ? String(tradeId) : null,
+      description: `Banking FX trade: ${from_amount} ${from_currency?.toUpperCase()} → ${to_currency?.toUpperCase()} via ${providerId}`,
+      amountUsdc: String(from_amount),
+      status: "pending",
+      chain: "evm",
+    }).catch(() => {});
+
     return Response.json(data);
   } catch (err: any) {
     return Response.json({ error: err?.message ?? "Failed" }, { status: 502 });

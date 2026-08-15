@@ -4,7 +4,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-const PENDING_KEY = "bottie:pending-redirect";
+const PENDING_KEY = "bluvfi:pending-redirect";
 
 export function useHandleLogin() {
   const router = useRouter();

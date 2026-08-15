@@ -1,5 +1,7 @@
 import { verifyAuth } from "@/lib/auth";
 import { getProvider } from "@/lib/banking/registry";
+import { db } from "@/lib/db";
+import { payments } from "@/lib/db/schema";
 
 export async function POST(
   req: Request,
@@ -35,6 +37,23 @@ export async function POST(
     const result = await provider.initiatePayout(userId, {
       amount, description, beneficiaryName, beneficiaryAccountNumber, beneficiaryIfsc,
     });
+
+    // Persist to payments ledger — webhook updates status to completed/failed
+    const anyResult = result as any;
+    const payoutId = anyResult?.data?.payout_id ?? anyResult?.payout_id ?? null;
+    const merchantRef = anyResult?.data?.merchant_payout_id ?? anyResult?.merchant_payout_id ?? payoutId;
+    db.insert(payments).values({
+      userId,
+      type: "offramp",
+      referenceId: merchantRef ? String(merchantRef) : null,
+      description: description
+        ? `Bank payout: ${description} → ${beneficiaryName}`
+        : `Bank payout to ${beneficiaryName} (${beneficiaryAccountNumber?.slice(-4)})`,
+      amountUsdc: String(amount),
+      status: "pending",
+      chain: "evm",
+    }).catch(() => {});
+
     return Response.json(result);
   } catch (err: any) {
     const status = err?.message?.startsWith("Unknown banking provider") ? 404 : 502;

@@ -23,6 +23,11 @@ export interface FinancialData {
   walletBalanceUsd?: number;
   totalSavingsUsd?: number;
   hasPositions?: boolean;
+  // Stablecoin balances — kept in sync with the dashboard's useStablecoinBalances hook
+  evmUsdc?: number;
+  evmUsdt?: number;
+  solUsdc?: number;
+  solUsdt?: number;
 }
 
 interface ChatContextType {

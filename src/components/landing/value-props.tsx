@@ -7,12 +7,12 @@ const PROPS = [
   {
     label: "Just talk",
     heading: "No tapping through menus.",
-    body: "Tell Bottie to pay your Netflix bill or buy 2 shares of Apple — it handles the payment and confirms back in plain English.",
+    body: "Tell Bluvfi to pay your Netflix bill or buy 2 shares of Apple — it handles the payment and confirms back in plain English.",
   },
   {
     label: "Gas-free",
     heading: "Payments settle instantly.",
-    body: "Circle Gateway nanopayments mean every transaction settles in seconds on Base Sepolia with zero gas fees — you never touch crypto manually.",
+    body: "Circle Gateway nanopayments mean every transaction settles in seconds on Base with zero gas fees — you never touch crypto manually.",
   },
   {
     label: "Any wallet",
@@ -62,7 +62,7 @@ export function ValueProps() {
         transition={{ duration: 0.6, ease }}
         className="font-display italic text-2xl text-sage/70"
       >
-        Why Bottie
+        Why Bluvfi
       </motion.p>
 
       <div className="mt-8 flex flex-col gap-8">

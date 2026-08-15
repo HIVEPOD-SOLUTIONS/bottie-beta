@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import { useBalance } from "wagmi";
 
-const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
-const PRIVY_TOKEN = "base-sepolia:0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-const ALCHEMY_RPC = `https://base-sepolia.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`;
+const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const; // Base mainnet USDC
+const PRIVY_TOKEN = "base:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const ALCHEMY_RPC = `https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`;
 
 // balanceOf(address) selector
 const BALANCE_OF_SELECTOR = "0x70a08231";
@@ -33,7 +33,7 @@ async function fetchRpcUsdcBalance(address: string): Promise<number> {
       id: 1,
       method: "eth_call",
       params: [
-        { to: USDC_BASE_SEPOLIA, data: `${BALANCE_OF_SELECTOR}${paddedAddress}` },
+        { to: USDC_BASE, data: `${BALANCE_OF_SELECTOR}${paddedAddress}` },
         "latest",
       ],
     }),
@@ -93,7 +93,7 @@ export function useUsdcBalance(
   // Tier 2: wagmi useBalance (always mounted; used when Privy fails)
   const { data, isLoading: wagmiLoading, refetch } = useBalance({
     address,
-    token: USDC_BASE_SEPOLIA,
+    token: USDC_BASE,
   });
   const wagmiBalance = data ? Number(data.formatted) : null;
 

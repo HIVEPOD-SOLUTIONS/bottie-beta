@@ -1,14 +1,28 @@
 import { NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
+import { checkVoiceLimit } from "@/lib/user-rate-limiter";
+
+// Whisper transcription can take a few seconds for long audio clips.
+export const maxDuration = 30;
 
 const OPENAI_API_URL = "https://api.openai.com/v1/audio/transcriptions";
 const OPENAI_MODEL = "whisper-1";
 
 export async function POST(req: Request) {
+  let userId: string;
   try {
-    await verifyAuth();
+    ({ userId } = await verifyAuth());
   } catch {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Per-user rate limit — Whisper is billed per audio-minute.
+  const rateLimit = checkVoiceLimit(userId);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: rateLimit.reason },
+      { status: 429, headers: rateLimit.headers },
+    );
   }
 
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { usePrivy } from "@privy-io/react-auth";
 import type { ProviderMeta } from "@/lib/banking/registry";
 import type { BankingTransaction, ProviderBalance, TransactionStatus } from "@/lib/banking/types";
+import { FuzeSection } from "./fuze-section";
 
 // ── Status pill ───────────────────────────────────────────────────────────────
 
@@ -159,7 +160,10 @@ function ReceiveModal({
       )}
       {step === "qr" && tx && (
         <div className="flex flex-col items-center gap-4">
-          <h2 className="font-display text-xl text-ink">Scan to Pay</h2>
+          <div className="flex w-full items-center">
+            <button onClick={() => setStep("form")} className="font-mono text-xs text-ink-light hover:text-ink mr-auto">← Back</button>
+            <h2 className="font-display text-xl text-ink mx-auto pr-8">Scan to Pay</h2>
+          </div>
           <p className="font-body text-sm text-ink-light text-center">Scan in any UPI-compatible app. Polling for confirmation…</p>
           <div className="rounded-2xl border border-border bg-white p-4">
             {tx.qrCode ? (
@@ -1380,7 +1384,10 @@ function BuyCryptoModal({ provider, onClose, onSuccess }: {
 
       {step === "qr" && order && (
         <div className="flex flex-col items-center gap-4">
-          <h2 className="font-display text-xl text-ink">Scan & Pay</h2>
+          <div className="flex w-full items-center">
+            <button onClick={() => setStep("form")} className="font-mono text-xs text-ink-light hover:text-ink mr-auto">← Back</button>
+            <h2 className="font-display text-xl text-ink mx-auto pr-8">Scan & Pay</h2>
+          </div>
           <p className="font-body text-sm text-ink-light text-center">
             Scan with any UPI app to pay ₹{order.input_amount.toLocaleString()}
           </p>
@@ -2150,11 +2157,355 @@ function ProviderSelector({ providers, selected, onSelect }: {
   );
 }
 
+// ── Banking platform list ─────────────────────────────────────────────────────
+
+type BankingPlatform = "credible" | "spherepay" | "fuze";
+
+const BANKING_PLATFORMS = [
+  {
+    id: "credible" as BankingPlatform,
+    icon: "🏦",
+    name: "Credible Finance",
+    tag: "Stablecoin Banking",
+    description: "Onramp, offramp, collections & payouts — INR ↔ crypto rails for India & Southeast Asia",
+    badge: "India",
+    badgeColor: "text-orange-400 bg-orange-400/10",
+  },
+  {
+    id: "spherepay" as BankingPlatform,
+    icon: "🌐",
+    name: "SpherePay",
+    tag: "B2B Payments",
+    description: "Global stablecoin payment rails — treasury, payroll, trade finance & payment acceptance",
+    badge: "Global",
+    badgeColor: "text-blue-400 bg-blue-400/10",
+  },
+  {
+    id: "fuze" as BankingPlatform,
+    icon: "🌐",
+    name: "Fuze Finance",
+    tag: "Crypto + Fiat",
+    description: "Global crypto & fiat infrastructure — onboard users, issue wallets, trade, remit across AED, USD, EUR, GBP, INR, USDT, USDC",
+    badge: "UAE",
+    badgeColor: "text-emerald-400 bg-emerald-400/10",
+  },
+];
+
+function CredibleFinanceSection({ providers, loading, error }: {
+  providers: ProviderMeta[];
+  loading: boolean;
+  error: string | null;
+}) {
+  const [selectedProvider, setSelectedProvider] = useState<ProviderMeta | null>(null);
+
+  useEffect(() => {
+    if (providers.length > 0 && !selectedProvider) setSelectedProvider(providers[0]);
+  }, [providers, selectedProvider]);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="h-12 animate-pulse rounded-xl bg-cream-dark/60" />
+        <div className="h-44 animate-pulse rounded-3xl bg-cream-dark/60" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {error || !selectedProvider ? (
+        <div className="py-10 text-center">
+          <p className="text-3xl">🔌</p>
+          <p className="mt-3 font-semibold text-ink">Provider not configured</p>
+          <p className="mt-1 text-sm text-ink-light">{error ?? "No providers available."}</p>
+          <p className="mt-3 font-mono text-[10px] text-ink-light/60">
+            Add CREDIBLE_FINANCE_API_KEY + CREDIBLE_FINANCE_API_SECRET to .env
+          </p>
+        </div>
+      ) : (
+        <>
+          <ProviderSelector providers={providers} selected={selectedProvider} onSelect={setSelectedProvider} />
+          <ProviderPanel key={selectedProvider.id} provider={selectedProvider} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── SpherePay section ─────────────────────────────────────────────────────────
+
+type SphereFlowType = "first-party" | "third-party";
+
+const SPHERE_USE_CASES = [
+  {
+    icon: "🏛️",
+    title: "Treasury Management",
+    description: "First-party on-ramp/off-ramp for company treasury — same legal entity owns source and destination.",
+    flow: "first-party" as SphereFlowType,
+    pattern: "Onramper Account · Offloader Wallet",
+  },
+  {
+    icon: "✅",
+    title: "Payment Acceptance",
+    description: "Platform fiat acceptance for incoming payments from customers — often third-party or Onramper pattern.",
+    flow: "third-party" as SphereFlowType,
+    pattern: "Onramper Account · Third-Party",
+  },
+  {
+    icon: "💼",
+    title: "Payroll & Disbursements",
+    description: "Pay employees, contractors, or vendors — different entities, platform-mediated.",
+    flow: "third-party" as SphereFlowType,
+    pattern: "Business pays supplier",
+  },
+  {
+    icon: "🌐",
+    title: "Cross-border Trade Finance",
+    description: "Supplier and invoice settlement across borders — stablecoin routing, multi-currency rails.",
+    flow: "third-party" as SphereFlowType,
+    pattern: "Third-Party Flows",
+  },
+];
+
+const SPHERE_ROUTING_TABLE = [
+  {
+    outcome: "Same legal entity owns source and destination",
+    guide: "First-Party Flows",
+    pattern: "—",
+  },
+  {
+    outcome: "Each on-ramp/off-ramp initiated explicitly via API",
+    guide: "First-Party Flows",
+    pattern: "One-off transfer",
+  },
+  {
+    outcome: "Reusable fiat deposit instructions into customer's own wallet",
+    guide: "First-Party Flows",
+    pattern: "Onramper Account",
+  },
+  {
+    outcome: "Reusable stablecoin-to-fiat cash-out to customer's own bank",
+    guide: "First-Party Flows",
+    pattern: "Offloader Wallet",
+  },
+  {
+    outcome: "A business pays a supplier, vendor, or contractor",
+    guide: "Third-Party Flows",
+    pattern: "Business pays supplier",
+  },
+  {
+    outcome: "A platform enables business customers to move funds",
+    guide: "Third-Party Flows",
+    pattern: "Platform serves business customers",
+  },
+  {
+    outcome: "A bank or fintech embeds ramps for end users",
+    guide: "Third-Party Flows",
+    pattern: "Bank or fintech serves consumers",
+  },
+];
+
+const SPHERE_SCOPING_CHECKLIST = [
+  "Who owns the funds at each step",
+  "Customer of record — who SpherePay must onboard and verify",
+  "Sender and beneficiary (may differ from customer of record)",
+  "Platform role — whether your platform is in the flow of funds",
+  "Downstream users — businesses, consumers, or both",
+  "Fiat currency and rail",
+  "Stablecoin and network",
+  "Transfer model — one-off API vs reusable deposit/cash-out instructions",
+  "Balance model — movement/conversion only vs fiat balance holding",
+  "Volume — monthly, average and maximum transaction size",
+];
+
+function SpherePaySection() {
+  const [activeFlow, setActiveFlow] = useState<SphereFlowType | "all">("all");
+  const [expandedRouting, setExpandedRouting] = useState(false);
+  const [expandedScoping, setExpandedScoping] = useState(false);
+
+  const filteredUseCases = activeFlow === "all"
+    ? SPHERE_USE_CASES
+    : SPHERE_USE_CASES.filter((u) => u.flow === activeFlow);
+
+  return (
+    <div className="flex flex-col gap-5">
+
+      {/* Header card */}
+      <div className="rounded-3xl bg-gradient-to-br from-[#3B3F8C] to-[#232660] p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-mono text-[10px] tracking-widest text-white/60 uppercase">Banking Provider</p>
+            <p className="mt-1 font-display text-2xl font-bold text-white">SpherePay</p>
+            <p className="mt-0.5 font-mono text-[10px] text-white/60 uppercase tracking-wide">
+              Stablecoin payment rails · Global fiat settlement
+            </p>
+          </div>
+          <span className="text-3xl">🌐</span>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="rounded-xl bg-white/10 p-2.5 text-center">
+            <p className="font-mono text-lg font-bold text-white">130+</p>
+            <p className="font-mono text-[9px] text-white/60">Countries</p>
+          </div>
+          <div className="rounded-xl bg-white/10 p-2.5 text-center">
+            <p className="font-mono text-lg font-bold text-white">USDC</p>
+            <p className="font-mono text-[9px] text-white/60">Stablecoin</p>
+          </div>
+          <div className="rounded-xl bg-white/10 p-2.5 text-center">
+            <p className="font-mono text-lg font-bold text-white">API</p>
+            <p className="font-mono text-[9px] text-white/60">First-class</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Coming soon badge */}
+      <div className="flex items-center gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+        <span className="text-lg">🚧</span>
+        <div>
+          <p className="font-mono text-xs font-semibold text-amber-400">Integration in progress</p>
+          <p className="font-mono text-[10px] text-ink-light">SpherePay API credentials required to activate</p>
+        </div>
+      </div>
+
+      {/* Flow type selector */}
+      <div>
+        <p className="mb-2 font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Flow Type</p>
+        <div className="grid grid-cols-3 gap-1 rounded-xl border border-border/60 bg-cream-dark/20 p-1">
+          {([["all", "All"], ["first-party", "First-Party"], ["third-party", "Third-Party"]] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setActiveFlow(key)}
+              className={`rounded-lg py-2 font-mono text-[10px] font-semibold transition-colors ${
+                activeFlow === key ? "bg-cream shadow-sm text-ink" : "text-ink-light hover:text-ink"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 rounded-xl border border-border/40 bg-cream-dark/10 px-3 py-2">
+          <p className="font-mono text-[10px] text-ink-light">
+            <span className="text-ink font-semibold">First-party:</span> same legal entity owns source and destination.{" "}
+            <span className="text-ink font-semibold">Third-party:</span> different entities, or platform-mediated flows.
+          </p>
+        </div>
+      </div>
+
+      {/* Use cases */}
+      <div>
+        <p className="mb-3 font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Solutions</p>
+        <div className="grid grid-cols-1 gap-3">
+          {filteredUseCases.map((uc) => (
+            <div key={uc.title} className="rounded-2xl border border-border/60 bg-cream-dark/20 p-4">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl leading-none">{uc.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="font-mono text-sm font-semibold text-ink">{uc.title}</p>
+                    <span className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-semibold ${
+                      uc.flow === "first-party"
+                        ? "bg-blue-500/10 text-blue-400"
+                        : "bg-purple-500/10 text-purple-400"
+                    }`}>
+                      {uc.flow === "first-party" ? "First-Party" : "Third-Party"}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-body text-xs text-ink-light leading-relaxed">{uc.description}</p>
+                  <p className="mt-1.5 font-mono text-[10px] text-ink-light/70">Guide: {uc.pattern}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Implementation routing table */}
+      <div className="rounded-2xl border border-border/60 bg-cream-dark/20 overflow-hidden">
+        <button
+          onClick={() => setExpandedRouting((v) => !v)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left"
+        >
+          <div>
+            <p className="font-mono text-xs font-semibold text-ink">Implementation Guide Routing</p>
+            <p className="font-mono text-[10px] text-ink-light">Route by discovery outcome → pick a build path</p>
+          </div>
+          <span className="font-mono text-xs text-ink-light">{expandedRouting ? "↑" : "↓"}</span>
+        </button>
+        {expandedRouting && (
+          <div className="border-t border-border/40 px-4 pb-4 pt-3 space-y-2">
+            {SPHERE_ROUTING_TABLE.map((row, i) => (
+              <div key={i} className="rounded-xl border border-border/40 bg-cream-dark/30 p-3">
+                <p className="font-body text-xs text-ink-light leading-snug">{row.outcome}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-semibold ${
+                    row.guide.startsWith("First")
+                      ? "bg-blue-500/10 text-blue-400"
+                      : "bg-purple-500/10 text-purple-400"
+                  }`}>
+                    {row.guide}
+                  </span>
+                  {row.pattern !== "—" && (
+                    <span className="font-mono text-[9px] text-ink-light">· {row.pattern}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Scoping checklist */}
+      <div className="rounded-2xl border border-border/60 bg-cream-dark/20 overflow-hidden">
+        <button
+          onClick={() => setExpandedScoping((v) => !v)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left"
+        >
+          <div>
+            <p className="font-mono text-xs font-semibold text-ink">Pre-build Scoping Checklist</p>
+            <p className="font-mono text-[10px] text-ink-light">Confirm these with your SpherePay representative</p>
+          </div>
+          <span className="font-mono text-xs text-ink-light">{expandedScoping ? "↑" : "↓"}</span>
+        </button>
+        {expandedScoping && (
+          <div className="border-t border-border/40 px-4 pb-4 pt-3 space-y-2">
+            {SPHERE_SCOPING_CHECKLIST.map((item, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="mt-0.5 font-mono text-[10px] text-ink-light/60">{i + 1}.</span>
+                <p className="font-body text-xs text-ink-light">{item}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Docs link */}
+      <div className="rounded-2xl border border-border/60 bg-cream-dark/20 p-4">
+        <p className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Documentation</p>
+        <p className="mt-2 font-body text-xs text-ink-light leading-relaxed">
+          Full API reference, flow guides, and concept docs available at the SpherePay developer portal.
+          Use <span className="font-mono text-ink">/llms.txt</span> to discover all available pages.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {[
+            { label: "First-Party Flows", tag: "Guide" },
+            { label: "Third-Party Flows", tag: "Guide" },
+            { label: "Concepts", tag: "Reference" },
+            { label: "API Reference", tag: "Reference" },
+          ].map((link) => (
+            <div key={link.label} className="flex items-center justify-between rounded-xl border border-border/40 px-3 py-2">
+              <p className="font-mono text-[10px] text-ink">{link.label}</p>
+              <span className="font-mono text-[9px] text-ink-light/60">{link.tag}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
 // ── Main banking screen ───────────────────────────────────────────────────────
 
 export function BankingScreen() {
+  const [open, setOpen] = useState<BankingPlatform | null>(null);
   const [providers, setProviders] = useState<ProviderMeta[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<ProviderMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -2162,44 +2513,77 @@ export function BankingScreen() {
     fetch("/api/banking/providers")
       .then((r) => r.json())
       .then((data: ProviderMeta[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setProviders(data);
-          setSelectedProvider(data[0]);
-        } else {
-          setError("No banking providers configured.");
-        }
+        if (Array.isArray(data) && data.length > 0) setProviders(data);
+        else setError("No banking providers configured.");
       })
       .catch(() => setError("Failed to load banking providers."))
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <div className="h-12 animate-pulse rounded-xl bg-cream-dark/60" />
-        <div className="h-44 animate-pulse rounded-3xl bg-cream-dark/60" />
-        <div className="h-16 animate-pulse rounded-2xl border border-border/60 bg-cream-dark/30" />
-      </div>
-    );
-  }
-
-  if (error || !selectedProvider) {
-    return (
-      <div className="py-16 text-center">
-        <p className="text-4xl">🏦</p>
-        <p className="mt-3 font-semibold text-ink">Banking unavailable</p>
-        <p className="mt-1 text-sm text-ink-light">{error ?? "No providers configured."}</p>
-        <p className="mt-3 font-mono text-xs text-ink-light/60">
-          Add CREDIBLE_FINANCE_API_KEY + CREDIBLE_FINANCE_API_SECRET to .env
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-4">
-      <ProviderSelector providers={providers} selected={selectedProvider} onSelect={setSelectedProvider} />
-      <ProviderPanel key={selectedProvider.id} provider={selectedProvider} />
-    </div>
+    <>
+      <div className="flex flex-col gap-3">
+        {BANKING_PLATFORMS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setOpen(p.id)}
+            className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-left transition-colors hover:border-[#3A3B37] active:bg-white/[0.04] w-full"
+          >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-2xl">
+              {p.icon}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold text-[#F2F0E8]">{p.name}</p>
+                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">{p.tag}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${p.badgeColor}`}>{p.badge}</span>
+              </div>
+              <p className="truncate text-xs text-[#A7A79A] mt-0.5">{p.description}</p>
+            </div>
+            <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        ))}
+      </div>
+
+      {/* Detail sheet */}
+      {open && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[70] flex flex-col">
+          <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(null)} />
+          <div className="bg-[#141513] rounded-t-3xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[#2A2B27] shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">{BANKING_PLATFORMS.find((p) => p.id === open)?.icon}</span>
+                <div>
+                  <p className="font-semibold text-[#F2F0E8] text-sm">
+                    {BANKING_PLATFORMS.find((p) => p.id === open)?.name}
+                  </p>
+                  <p className="text-xs text-[#A7A79A]">
+                    {BANKING_PLATFORMS.find((p) => p.id === open)?.tag}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOpen(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.06] text-[#A7A79A] hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            {/* Scrollable content */}
+            <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
+              {open === "credible" && (
+                <CredibleFinanceSection providers={providers} loading={loading} error={error} />
+              )}
+              {open === "spherepay" && <SpherePaySection />}
+              {open === "fuze" && <FuzeSection />}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

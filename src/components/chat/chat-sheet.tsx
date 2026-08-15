@@ -3,14 +3,13 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useSignTransaction } from "@privy-io/react-auth/solana";
 import { Connection, Keypair, Transaction } from "@solana/web3.js";
 import { useChatSheet } from "@/contexts/chat-context";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
-import { useUsdcBalance } from "@/hooks/use-usdc-balance";
 import { useDemoState } from "@/contexts/demo-state-context";
-import { useSolanaBalance } from "@/hooks/use-solana-balance";
 import { MessageBubble } from "./message-bubble";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ToolApprovalCard } from "./tool-approval-card";
@@ -71,6 +70,464 @@ function loadActiveSession(): { keypair: Keypair; expiresAt: number } | null {
     if (Date.now() >= expiresAt) return null;
     return { keypair: Keypair.fromSecretKey(new Uint8Array(secretKey)), expiresAt };
   } catch { return null; }
+}
+
+// ── Roaster chat cards ────────────────────────────────────────────────────────
+
+function RoasterBondCard({
+  toolCallId,
+  output,
+  addToolResult,
+}: {
+  toolCallId: string;
+  output: { pendingRoasterBond: true; battle_id: string; bond_transaction: string; solanaAddress: string };
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+}) {
+  const { signTransaction } = useSignTransaction();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleApprove = async () => {
+    setBusy(true); setError(null);
+    try {
+      const conn = new Connection(SOL_RPC, "confirmed");
+      const raw = Buffer.from(output.bond_transaction, "base64");
+      const signed: Uint8Array = await (signTransaction as any)({ transaction: raw });
+      const sig = await conn.sendRawTransaction(signed, { skipPreflight: false });
+      await conn.confirmTransaction(sig, "confirmed");
+      setDone(true);
+      addToolResult({ tool: "roaster_create_battle", toolCallId, output: { success: true, battle_id: output.battle_id, signature: sig } });
+    } catch (err: any) {
+      const msg = err?.message ?? "Transaction failed";
+      setError(msg);
+      addToolResult({ tool: "roaster_create_battle", toolCallId, output: { success: false, error: msg } });
+    } finally { setBusy(false); }
+  };
+
+  const handleReject = () => {
+    addToolResult({ tool: "roaster_create_battle", toolCallId, output: { success: false, error: "User cancelled" } });
+    setDone(true);
+  };
+
+  if (done && !error) {
+    return (
+      <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400">
+        ✓ Battle created on-chain — open Invest → Roaster to see it
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">🎤</span>
+        <div>
+          <p className="font-medium text-ink text-sm">Create Rap Battle</p>
+          <p className="text-xs text-ink/50">Roaster · Solana · 10 USDC bond</p>
+        </div>
+      </div>
+      <div className="rounded-lg bg-ink/5 p-2 text-xs space-y-1">
+        <div className="flex justify-between gap-2">
+          <span className="text-ink/50">Battle ID</span>
+          <span className="text-ink font-mono">{output.battle_id.slice(0, 12)}…</span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span className="text-ink/50">Creation bond</span>
+          <span className="text-ink">10 USDC (non-refundable)</span>
+        </div>
+      </div>
+      <p className="text-xs text-ink/40">This signs an on-chain transaction to deposit the 10 USDC creation bond into the battle vault.</p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={handleReject} disabled={busy} className="flex-1 rounded-lg border border-border py-2 text-sm text-ink/60 hover:bg-ink/5 transition-colors">Cancel</button>
+        <button onClick={handleApprove} disabled={busy} className="flex-1 rounded-lg bg-ink py-2 text-sm font-medium text-cream hover:opacity-80 transition-opacity disabled:opacity-50">
+          {busy ? "Signing…" : "Pay Bond & Create"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RoasterBackCard({
+  toolCallId,
+  output,
+  addToolResult,
+}: {
+  toolCallId: string;
+  output: { pendingRoasterBack: true; battle_id: string; side: number; amount_usdc: number; platform_fee_usdc: number; time_weight: number; transaction: string; solanaAddress: string };
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+}) {
+  const { signTransaction } = useSignTransaction();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleApprove = async () => {
+    setBusy(true); setError(null);
+    try {
+      const conn = new Connection(SOL_RPC, "confirmed");
+      const raw = Buffer.from(output.transaction, "base64");
+      const signed: Uint8Array = await (signTransaction as any)({ transaction: raw });
+      const sig = await conn.sendRawTransaction(signed, { skipPreflight: false });
+      await conn.confirmTransaction(sig, "confirmed");
+      setDone(true);
+      addToolResult({ tool: "roaster_back_side", toolCallId, output: { success: true, battle_id: output.battle_id, side: output.side, amount_usdc: output.amount_usdc, signature: sig } });
+    } catch (err: any) {
+      const msg = err?.message ?? "Transaction failed";
+      setError(msg);
+      addToolResult({ tool: "roaster_back_side", toolCallId, output: { success: false, error: msg } });
+    } finally { setBusy(false); }
+  };
+
+  const handleReject = () => {
+    addToolResult({ tool: "roaster_back_side", toolCallId, output: { success: false, error: "User cancelled" } });
+    setDone(true);
+  };
+
+  if (done && !error) {
+    return (
+      <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400">
+        ✓ Backed Side {output.side === 0 ? "A" : "B"} with ${output.amount_usdc.toFixed(2)} USDC
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">💰</span>
+        <div>
+          <p className="font-medium text-ink text-sm">Back Side {output.side === 0 ? "A" : "B"}</p>
+          <p className="text-xs text-ink/50">Roaster · Solana · Parimutuel pool</p>
+        </div>
+      </div>
+      <div className="rounded-lg bg-ink/5 p-2 text-xs space-y-1">
+        <div className="flex justify-between gap-2">
+          <span className="text-ink/50">Amount</span>
+          <span className="text-ink">${output.amount_usdc.toFixed(2)} USDC</span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span className="text-ink/50">Platform fee (1.25%)</span>
+          <span className="text-ink">-${(output.platform_fee_usdc ?? output.amount_usdc * 0.0125).toFixed(4)}</span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span className="text-ink/50">Time weight</span>
+          <span className="text-ink">{output.time_weight?.toFixed(3) ?? "—"}</span>
+        </div>
+      </div>
+      <p className="text-xs text-ink/40">Earlier backing earns a higher time-weight and a larger share of winnings if your side wins.</p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={handleReject} disabled={busy} className="flex-1 rounded-lg border border-border py-2 text-sm text-ink/60 hover:bg-ink/5 transition-colors">Cancel</button>
+        <button onClick={handleApprove} disabled={busy} className="flex-1 rounded-lg bg-ink py-2 text-sm font-medium text-cream hover:opacity-80 transition-opacity disabled:opacity-50">
+          {busy ? "Signing…" : "Confirm & Back"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Velvet EVM transaction approval card ─────────────────────────────────────
+
+const VELVET_PENDING_LABELS: Record<string, string> = {
+  pendingDeposit:          "Deposit into Vault",
+  pendingWithdrawal:       "Withdraw from Vault",
+  pendingRebalance:        "Rebalance Portfolio",
+  pendingRemoveToken:      "Remove Token from Vault",
+  pendingFeeProposal:      "Propose Fee Change",
+  pendingFeeAction:        "Apply Fee Change",
+  pendingWhitelistUpdate:  "Update Whitelist",
+  pendingSettingsUpdate:   "Update Vault Settings",
+  pendingCollateralUpdate: "Update Collateral",
+  pendingBorrow:           "Borrow Against Vault",
+  pendingClaim:            "Claim Removed Tokens",
+  pendingWeightUpdate:     "Rebalance Vault Weights",
+};
+
+// ── Bitrefill payment card — handles actual USDC transfer for AI-initiated purchases ──
+
+const BITREFILL_SMART_WALLET_TOKENS: Record<string, { contract: `0x${string}`; chainId: number }> = {
+  usdc_base:     { contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", chainId: 8453  },
+  usdt_base:     { contract: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", chainId: 8453  },
+  usdc_erc20:    { contract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", chainId: 1     },
+  usdt_erc20:    { contract: "0xdAC17F958D2ee523a2206206994597C13D831ec7", chainId: 1     },
+  usdc_polygon:  { contract: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", chainId: 137   },
+  usdt_polygon:  { contract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", chainId: 137   },
+  usdc_arbitrum: { contract: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", chainId: 42161 },
+  usdt_arbitrum: { contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", chainId: 42161 },
+  usdc_optimism: { contract: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", chainId: 10    },
+  usdt_optimism: { contract: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", chainId: 10    },
+};
+
+function BitrefillPaymentCard({
+  toolCallId,
+  output,
+  addToolResult,
+}: {
+  toolCallId: string;
+  output: {
+    invoiceId: string;
+    paymentMethod: string;
+    paymentAddress: string;
+    paymentAmount: number | string;
+    paymentCurrency: string;
+    isTopup?: boolean;
+    expiresInMinutes?: number;
+  };
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+}) {
+  const { wallets } = useWallets();
+  const { client: smartWalletClient } = useSmartWallets();
+  const [state, setState] = useState<"idle" | "paying" | "done" | "error">("idle");
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  const handlePay = async () => {
+    setState("paying");
+    setErrMsg(null);
+    try {
+      const pm = output.paymentMethod ?? "usdc_base";
+      const isSolana = pm.includes("solana");
+
+      if (isSolana) {
+        const solWallet = wallets.find((w) => (w as any).chainType === "solana");
+        if (!solWallet) throw new Error("No Solana wallet connected");
+        const provider = await (solWallet as any).getSolanaProvider?.();
+        if (!provider) throw new Error("Solana provider unavailable");
+        const { createSolanaAdapterFromProvider } = await import("@circle-fin/adapter-solana");
+        const { arcKit, SOLANA_ARC_CHAIN } = await import("@/lib/arc-kit");
+        const adapter = await createSolanaAdapterFromProvider({ provider });
+        const token = pm.includes("usdt") ? "USDT" : "USDC";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await arcKit.send({ from: { adapter: adapter as any, chain: SOLANA_ARC_CHAIN }, to: output.paymentAddress, amount: String(output.paymentAmount), token });
+      } else {
+        const swConfig = BITREFILL_SMART_WALLET_TOKENS[pm];
+        let swSucceeded = false;
+
+        if (swConfig && smartWalletClient) {
+          try {
+            const { encodeFunctionData, erc20Abi, parseUnits } = await import("viem");
+            const calldata = encodeFunctionData({
+              abi: erc20Abi,
+              functionName: "transfer",
+              args: [output.paymentAddress as `0x${string}`, parseUnits(String(output.paymentAmount), 6)],
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await smartWalletClient.sendTransaction({ calls: [{ to: swConfig.contract, data: calldata }], chain: { id: swConfig.chainId } as any });
+            swSucceeded = true;
+          } catch (swErr: unknown) {
+            console.warn("[chat/bitrefill] Smart wallet failed, falling back to EOA:", (swErr as Error)?.message);
+          }
+        }
+
+        if (!swSucceeded) {
+          const { createViemAdapterFromProvider } = await import("@circle-fin/adapter-viem-v2");
+          const { arcKit, AGENT_CHAIN } = await import("@/lib/arc-kit");
+          const { Blockchain } = await import("@circle-fin/app-kit");
+          const EVM_CHAIN_MAP: Record<string, typeof Blockchain[keyof typeof Blockchain]> = {
+            usdc_base:     Blockchain.Base,
+            usdc_erc20:    Blockchain.Ethereum,
+            usdt_erc20:    Blockchain.Ethereum,
+            usdc_polygon:  Blockchain.Polygon,
+            usdt_polygon:  Blockchain.Polygon,
+            usdc_arbitrum: Blockchain.Arbitrum,
+            usdt_arbitrum: Blockchain.Arbitrum,
+          };
+          const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
+          if (!privyWallet) throw new Error("No EVM wallet connected");
+          const provider = await privyWallet.getEthereumProvider();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const adapter = await createViemAdapterFromProvider({ provider: provider as any });
+          const chain = EVM_CHAIN_MAP[pm] ?? AGENT_CHAIN;
+          const token = pm.includes("usdt") ? "USDT" : "USDC";
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await arcKit.send({ from: { adapter, chain: chain as any }, to: output.paymentAddress, amount: String(output.paymentAmount), token });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if ((result as any)?.state && (result as any).state !== "success") throw new Error("Transfer did not complete");
+        }
+      }
+
+      setState("done");
+      addToolResult({
+        tool: "buy_bitrefill_product",
+        toolCallId,
+        output: {
+          paid: true,
+          invoiceId: output.invoiceId,
+          isTopup: output.isTopup,
+          tip: `USDC payment confirmed on-chain. Call poll_bitrefill_order(invoiceId="${output.invoiceId}", isTopup=${!!output.isTopup}) NOW. Keep retrying every ~3 s (up to 20 times) until status is complete/failed/expired. Do not ask the user anything.`,
+        },
+      });
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message ?? "Payment failed";
+      const friendly =
+        msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("reject") || msg.toLowerCase().includes("denied")
+          ? "Payment cancelled."
+          : msg;
+      setErrMsg(friendly);
+      setState("error");
+      addToolResult({
+        tool: "buy_bitrefill_product",
+        toolCallId,
+        output: { paid: false, error: friendly, invoiceId: output.invoiceId },
+      });
+    }
+  };
+
+  const handleCancel = () => {
+    addToolResult({
+      tool: "buy_bitrefill_product",
+      toolCallId,
+      output: { paid: false, error: "Cancelled by user", invoiceId: output.invoiceId },
+    });
+  };
+
+  if (state === "done") {
+    return (
+      <div className="my-2 rounded-xl border border-green-700/30 bg-green-900/10 px-4 py-2">
+        <p className="text-xs text-green-400">✓ Payment sent — confirming with Bitrefill…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-2 rounded-xl border border-[#2A2B27] bg-[#1B1C19] px-4 py-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-[#F2F0E8]">Confirm Payment</p>
+        {output.expiresInMinutes && (
+          <span className="text-[10px] text-[#A7A79A]">Expires in {output.expiresInMinutes}m</span>
+        )}
+      </div>
+      <div className="rounded-lg bg-[#141513] px-3 py-2 flex items-center justify-between">
+        <span className="text-xs text-[#A7A79A]">Amount</span>
+        <span className="font-mono text-sm font-bold text-[#F2F0E8]">
+          {output.paymentAmount} {output.paymentCurrency}
+        </span>
+      </div>
+      {errMsg && <p className="text-xs text-red-400">{errMsg}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={handleCancel}
+          disabled={state === "paying"}
+          className="flex-1 rounded-xl border border-[#2A2B27] py-2.5 text-xs font-medium text-[#A7A79A] hover:bg-white/[0.04] transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handlePay}
+          disabled={state === "paying"}
+          className="flex-1 rounded-xl bg-[#8FAE82] py-2.5 text-xs font-semibold text-[#141513] disabled:opacity-50 transition-opacity"
+        >
+          {state === "paying" ? "Sending…" : `Pay ${output.paymentAmount} ${output.paymentCurrency}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Returns the pending marker key from a Velvet tool result, or null if not Velvet pending. */
+function velvetPendingKey(output: unknown): string | null {
+  if (!output || typeof output !== "object") return null;
+  for (const key of Object.keys(VELVET_PENDING_LABELS)) {
+    if ((output as Record<string, unknown>)[key] === true) return key;
+  }
+  return null;
+}
+
+function VelvetTxApprovalCard({
+  toolCallId,
+  output,
+  addToolResult,
+}: {
+  toolCallId: string;
+  output: Record<string, unknown>;
+  addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
+}) {
+  const { wallets } = useWallets();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pendingKey = velvetPendingKey(output);
+  const label = pendingKey ? VELVET_PENDING_LABELS[pendingKey] : "Velvet Transaction";
+  // Standard shape: output.tx = { to, data, gas_limit?, gas_price? }
+  // Weight-update shape: output.handler + output.call_data + output.estimate_gas + output.gas_price
+  const tx = output.tx as { to?: string; data?: string; gas_limit?: string; gas_price?: string } | undefined;
+  const txTo   = (tx?.to   ?? output.handler)  as string | undefined;
+  const txData = (tx?.data ?? output.call_data) as string | undefined;
+  const txGas  = (tx?.gas_limit ?? output.estimate_gas) as string | undefined;
+  const txGasPrice = (tx?.gas_price ?? output.gas_price) as string | undefined;
+
+  const handleApprove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (!txTo || !txData) throw new Error("Transaction data missing");
+      const evmWallet = wallets?.find((w) => w.walletClientType === "privy") ?? wallets?.[0];
+      if (!evmWallet) throw new Error("EVM wallet not connected");
+      const provider = await (evmWallet as any).getEthereumProvider?.();
+      if (!provider) throw new Error("Could not get wallet provider");
+      const txHash = await provider.request({
+        method: "eth_sendTransaction",
+        params: [{
+          to: txTo,
+          data: txData,
+          ...(txGas ? { gas: "0x" + parseInt(txGas).toString(16) } : {}),
+          ...(txGasPrice ? { gasPrice: "0x" + parseInt(txGasPrice).toString(16) } : {}),
+        }],
+      });
+      setDone(true);
+      addToolResult({ tool: pendingKey ?? "velvet_tx", toolCallId, output: { success: true, txHash } });
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message ?? "Transaction failed";
+      setError(msg);
+      addToolResult({ tool: pendingKey ?? "velvet_tx", toolCallId, output: { success: false, error: msg } });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReject = () => {
+    addToolResult({ tool: pendingKey ?? "velvet_tx", toolCallId, output: { success: false, error: "User cancelled" } });
+    setDone(true);
+  };
+
+  if (done && !error) {
+    return (
+      <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400">
+        ✓ {label} submitted on-chain
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">🏛️</span>
+        <div>
+          <p className="font-medium text-ink text-sm">{label}</p>
+          <p className="text-xs text-ink/50">Velvet Capital · Base (EVM)</p>
+        </div>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={handleReject}
+          disabled={busy}
+          className="flex-1 rounded-lg border border-border py-2 text-sm text-ink/60 hover:bg-ink/5 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleApprove}
+          disabled={busy}
+          className="flex-1 rounded-lg bg-ink py-2 text-sm font-medium text-cream hover:opacity-80 transition-opacity disabled:opacity-50"
+        >
+          {busy ? "Signing…" : "Sign & Execute"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function FlashTxApprovalCard({
@@ -251,7 +708,7 @@ function FlashSessionApprovalCard({
   if (done && !error) {
     return (
       <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400">
-        ✓ Trading session created — Bottie can now trade without wallet popups
+        ✓ Trading session created — Bluvfi can now trade without wallet popups
       </div>
     );
   }
@@ -389,21 +846,29 @@ export function ChatSheet({ visible }: ChatSheetProps) {
 
   const accounts = (user?.linkedAccounts as any[]) ?? [];
   const walletAddress = user?.smartWallet?.address ?? user?.wallet?.address;
-  const evmWallet = accounts.find((a: any) => a.chainType === "ethereum" && a.walletClientType === "privy");
-  const { balance: walletBalance } = useUsdcBalance(walletAddress as `0x${string}` | undefined, evmWallet?.id);
-
   const solanaWallet = accounts.find((a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
   const solanaAddress = solanaWallet?.address as string | undefined;
-  const { balance: solanaBalance } = useSolanaBalance(solanaAddress, solanaWallet?.id);
+
+  // Balance values come from dashboardData (registered by page.tsx via registerDashboardData).
+  // This keeps the agent in sync with exactly what the dashboard displays — no separate fetch.
+  const evmUsdc = dashboardData?.evmUsdc;
+  const evmUsdt = dashboardData?.evmUsdt;
+  const solUsdc = dashboardData?.solUsdc;
+  const solUsdt = dashboardData?.solUsdt;
 
   const bodyRef = useRef<Record<string, unknown>>({});
   bodyRef.current = {
     walletAddress,
     solanaAddress,
     userName: name,
-    walletBalance,
-    solanaBalance,
+    evmUsdc,
+    evmUsdt,
+    solUsdc,
+    solUsdt,
     paidBillIds,
+    totalBillsDueUsd: dashboardData?.totalBillsDueUsd,
+    portfolioValueUsd: dashboardData?.portfolioValueUsd,
+    billCount: dashboardData?.billCount,
   };
 
   const getAccessTokenRef = useRef(getAccessToken);
@@ -411,7 +876,11 @@ export function ChatSheet({ visible }: ChatSheetProps) {
 
   const transport = useMemo(() => {
     const liveBody: Record<string, unknown> = {};
-    for (const key of ["walletAddress", "solanaAddress", "userName", "walletBalance", "solanaBalance", "paidBillIds"]) {
+    for (const key of [
+      "walletAddress", "solanaAddress", "userName",
+      "evmUsdc", "evmUsdt", "solUsdc", "solUsdt", "paidBillIds",
+      "totalBillsDueUsd", "portfolioValueUsd", "billCount",
+    ]) {
       Object.defineProperty(liveBody, key, {
         get: () => bodyRef.current[key],
         enumerable: true,
@@ -510,7 +979,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
           visible ? "translate-y-0" : "translate-y-full"
         }`}
       >
-        {/* Fix 5: Centered Bottie logo, tappable to close */}
+        {/* Bluvfi logo, tappable to close */}
         <div className="flex-none px-5 pt-3 pb-2">
           <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
           <div className="flex justify-center">
@@ -518,7 +987,10 @@ export function ChatSheet({ visible }: ChatSheetProps) {
               onClick={close}
               className="transition-opacity hover:opacity-60"
             >
-              <img src="/Bottie.jpg" alt="Bottie" className="h-8 w-8 rounded-full object-cover" />
+              <div className="relative">
+                <img src="/Bluvfiv2.jpg" alt="Bluvfi" className="h-8 w-8 rounded-full object-cover" />
+                <span className="absolute -top-1 -right-5 rounded text-[9px] font-bold tracking-wide uppercase bg-violet-500/20 text-violet-400 px-1 py-px leading-none">beta</span>
+              </div>
             </button>
           </div>
         </div>
@@ -533,7 +1005,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                   {greeting}{name ? `, ${name}` : ""}. 👋
                 </p>
                 <p className="mt-3 font-body text-[1rem] leading-relaxed text-ink/60">
-                  I&rsquo;m Bottie, your financial assistant. Ask me to pay your bills, invest in stocks, or check your portfolio.
+                  I&rsquo;m Bluvfi, your financial assistant. Ask me to pay your bills, invest in stocks, or check your portfolio.
                 </p>
               </div>
             )}
@@ -587,6 +1059,36 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                       if (
                         tp.state === "output-available" &&
                         tp.output &&
+                        (tp.output as any)?.pendingRoasterBond === true
+                      ) {
+                        return (
+                          <RoasterBondCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult}
+                          />
+                        );
+                      }
+
+                      if (
+                        tp.state === "output-available" &&
+                        tp.output &&
+                        (tp.output as any)?.pendingRoasterBack === true
+                      ) {
+                        return (
+                          <RoasterBackCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult}
+                          />
+                        );
+                      }
+
+                      if (
+                        tp.state === "output-available" &&
+                        tp.output &&
                         (tp.output as any)?.pendingFlashRevoke === true
                       ) {
                         return (
@@ -621,6 +1123,38 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                       ) {
                         return (
                           <FlashTxApprovalCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult}
+                          />
+                        );
+                      }
+
+                      if (
+                        tp.state === "output-available" &&
+                        tp.output &&
+                        velvetPendingKey(tp.output) !== null
+                      ) {
+                        return (
+                          <VelvetTxApprovalCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as Record<string, unknown>}
+                            addToolResult={addToolResult}
+                          />
+                        );
+                      }
+
+                      // Bitrefill payment — show a "Confirm Payment" card that sends USDC client-side
+                      if (
+                        tp.state === "output-available" &&
+                        tp.output &&
+                        (tp.output as any)?.pendingBitrefillPayment === true &&
+                        !(tp.output as any)?.isAddressBased
+                      ) {
+                        return (
+                          <BitrefillPaymentCard
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}

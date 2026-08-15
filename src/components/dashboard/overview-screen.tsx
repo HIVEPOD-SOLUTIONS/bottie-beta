@@ -277,7 +277,7 @@ export function OverviewScreen({
     : [...new Set(data.positions.map((p) => p.vault.id))];
 
   const walletAddress = user?.smartWallet?.address ?? user?.wallet?.address;
-  const narrationCacheKey = walletAddress ? `bottie:narration-cache:${walletAddress}` : null;
+  const narrationCacheKey = walletAddress ? `bluvfi:narration-cache:${walletAddress}` : null;
 
   // Fetch AI narration when activities exist
   const activityCount = activities?.length ?? 0;
@@ -495,7 +495,7 @@ export function OverviewScreen({
                     <div className={cardBase}>
                       <div className="pointer-events-none absolute inset-0 rounded-[inherit] border" style={{ background: emeraldMetal.background, borderColor: emeraldMetal.borderColor }} />
                       <CardGrain />
-                      <span className="pointer-events-none absolute right-5 bottom-5 font-display text-[3rem] leading-none text-ink/[0.04] select-none" style={{ transform: "rotate(-8deg)" }}>Bottie</span>
+                      <span className="pointer-events-none absolute right-5 bottom-5 font-display text-[3rem] leading-none text-ink/[0.04] select-none" style={{ transform: "rotate(-8deg)" }}>Bluvfi</span>
                       <div className="relative flex aspect-[1.6/1] flex-col p-6">
                         <AnimatePresence mode="wait" initial={false}>
                           {flippedCard !== 0 ? (
@@ -562,7 +562,7 @@ export function OverviewScreen({
                     <div className={cardBase}>
                       <div className="pointer-events-none absolute inset-0 rounded-[inherit] border" style={{ background: goldMetal.background, borderColor: goldMetal.borderColor }} />
                       <CardGrain />
-                      <span className="pointer-events-none absolute right-5 bottom-5 font-display text-[3rem] leading-none text-ink/[0.04] select-none" style={{ transform: "rotate(-8deg)" }}>Bottie</span>
+                      <span className="pointer-events-none absolute right-5 bottom-5 font-display text-[3rem] leading-none text-ink/[0.04] select-none" style={{ transform: "rotate(-8deg)" }}>Bluvfi</span>
                       <div className="relative flex aspect-[1.6/1] flex-col p-6">
                         <AnimatePresence mode="wait" initial={false}>
                           {flippedCard !== 1 ? (

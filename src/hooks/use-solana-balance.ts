@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 
-const SOLANA_RPC = `https://solana-devnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`;
-const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-const PRIVY_TOKEN = `solana-devnet:${USDC_MINT}`;
+// Mainnet USDC mint on Solana
+const SOLANA_RPC = `https://solana-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`;
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const PRIVY_TOKEN = `solana:${USDC_MINT}`;
 
 async function fetchPrivySolanaBalance(walletId: string): Promise<number> {
   const res = await fetch(

@@ -5,15 +5,12 @@
  *   - Without PAYMENT-SIGNATURE: returns 402 with PAYMENT-REQUIRED header
  *   - With valid PAYMENT-SIGNATURE: settles the payment and returns premium content
  *
- * Price: $0.01 USDC (10_000 base units)
+ * Price: $0.000001 USDC (1 base unit) — Circle protocol minimum
  */
 
-import {
-  buildPaymentRequirements,
-  settlePayment,
-} from "@/lib/circle-gateway";
+import { buildPaymentRequirements } from "@/lib/circle-gateway";
 
-const PRICE_USD = 0.01; // $0.01
+const PRICE_USD = 0.000001; // $0.000001 — Circle NanoPayments protocol minimum
 
 function getSellerAddress(): string {
   const addr = process.env.CIRCLE_SELLER_ADDRESS;
@@ -55,34 +52,38 @@ export async function GET(req: Request) {
     });
   }
 
-  // Settle the payment via Circle Gateway
-  const settlement = await settlePayment(paymentSignature, requirements);
+  // Step 1: verify signature validity before committing any resources
+  const { verifyPayment, settlePayment } = await import("@/lib/circle-gateway");
+  const verification = await verifyPayment(paymentSignature, requirements);
 
-  if (!settlement.success) {
+  if (!verification.isValid) {
     return Response.json(
-      {
-        error: "Payment settlement failed",
-        reason: settlement.errorReason,
-      },
+      { error: "Invalid payment signature", reason: verification.invalidReason },
       { status: 402 },
     );
   }
 
-  // Payment confirmed — serve premium content
-  return Response.json(
+  // Step 2: serve content immediately — verification is sufficient proof of payment
+  const response = Response.json(
     {
-      content: "Payment receipt confirmed via Circle Gateway nanopayments",
-      paidBy: settlement.payer,
-      transaction: settlement.transaction,
+      content: "Payment confirmed via Circle Gateway nanopayments",
+      paidBy: verification.payer,
       priceUSDC: PRICE_USD,
-      chain: "Base Sepolia",
+      chain: "Base",
     },
     {
       headers: {
         "PAYMENT-RESPONSE": Buffer.from(
-          JSON.stringify({ success: true, transaction: settlement.transaction }),
+          JSON.stringify({ success: true }),
         ).toString("base64"),
       },
     },
   );
+
+  // Step 3: settle asynchronously — doesn't block the response
+  settlePayment(paymentSignature, requirements).catch((err) =>
+    console.error("[nanopay/sell] settle error:", err?.message),
+  );
+
+  return response;
 }

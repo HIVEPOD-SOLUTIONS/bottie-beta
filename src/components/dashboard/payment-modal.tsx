@@ -3,13 +3,23 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useWallets } from "@privy-io/react-auth";
-import { arcKit, AGENT_CHAIN } from "@/lib/arc-kit";
+import { arcKit, AGENT_CHAIN, SOLANA_ARC_CHAIN } from "@/lib/arc-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseUnits } from "viem";
 
-const USDC_CONTRACT = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
-const RECEIVER = "0x9404966338eB27aF420a952574d777598Bbb58c4" as const;
+const USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const; // Base mainnet USDC
+const EVM_RECEIVER = "0x9404966338eB27aF420a952574d777598Bbb58c4" as const;
+const SOL_RECEIVER = process.env.NEXT_PUBLIC_SOLANA_BILL_RECEIVER ?? "";
+
+type Network = "evm" | "solana";
+
+/** Shows the right number of decimal places for any USDC amount down to $0.000001. */
+function fmtUsdc(n: number): string {
+  if (n >= 0.01) return n.toFixed(2);
+  if (n >= 0.0001) return n.toFixed(4);
+  return n.toFixed(6);
+}
 
 const TRANSFER_ABI = [
   {
@@ -30,7 +40,9 @@ interface PaymentModalProps {
   icon: string;
   amount: number;
   ctaLabel?: string;
-  onSuccess: (txHash: string) => void;
+  /** Lock to a specific network; omit to show the selector */
+  network?: Network;
+  onSuccess: (txHash: string, chain: Network) => void;
   onClose: () => void;
 }
 
@@ -40,6 +52,7 @@ export function PaymentModal({
   icon,
   amount,
   ctaLabel,
+  network: forcedNetwork,
   onSuccess,
   onClose,
 }: PaymentModalProps) {
@@ -47,7 +60,14 @@ export function PaymentModal({
   const [arcPending, setArcPending] = useState(false);
   const [arcError, setArcError] = useState<string | null>(null);
 
-  // wagmi fallback — only used when no Privy wallet is available
+  const hasEvmWallet = wallets.some((w) => w.walletClientType === "privy" || (w as any).chainType === "ethereum");
+  const hasSolanaWallet = wallets.some((w) => (w as any).chainType === "solana");
+  const defaultNetwork: Network = forcedNetwork ?? (hasEvmWallet ? "evm" : "solana");
+  const [selectedNetwork, setSelectedNetwork] = useState<Network>(defaultNetwork);
+
+  useEffect(() => { if (forcedNetwork) setSelectedNetwork(forcedNetwork); }, [forcedNetwork]);
+
+  // wagmi fallback — only used for non-Privy EVM wallets
   const {
     writeContract,
     data: txHash,
@@ -61,65 +81,93 @@ export function PaymentModal({
 
   useEffect(() => {
     if (isConfirmed && txHash) {
-      onSuccess(txHash);
+      onSuccess(txHash, "evm");
     }
   }, [isConfirmed, txHash, onSuccess]);
 
-  const handlePay = useCallback(async () => {
-    if (arcPending || isPending || isConfirming) return;
-    setArcError(null);
-
-    // Prefer Privy embedded wallet — gasless via Arc AppKit send
-    const privyWallet =
-      wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-
+  // ── EVM payment ────────────────────────────────────────────────────────────
+  const payEvm = useCallback(async () => {
+    const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
     if (privyWallet) {
-      setArcPending(true);
-      try {
-        const provider = await privyWallet.getEthereumProvider();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const adapter = await createViemAdapterFromProvider({ provider: provider as any });
-        const result = await arcKit.send({
-          from: { adapter, chain: AGENT_CHAIN },
-          to: RECEIVER,
-          amount: amount.toFixed(6),
-          token: "USDC",
-        });
-        if ((result as any)?.state && (result as any).state !== "success") {
-          throw new Error("Transfer did not complete");
-        }
-        const hash =
-          (result as any)?.hash ??
-          (result as any)?.transactionHash ??
-          `arc-${Date.now()}`;
-        onSuccess(hash);
-      } catch (err: any) {
-        console.error("[PaymentModal] arcKit.send failed:", err);
-        const msg = (err?.message ?? "").toLowerCase();
-        setArcError(
-          msg.includes("reject") || msg.includes("cancel") || msg.includes("denied")
-            ? "Payment cancelled."
-            : "Payment could not be processed. Please try again.",
-        );
-      } finally {
-        setArcPending(false);
-      }
+      const provider = await privyWallet.getEthereumProvider();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const adapter = await createViemAdapterFromProvider({ provider: provider as any });
+      const result = await arcKit.send({
+        from: { adapter, chain: AGENT_CHAIN },
+        to: EVM_RECEIVER,
+        amount: amount.toFixed(6),
+        token: "USDC",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((result as any)?.state && (result as any).state !== "success") throw new Error("Transfer did not complete");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const hash = (result as any)?.hash ?? (result as any)?.transactionHash ?? `arc-${Date.now()}`;
+      onSuccess(hash, "evm");
       return;
     }
-
-    // wagmi fallback for non-Privy wallets (requires gas)
+    // wagmi fallback for external wallets
     reset();
     writeContract({
       address: USDC_CONTRACT,
       abi: TRANSFER_ABI,
       functionName: "transfer",
-      args: [RECEIVER, parseUnits(amount.toFixed(6), 6)],
+      args: [EVM_RECEIVER, parseUnits(amount.toFixed(6), 6)],
     });
-  }, [arcPending, isPending, isConfirming, wallets, amount, onSuccess, reset, writeContract]);
+  }, [wallets, amount, onSuccess, reset, writeContract]);
+
+  // ── Solana payment (Arc AppKit) ────────────────────────────────────────────
+  const paySolana = useCallback(async () => {
+    const solWallet = wallets.find((w) => (w as any).chainType === "solana");
+    if (!solWallet) throw new Error("No Solana wallet connected");
+    if (!SOL_RECEIVER) throw new Error("Solana receiver not configured");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const solanaProvider = await (solWallet as any).getSolanaProvider?.();
+    if (!solanaProvider) throw new Error("Solana provider unavailable");
+
+    const { createSolanaAdapterFromProvider } = await import("@circle-fin/adapter-solana");
+    const adapter = await createSolanaAdapterFromProvider({ provider: solanaProvider });
+
+    const result = await arcKit.send({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      from: { adapter: adapter as any, chain: SOLANA_ARC_CHAIN },
+      to: SOL_RECEIVER,
+      amount: amount.toFixed(6),
+      token: "USDC",
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((result as any)?.state && (result as any).state !== "success") throw new Error("Transfer did not complete");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hash = (result as any)?.hash ?? (result as any)?.transactionHash ?? `sol-${Date.now()}`;
+    onSuccess(hash, "solana");
+  }, [wallets, amount, onSuccess]);
+
+  const handlePay = useCallback(async () => {
+    if (arcPending || isPending || isConfirming) return;
+    setArcError(null);
+    setArcPending(true);
+    try {
+      if (selectedNetwork === "solana") {
+        await paySolana();
+      } else {
+        await payEvm();
+      }
+    } catch (err: any) {
+      console.error("[PaymentModal] payment failed:", err);
+      const msg = (err?.message ?? "").toLowerCase();
+      setArcError(
+        msg.includes("reject") || msg.includes("cancel") || msg.includes("denied")
+          ? "Payment cancelled."
+          : "Payment could not be processed. Please try again.",
+      );
+    } finally {
+      setArcPending(false);
+    }
+  }, [arcPending, isPending, isConfirming, selectedNetwork, paySolana, payEvm]);
 
   const isBusy = arcPending || isPending || isConfirming;
 
-  let btnLabel = ctaLabel ?? `Pay $${amount.toFixed(2)}`;
+  let btnLabel = ctaLabel ?? `Pay $${fmtUsdc(amount)}`;
   if (arcPending || isPending) btnLabel = "Confirm in wallet…";
   if (isConfirming) btnLabel = "Processing payment…";
 
@@ -147,7 +195,7 @@ export function PaymentModal({
         </div>
 
         {/* Details card */}
-        <div className="mb-6 rounded-2xl bg-[#141513] border border-[#2A2B27] p-4">
+        <div className="mb-4 rounded-2xl bg-[#141513] border border-[#2A2B27] p-4">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-3xl">
               {icon}
@@ -160,10 +208,37 @@ export function PaymentModal({
           <div className="flex items-center justify-between border-t border-[#2A2B27] pt-3">
             <span className="text-sm text-[#A7A79A]">Amount due</span>
             <span className="text-2xl font-bold text-[#F2F0E8]">
-              ${amount.toFixed(2)}
+              ${fmtUsdc(amount)}
             </span>
           </div>
         </div>
+
+        {/* Network selector — only shown when BOTH wallets are connected and no network is forced.
+            When only one wallet is present the defaultNetwork already auto-selects the right one. */}
+        {!forcedNetwork && hasEvmWallet && hasSolanaWallet && (
+          <div className="mb-4 flex gap-2">
+            <button
+              onClick={() => setSelectedNetwork("evm")}
+              disabled={!hasEvmWallet || isBusy}
+              className={`flex-1 rounded-xl border py-2 text-xs font-medium transition-colors
+                ${selectedNetwork === "evm"
+                  ? "border-[#8FAE82] bg-[#8FAE82]/10 text-[#8FAE82]"
+                  : "border-[#2A2B27] text-[#A7A79A] hover:border-[#8FAE82]/40 disabled:opacity-40"}`}
+            >
+              🔷 Base (EVM)
+            </button>
+            <button
+              onClick={() => setSelectedNetwork("solana")}
+              disabled={!hasSolanaWallet || isBusy}
+              className={`flex-1 rounded-xl border py-2 text-xs font-medium transition-colors
+                ${selectedNetwork === "solana"
+                  ? "border-[#9945FF] bg-[#9945FF]/10 text-[#9945FF]"
+                  : "border-[#2A2B27] text-[#A7A79A] hover:border-[#9945FF]/40 disabled:opacity-40"}`}
+            >
+              ◎ Solana
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         {friendlyError && (
@@ -175,10 +250,10 @@ export function PaymentModal({
         {/* CTA */}
         <button
           onClick={handlePay}
-          disabled={isBusy}
+          disabled={isBusy || (selectedNetwork === "solana" && !hasSolanaWallet)}
           className="w-full rounded-2xl bg-[#8FAE82] py-3.5 text-sm font-semibold text-[#141513] disabled:opacity-60"
         >
-          {btnLabel}
+          {isBusy ? btnLabel : `${ctaLabel ?? `Pay $${fmtUsdc(amount)}`} · ${selectedNetwork === "solana" ? "Solana" : "Base"}`}
         </button>
         <button
           onClick={onClose}

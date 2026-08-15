@@ -3,7 +3,10 @@ import { eq, desc } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { investments } from "@/lib/db/schema";
-import { INVESTMENT_OPTIONS } from "@/lib/constants";
+import { DEMO_ASSETS } from "@/lib/demo-data";
+
+// Build a lookup map from DEMO_ASSETS (source of truth for price + icon)
+const ASSET_MAP = Object.fromEntries(DEMO_ASSETS.map((a) => [a.symbol, a]));
 
 export async function GET() {
   let userId: string;
@@ -22,28 +25,34 @@ export async function GET() {
       .orderBy(desc(investments.createdAt));
 
     const portfolio = positions.map((pos) => {
-      const market = INVESTMENT_OPTIONS[pos.symbol];
-      const currentPrice = market?.currentPriceUsd ?? Number(pos.avgPriceUsd);
-      const currentValue = currentPrice * Number(pos.shares);
-      const costBasis = Number(pos.avgPriceUsd) * Number(pos.shares);
+      const market = ASSET_MAP[pos.symbol];
+      const currentPrice = market?.priceUsd ?? Number(pos.avgPriceUsd);
+      const sharesNum = Number(pos.shares);
+      const avgPrice = Number(pos.avgPriceUsd);
+      const currentValue = currentPrice * sharesNum;
+      const costBasis = avgPrice * sharesNum;
       return {
-        ...pos,
-        currentPriceUsd: currentPrice.toFixed(2),
-        currentValueUsd: currentValue.toFixed(2),
-        gainLossUsd: (currentValue - costBasis).toFixed(2),
+        id: pos.id,
+        symbol: pos.symbol,
+        name: pos.name,
+        type: pos.type,
+        shares: sharesNum,
+        avgPriceUsd: avgPrice,
+        currentPriceUsd: currentPrice,
+        currentValueUsd: currentValue,
+        gainLossUsd: currentValue - costBasis,
+        gainLossPct: costBasis > 0 ? ((currentValue - costBasis) / costBasis) * 100 : 0,
+        icon: market?.icon ?? "📈",
         description: market?.description ?? "",
-        assetType: market?.type ?? pos.type,
+        change24h: market?.change24h ?? 0,
       };
     });
 
-    const totalValueUsd = portfolio.reduce(
-      (sum, p) => sum + Number(p.currentValueUsd),
-      0
-    );
+    const totalValueUsd = portfolio.reduce((sum, p) => sum + p.currentValueUsd, 0);
 
-    return NextResponse.json({ portfolio, totalValueUsd: totalValueUsd.toFixed(2) });
+    return NextResponse.json({ portfolio, totalValueUsd });
   } catch {
-    return NextResponse.json({ portfolio: [], totalValueUsd: "0.00" });
+    return NextResponse.json({ portfolio: [], totalValueUsd: 0 });
   }
 }
 
@@ -77,10 +86,10 @@ export async function POST(req: Request) {
   }
 
   const sym = symbol.toUpperCase();
-  const market = INVESTMENT_OPTIONS[sym];
+  const market = ASSET_MAP[sym];
   if (!market) {
     return NextResponse.json(
-      { error: `Unknown symbol: ${sym}` },
+      { error: `Unknown symbol: ${sym}. Available: ${Object.keys(ASSET_MAP).join(", ")}` },
       { status: 400 }
     );
   }

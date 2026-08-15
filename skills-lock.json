@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "bitrefill": {
+      "source": "bitrefill/agents",
+      "sourceType": "github",
+      "skillPath": "skills/bitrefill/SKILL.md",
+      "computedHash": "4f0d712dad9c0d7fe5b9979db3bc041f4c8a8f35a80ed6831aa284231cee1c34"
+    },
+    "cryptorefills-buy": {
+      "source": "cryptorefills/agents",
+      "sourceType": "github",
+      "skillPath": "skills/cryptorefills-buy/SKILL.md",
+      "computedHash": "74665b667046d56eea0b50752bf937ea4bcf74bccdc4d1feccecac6d5dbcceed"
+    },
+    "cryptorefills-catalog": {
+      "source": "cryptorefills/agents",
+      "sourceType": "github",
+      "skillPath": "skills/cryptorefills-catalog/SKILL.md",
+      "computedHash": "6b915b381d46039aa26dd2d274e1e1504e63a53482ed8912432debd16b309c0c"
+    },
+    "cryptorefills-x402": {
+      "source": "cryptorefills/agents",
+      "sourceType": "github",
+      "skillPath": "skills/cryptorefills-x402/SKILL.md",
+      "computedHash": "ec24ac46d177082ef85e044c49f289afbc63372b86fc0d429c17624244ca0140"
+    }
+  }
+}

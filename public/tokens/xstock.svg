@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">
+  <rect width="40" height="40" rx="10" fill="#0D1117"/>
+  <rect width="40" height="40" rx="10" fill="url(#bg)"/>
+  <!-- Rising chart bars -->
+  <rect x="7" y="26" width="4" height="7" rx="1.5" fill="#2DD4BF" opacity="0.5"/>
+  <rect x="13" y="21" width="4" height="12" rx="1.5" fill="#2DD4BF" opacity="0.7"/>
+  <rect x="19" y="16" width="4" height="17" rx="1.5" fill="#2DD4BF" opacity="0.85"/>
+  <rect x="25" y="10" width="4" height="23" rx="1.5" fill="#2DD4BF"/>
+  <!-- Upward trend arrow -->
+  <path d="M8 25 L15 18 L21 22 L32 10" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M27 8 L32 10 L30 15" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F2027"/>
+      <stop offset="100%" stop-color="#0D1B1A"/>
+    </linearGradient>
+  </defs>
+</svg>

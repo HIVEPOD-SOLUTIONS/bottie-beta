@@ -2,19 +2,17 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { DEMO_ASSETS, ASSET_PRICES, type DemoAsset } from "@/lib/demo-data";
-import { useDemoState, type PortfolioPosition } from "@/contexts/demo-state-context";
-import { PaymentModal } from "./payment-modal";
 import { useChatSheet } from "@/contexts/chat-context";
+import { useInvestments, type InvestmentPosition } from "@/hooks/use-investments";
 import { VelvetTradingSection } from "./velvet-trading-section";
 import { FlashTradeSection } from "./flash-trade-section";
 import { FlashExtrasSection } from "./flash-extras-section";
-
-const TYPE_LABELS: Record<string, string> = {
-  stock: "Stock",
-  ipo:   "Pre-IPO",
-  etf:   "ETF",
-};
+import { GrailSection } from "./grail-section";
+import { RoasterSection } from "./roaster-section";
+import { NosanaSection } from "./nosana-section";
+import { DomaSection } from "./doma-section";
+import { XStocksSection } from "./xstocks-section";
+import { DydxSection } from "./dydx-section";
 
 const MARKET_TABS = [
   { key: "all",    label: "All"            },
@@ -24,11 +22,8 @@ const MARKET_TABS = [
   { key: "crypto", label: "Crypto Trading" },
 ] as const;
 
-function PortfolioCard({ pos }: { pos: PortfolioPosition }) {
-  const currentPrice = ASSET_PRICES[pos.symbol] ?? pos.avgPriceUsd;
-  const currentValue = pos.shares * currentPrice;
-  const gainLoss = currentValue - pos.shares * pos.avgPriceUsd;
-  const isPos = gainLoss >= 0;
+function PortfolioCard({ pos }: { pos: InvestmentPosition }) {
+  const isPos = pos.gainLossUsd >= 0;
 
   return (
     <div className="rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4">
@@ -43,116 +38,55 @@ function PortfolioCard({ pos }: { pos: PortfolioPosition }) {
           </div>
         </div>
         <div className="text-right">
-          <p className="font-semibold text-[#F2F0E8]">${currentValue.toFixed(2)}</p>
+          <p className="font-semibold text-[#F2F0E8]">${pos.currentValueUsd.toFixed(2)}</p>
           <p className={`text-xs font-medium ${isPos ? "text-green-400" : "text-red-400"}`}>
-            {isPos ? "+" : ""}${gainLoss.toFixed(2)}
+            {isPos ? "+" : ""}${pos.gainLossUsd.toFixed(2)}
+            {" "}
+            <span className="opacity-70">({isPos ? "+" : ""}{pos.gainLossPct.toFixed(1)}%)</span>
           </p>
         </div>
       </div>
       <div className="mt-3 flex gap-4 text-xs text-[#A7A79A]">
         <span>{pos.shares.toFixed(4)} shares</span>
         <span>avg ${pos.avgPriceUsd.toFixed(2)}</span>
-        <span>now ${currentPrice.toFixed(2)}</span>
+        <span>now ${pos.currentPriceUsd.toFixed(2)}</span>
       </div>
     </div>
   );
 }
 
-interface BuySheetProps {
-  asset: DemoAsset;
-  onClose: () => void;
-  onConfirm: (shares: number, total: number) => void;
-}
 
-function BuySheet({ asset, onClose, onConfirm }: BuySheetProps) {
-  const [sharesInput, setSharesInput] = useState("1");
-  const [confirming, setConfirming] = useState(false);
+// ── xStocks platform card (shown in Stocks tab) ───────────────────────────────
 
-  const shares = Math.max(0, Number(sharesInput) || 0);
-  const total = shares * asset.priceUsd;
-
-  if (confirming) {
-    return (
-      <PaymentModal
-        title={`Buy ${asset.symbol}`}
-        subtitle={`${shares} share${shares !== 1 ? "s" : ""} · ${asset.name}`}
-        icon={asset.icon}
-        amount={total}
-        ctaLabel={`Invest $${total.toFixed(2)}`}
-        onSuccess={() => onConfirm(shares, total)}
-        onClose={() => setConfirming(false)}
-      />
-    );
-  }
-
-  return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-t-3xl bg-[#1B1C19] p-6 pb-10 border-t border-[#2A2B27]">
-        <div className="mb-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">{asset.icon}</span>
-            <div>
-              <h3 className="text-lg font-semibold text-[#F2F0E8]">Buy {asset.symbol}</h3>
-              <p className="text-xs text-[#A7A79A]">{asset.name}</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-full p-1.5 text-[#A7A79A] hover:bg-white/[0.06]"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Price info */}
-        <div className="mb-4 rounded-2xl border border-[#2A2B27] bg-[#141513] p-4">
-          <div className="flex justify-between text-sm">
-            <span className="text-[#A7A79A]">Price per share</span>
-            <span className="font-semibold text-[#F2F0E8]">${asset.priceUsd.toFixed(2)}</span>
-          </div>
-          <div className="mt-1 flex justify-between text-sm">
-            <span className="text-[#A7A79A]">Type</span>
-            <span className="font-medium text-[#F2F0E8]">{TYPE_LABELS[asset.type] ?? asset.type}</span>
-          </div>
-        </div>
-
-        {/* Shares input */}
-        <div className="mb-4">
-          <label className="mb-1.5 block text-sm font-medium text-[#A7A79A]">
-            Number of shares
-          </label>
-          <input
-            type="number"
-            step="0.001"
-            min="0.001"
-            value={sharesInput}
-            onChange={(e) => setSharesInput(e.target.value)}
-            className="w-full rounded-xl border border-[#2A2B27] bg-[#141513] px-4 py-2.5 text-sm text-[#F2F0E8] outline-none focus:border-[#8FAE82]"
-          />
-        </div>
-
-        {/* Total */}
-        <div className="mb-5 flex items-center justify-between rounded-2xl bg-white/[0.04] px-4 py-3">
-          <span className="text-sm text-[#A7A79A]">Total investment</span>
-          <span className="text-xl font-bold text-[#F2F0E8]">${total.toFixed(2)}</span>
-        </div>
-
-        <button
-          onClick={() => setConfirming(true)}
-          disabled={shares <= 0}
-          className="w-full rounded-2xl bg-[#8FAE82] py-3.5 text-sm font-semibold text-[#141513] disabled:opacity-50"
-        >
-          Review & Invest
-        </button>
+function XStocksBanner({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      onClick={onOpen}
+      className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-left hover:border-[#3A3B37] transition-colors w-full"
+    >
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-[#0D1B1A]">
+        <img src="/tokens/xstocks-icon.svg" alt="xStocks" className="h-10 w-10" />
       </div>
-    </div>,
-    document.body
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <img src="/tokens/xstocks.svg" alt="xStocks" className="h-4" style={{ width: "auto" }} />
+          <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">Tokenized Stocks</span>
+          <span className="rounded-full px-2 py-0.5 text-xs font-medium text-teal-400 bg-teal-400/10">Backed</span>
+        </div>
+        <p className="truncate text-xs text-[#A7A79A] mt-0.5">
+          AAPL, TSLA, NVDA and 70+ tokenized real-world stocks on-chain — xChange RFQ, proof of reserves, oracles
+        </p>
+      </div>
+      <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </button>
   );
 }
 
 // ── Crypto platform list + detail sheet ──────────────────────────────────────
 
-type CryptoPlatform = "flash-trade" | "flash-extras" | "velvet";
+type CryptoPlatform = "flash-trade" | "flash-extras" | "velvet" | "grail" | "roaster" | "nosana" | "doma" | "dydx";
 
 const CRYPTO_PLATFORMS = [
   {
@@ -181,6 +115,51 @@ const CRYPTO_PLATFORMS = [
     description: "Automated on-chain vaults — deposit, withdraw and rebalance on Base",
     badge: "Base",
     badgeColor: "text-blue-400 bg-blue-400/10",
+  },
+  {
+    id: "grail" as CryptoPlatform,
+    icon: "✦",
+    name: "Oro Gold",
+    tag: "Physical Gold",
+    description: "Buy, sell, and redeem physical gold on Solana via $GOLD tokens",
+    badge: "Solana",
+    badgeColor: "text-yellow-400 bg-yellow-400/10",
+  },
+  {
+    id: "roaster" as CryptoPlatform,
+    icon: "🎤",
+    name: "Roaster",
+    tag: "AI Rap Battles",
+    description: "Back a side in AI rap battles — AI Jury picks the winner, you split the pool",
+    badge: "Solana",
+    badgeColor: "text-purple-400 bg-purple-400/10",
+  },
+  {
+    id: "nosana" as CryptoPlatform,
+    icon: "⚙️",
+    name: "Nosana GPU Cloud",
+    tag: "AI Compute",
+    description: "Deploy containerized AI workloads on decentralized GPUs — pay with NOS credits",
+    badge: "Solana",
+    badgeColor: "text-purple-400 bg-purple-400/10",
+  },
+  {
+    id: "doma" as CryptoPlatform,
+    icon: "⌁",
+    name: "Doma Protocol",
+    tag: "DomainFi",
+    description: "Search, analyze, and prepare trades for tokenized internet domains",
+    badge: "Doma",
+    badgeColor: "text-cyan-400 bg-cyan-400/10",
+  },
+  {
+    id: "dydx" as CryptoPlatform,
+    icon: "⚡",
+    name: "dYdX Chain",
+    tag: "Perpetuals",
+    description: "Up to 100× leverage on BTC, ETH, SOL and 100+ markets — Cosmos appchain, no gas fees",
+    badge: "Cosmos",
+    badgeColor: "text-purple-400 bg-purple-400/10",
   },
 ];
 
@@ -248,6 +227,11 @@ function CryptoList() {
               {open === "flash-trade"  && <FlashTradeSection />}
               {open === "flash-extras" && <FlashExtrasSection />}
               {open === "velvet"       && <VelvetTradingSection />}
+              {open === "grail"        && <GrailSection />}
+              {open === "roaster"     && <RoasterSection />}
+              {open === "nosana"      && <NosanaSection />}
+              {open === "doma"        && <DomaSection />}
+              {open === "dydx"        && <DydxSection />}
             </div>
           </div>
         </div>,
@@ -258,44 +242,11 @@ function CryptoList() {
 }
 
 export function InvestmentsScreen() {
-  const { portfolio, buyAsset } = useDemoState();
+  const { portfolio, totalValueUsd, loading: portfolioLoading, error: portfolioError, refetch } = useInvestments();
   const { open: openChat, sendMessage } = useChatSheet();
   const [viewTab, setViewTab] = useState<"portfolio" | "market">("portfolio");
   const [marketFilter, setMarketFilter] = useState<string>("all");
-  const [buyingAsset, setBuyingAsset] = useState<DemoAsset | null>(null);
-
-  const portfolioValue = portfolio.reduce(
-    (sum, p) => sum + p.shares * (ASSET_PRICES[p.symbol] ?? p.avgPriceUsd),
-    0
-  );
-
-  const marketEntries = DEMO_ASSETS.filter(
-    (a) => marketFilter === "all" || a.type === marketFilter
-  );
-
-  const handleConfirm = async (shares: number) => {
-    if (!buyingAsset) return;
-    const asset = buyingAsset;
-    setBuyingAsset(null);
-
-    let nanopay: { usedNanopay?: boolean; txHash?: string | null } = {};
-    try {
-      const res = await fetch("/api/nanopay/checkout", { method: "POST" });
-      if (res.ok) nanopay = await res.json();
-    } catch {
-      // nanopay settlement is best-effort; the on-chain transfer already succeeded
-    }
-
-    buyAsset(
-      asset.symbol,
-      asset.name,
-      asset.type,
-      asset.icon,
-      shares,
-      asset.priceUsd,
-      nanopay
-    );
-  };
+  const [xstocksOpen, setXstocksOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-4">
@@ -303,7 +254,7 @@ export function InvestmentsScreen() {
       <div className="rounded-3xl bg-[#8FAE82] p-5">
         <p className="text-sm font-medium text-[#141513]/70">Portfolio Value</p>
         <p className="mt-1 text-3xl font-bold text-[#141513]">
-          ${portfolioValue.toFixed(2)}
+          ${totalValueUsd.toFixed(2)}
         </p>
         <p className="mt-0.5 text-xs text-[#141513]/50">
           {portfolio.length} position{portfolio.length !== 1 ? "s" : ""}
@@ -339,7 +290,22 @@ export function InvestmentsScreen() {
       {/* Portfolio view */}
       {viewTab === "portfolio" && (
         <>
-          {portfolio.length === 0 ? (
+          {portfolioLoading && (
+            <div className="flex flex-col gap-3 animate-pulse">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-20 rounded-2xl bg-white/[0.04]" />
+              ))}
+            </div>
+          )}
+
+          {portfolioError && (
+            <div className="rounded-2xl border border-red-900/30 bg-red-900/10 px-4 py-3 text-sm text-red-400">
+              {portfolioError}
+              <button onClick={refetch} className="ml-3 underline text-xs">Retry</button>
+            </div>
+          )}
+
+          {!portfolioLoading && !portfolioError && portfolio.length === 0 ? (
             <div className="py-12 text-center">
               <p className="text-4xl">📊</p>
               <p className="mt-2 font-semibold text-[#F2F0E8]">No positions yet</p>
@@ -353,13 +319,13 @@ export function InvestmentsScreen() {
                 Browse Market
               </button>
             </div>
-          ) : (
+          ) : !portfolioLoading && portfolio.length > 0 ? (
             <div className="flex flex-col gap-3">
               {portfolio.map((pos) => (
-                <PortfolioCard key={pos.symbol} pos={pos} />
+                <PortfolioCard key={pos.id} pos={pos} />
               ))}
             </div>
-          )}
+          ) : null}
         </>
       )}
 
@@ -383,58 +349,57 @@ export function InvestmentsScreen() {
             ))}
           </div>
 
-          {marketFilter === "crypto" && (
-            <CryptoList />
+          {(marketFilter === "stock" || marketFilter === "all") && (
+            <XStocksBanner onOpen={() => setXstocksOpen(true)} />
           )}
 
-          {marketFilter !== "crypto" && <div className="flex flex-col gap-3">
-            {marketEntries.map((asset) => {
-              const ownedPos = portfolio.find((p) => p.symbol === asset.symbol);
-              const isPos = asset.change24h >= 0;
-              return (
-                <div
-                  key={asset.symbol}
-                  className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4"
-                >
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-2xl">
-                    {asset.icon}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-[#F2F0E8]">{asset.symbol}</p>
-                      <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">
-                        {TYPE_LABELS[asset.type] ?? asset.type}
-                      </span>
-                    </div>
-                    <p className="truncate text-xs text-[#A7A79A]">{asset.description}</p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="font-semibold text-[#F2F0E8]">${asset.priceUsd.toFixed(2)}</p>
-                    {asset.change24h !== 0 && (
-                      <p className={`text-xs ${isPos ? "text-green-400" : "text-red-400"}`}>
-                        {isPos ? "+" : ""}{asset.change24h.toFixed(2)}%
-                      </p>
-                    )}
-                    <button
-                      onClick={() => setBuyingAsset(asset)}
-                      className="mt-1 rounded-xl bg-[#8FAE82] px-3 py-1 text-xs font-semibold text-[#141513]"
-                    >
-                      {ownedPos ? "Buy more" : "Buy"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>}
+          {(marketFilter === "ipo") && (
+            <div className="py-12 text-center">
+              <p className="text-4xl">🚀</p>
+              <p className="mt-2 font-semibold text-[#F2F0E8]">Pre-IPO coming soon</p>
+              <p className="mt-1 text-sm text-[#A7A79A]">Early-stage company investments will appear here</p>
+            </div>
+          )}
+
+          {(marketFilter === "etf") && (
+            <div className="py-12 text-center">
+              <p className="text-4xl">📊</p>
+              <p className="mt-2 font-semibold text-[#F2F0E8]">ETFs coming soon</p>
+              <p className="mt-1 text-sm text-[#A7A79A]">Index and thematic ETFs will appear here</p>
+            </div>
+          )}
+
+          {(marketFilter === "crypto" || marketFilter === "all") && (
+            <CryptoList />
+          )}
         </>
       )}
 
-      {buyingAsset && (
-        <BuySheet
-          asset={buyingAsset}
-          onClose={() => setBuyingAsset(null)}
-          onConfirm={handleConfirm}
-        />
+      {xstocksOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[70] flex flex-col">
+          <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={() => setXstocksOpen(false)} />
+          <div className="bg-[#141513] rounded-t-3xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[#2A2B27] shrink-0">
+              <div className="flex items-center gap-3">
+                <img src="/tokens/xstocks-icon.svg" alt="xStocks" className="h-8 w-8 rounded-lg bg-[#0D1B1A] p-0.5" />
+                <div>
+                  <p className="font-semibold text-[#F2F0E8] text-sm">xStocks</p>
+                  <p className="text-xs text-[#A7A79A]">Tokenized Stocks</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setXstocksOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.06] text-[#A7A79A] hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
+              <XStocksSection />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 {
-  "name": "Bottie — Onchain Savings",
-  "short_name": "Bottie",
+  "name": "Bluvfi — Onchain Savings",
+  "short_name": "Bluvfi",
   "description": "Onchain savings made easy.",
   "start_url": "/app",
   "display": "standalone",
@@ -12,12 +12,19 @@
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "maskable any"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

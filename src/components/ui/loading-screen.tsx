@@ -37,8 +37,8 @@ export function LoadingScreen({ progress, onExit, skipEntry = false }: LoadingSc
       transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
     >
       <motion.img
-        src="/Bottie.jpg"
-        alt="Bottie"
+        src="/Bluvfiv2.jpg"
+        alt="Bluvfi"
         className="h-28 w-28 rounded-full object-cover"
         initial={entryInitial}
         animate={exiting ? exitTarget : visibleTarget}

@@ -8,12 +8,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { ReactNode } from "react";
 import { formatUsd } from "@/lib/format";
 import { getUserFirstName } from "@/lib/user-display-name";
-import { useSolanaBalance } from "@/hooks/use-solana-balance";
+import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
 
 interface SettingsSidebarProps {
   open: boolean;
   onClose: () => void;
+  /** Total EVM stablecoin balance (USDC + USDT across all EVM chains) */
   walletBalanceUsd?: number;
+  /** Total Solana stablecoin balance (USDC + USDT) */
+  solanaBalanceUsd?: number;
 }
 
 function CopyableWallet({ address }: { address: string }) {
@@ -50,6 +53,7 @@ export function SettingsSidebar({
   open,
   onClose,
   walletBalanceUsd,
+  solanaBalanceUsd,
 }: SettingsSidebarProps) {
   const { user } = usePrivy();
   const router = useRouter();
@@ -65,7 +69,9 @@ export function SettingsSidebar({
   const evmAddress = user?.smartWallet?.address ?? user?.wallet?.address;
   const solanaWallet = accounts.find((a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
   const solanaAddress = solanaWallet?.address as string | undefined;
-  const { balance: solanaBalanceSol, isLoading: solBalLoading } = useSolanaBalance(solanaAddress, solanaWallet?.id);
+
+  // Per-token breakdown for sub-labels
+  const { evmUsdc, evmUsdt, solUsdc, solUsdt, isLoading: sbLoading } = useStablecoinBalances();
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
   const initial = firstName.charAt(0).toUpperCase();
@@ -121,29 +127,81 @@ export function SettingsSidebar({
           </div>
         )}
 
-        {walletBalanceUsd !== undefined && (
-          <div>
-            <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">EVM Balance</span>
-            <p className="mt-1 font-display text-xl text-ink">
-              {formatUsd(walletBalanceUsd)} <span className="text-sm text-ink-light">USDC</span>
-            </p>
-          </div>
-        )}
+        {/* 4 balance rows — one per token per network */}
+        {(evmAddress || solanaAddress) && (
+          <div className="space-y-3">
+            <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Balances</span>
 
-        {solanaAddress && (
-          <div>
-            <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Solana Balance</span>
-            <p className="mt-1 font-display text-xl text-ink">
-              {solBalLoading
-                ? <span className="text-sm text-ink-light">Loading…</span>
-                : <>${solanaBalanceSol.toFixed(2)} <span className="text-sm text-ink-light">USDC</span></>
-              }
-            </p>
+            {evmAddress && (
+              <>
+                {/* EVM USDC */}
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-ink-light">EVM USDC</span>
+                  <span className="font-display text-sm font-semibold text-ink">
+                    {sbLoading ? "…" : formatUsd(evmUsdc)}
+                  </span>
+                </div>
+                {/* EVM USDT */}
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-ink-light">EVM USDT</span>
+                  <span className="font-display text-sm font-semibold text-ink">
+                    {sbLoading ? "…" : formatUsd(evmUsdt)}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {solanaAddress && (
+              <>
+                {/* Solana USDC */}
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-ink-light">SOL USDC</span>
+                  <span className="font-display text-sm font-semibold text-ink">
+                    {sbLoading ? "…" : formatUsd(solUsdc)}
+                  </span>
+                </div>
+                {/* Solana USDT */}
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-ink-light">SOL USDT</span>
+                  <span className="font-display text-sm font-semibold text-ink">
+                    {sbLoading ? "…" : formatUsd(solUsdt)}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
 
       <div className="flex-1" />
+
+      {/* Social links */}
+      <div className="mb-4 flex items-center gap-3">
+        <a
+          href="https://x.com/bluvfi"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-2.5 font-mono text-xs text-ink/60 transition-colors hover:bg-ink/[0.08] hover:text-ink/90"
+        >
+          {/* X (Twitter) icon */}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.402 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.261 5.634 5.903-5.634Zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+          <span>@bluvfi</span>
+        </a>
+        <a
+          href="https://t.me/+KXpDSUAnfg44MTg0"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-2.5 font-mono text-xs text-ink/60 transition-colors hover:bg-ink/[0.08] hover:text-ink/90"
+        >
+          {/* Telegram icon */}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.26 14.426l-2.965-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.893.133z" />
+          </svg>
+          <span>Telegram</span>
+        </a>
+      </div>
 
       {/* Logout */}
       <button

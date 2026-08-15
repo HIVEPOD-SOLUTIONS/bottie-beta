@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-const STORAGE_KEY = "bottie_v1";
+const STORAGE_KEY = "bluvfi_v1";
 
 export type PaymentRecord = {
   id: string;
@@ -19,6 +19,8 @@ export type PaymentRecord = {
   paidAt: string;
   usedNanopay?: boolean;
   txHash?: string | null;
+  /** "evm" | "solana" — which network the payment settled on */
+  chain?: string;
 };
 
 export type PortfolioPosition = {
@@ -43,7 +45,7 @@ type CtxValue = State & {
     billId: string,
     amount: number,
     name: string,
-    nanopay?: { usedNanopay?: boolean; txHash?: string | null }
+    nanopay?: { usedNanopay?: boolean; txHash?: string | null; chain?: string }
   ) => void;
   buyAsset: (
     symbol: string,
@@ -52,7 +54,7 @@ type CtxValue = State & {
     icon: string,
     shares: number,
     priceUsd: number,
-    nanopay?: { usedNanopay?: boolean; txHash?: string | null }
+    nanopay?: { usedNanopay?: boolean; txHash?: string | null; chain?: string }
   ) => void;
 };
 
@@ -106,7 +108,7 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
       billId: string,
       amount: number,
       name: string,
-      nanopay?: { usedNanopay?: boolean; txHash?: string | null }
+      nanopay?: { usedNanopay?: boolean; txHash?: string | null; chain?: string }
     ) => {
       update((prev) => ({
         ...prev,
@@ -122,6 +124,7 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
             paidAt: new Date().toISOString(),
             usedNanopay: nanopay?.usedNanopay,
             txHash: nanopay?.txHash,
+            chain: nanopay?.chain ?? "evm",
           },
           ...prev.payments,
         ],
@@ -138,7 +141,7 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
       icon: string,
       shares: number,
       priceUsd: number,
-      nanopay?: { usedNanopay?: boolean; txHash?: string | null }
+      nanopay?: { usedNanopay?: boolean; txHash?: string | null; chain?: string }
     ) => {
       update((prev) => {
         const existing = prev.portfolio.find((p) => p.symbol === symbol);
@@ -169,6 +172,7 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
               paidAt: new Date().toISOString(),
               usedNanopay: nanopay?.usedNanopay,
               txHash: nanopay?.txHash,
+              chain: nanopay?.chain ?? "evm",
             },
             ...prev.payments,
           ],

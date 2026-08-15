@@ -1,8 +1,8 @@
-# Bottie — AI Financial Assistant
+# Bluvfi — AI Financial Assistant
 
 **Pay bills, subscribe to services, and invest — by chat or tap.**
 
-Bottie is a mobile-first AI financial assistant that lets you manage recurring subscriptions, internet/cable bills, utilities, and investments (stocks, ETFs, pre-IPO) through natural conversation or a clean web2-style UI. Payments execute gaslessly from the user's embedded wallet via Circle Arc AppKit. Every payment — whether triggered by chat or by tapping a button — goes through the same on-chain path and is settled via Circle Gateway x402 nanopayments.
+Bluvfi is a mobile-first AI financial assistant that lets you manage recurring subscriptions, internet/cable bills, utilities, and investments (stocks, ETFs, pre-IPO) through natural conversation or a clean web2-style UI. Payments execute gaslessly from the user's embedded wallet via Circle Arc AppKit. Every payment — whether triggered by chat or by tapping a button — goes through the same on-chain path and is settled via Circle Gateway x402 nanopayments.
 
 ---
 
@@ -13,7 +13,7 @@ Bottie is a mobile-first AI financial assistant that lets you manage recurring s
 3. **Pay manually or via the AI.**
    - **UI path:** Tap "Subscribe" on any bill or "Buy" on any asset → a payment modal opens → `arcKit.send()` transfers USDC gaslessly from your Privy wallet → bill flips to "Active ✓" / portfolio updates.
    - **AI path:** Type or say "Pay my Netflix" → the agent queues the payment and renders a Confirm card inline in the chat → tap Confirm → same `arcKit.send()` path executes → same state updates.
-4. **Fund your wallet** when balance is low via the "Add Funds" sheet — Send from a browser wallet (Arc AppKit) or Bridge from 8 other testnets (Arc AppKit Bridge → Base Sepolia).
+4. **Fund your wallet** when balance is low via the "Add Funds" sheet — Send from a browser wallet (Arc AppKit) or Bridge from 7 other mainnet networks (Arc AppKit Bridge → Base).
 5. **Track history.** Every payment is recorded in the History tab and in Postgres.
 
 ---
@@ -25,11 +25,11 @@ Bottie is a mobile-first AI financial assistant that lets you manage recurring s
 - **Voice input** — OpenAI Whisper transcribes voice messages to text.
 - **Gasless payments** — All bill and investment payments use `arcKit.send()` which sponsors gas via Circle's infrastructure. Users only need USDC — no ETH required.
 - **Privy embedded wallet** — `useWallets()` from `@privy-io/react-auth` surfaces the user's embedded wallet directly to Arc AppKit via `createViemAdapterFromProvider`. No EIP-6963 browser wallet required for payments.
-- **Arc AppKit Send** — Fund the agent wallet by sending USDC from any EIP-6963 browser wallet (MetaMask, Coinbase Wallet, etc.) on Base Sepolia.
-- **Arc AppKit Bridge** — Bridge USDC from 8 source testnets (Arc Testnet, Ethereum Sepolia, Arbitrum Sepolia, Optimism Sepolia, Avalanche Fuji, Polygon Amoy, Linea Sepolia, Base Sepolia) into the agent wallet.
+- **Arc AppKit Send** — Fund the agent wallet by sending USDC from any EIP-6963 browser wallet (MetaMask, Coinbase Wallet, etc.) on Base mainnet.
+- **Arc AppKit Bridge** — Bridge USDC from 7 mainnet chains (Ethereum, Arbitrum, Optimism, Avalanche, Polygon, Linea, Base) into the agent wallet.
 - **Circle Gateway x402 nanopayments** — Every payment triggers a real x402 round-trip against `/api/nanopay/sell`. The History tab shows ⚡ Nanopay when settlement succeeded.
 - **Unified payment state** — `DemoStateProvider` lives at the layout level so chat confirm cards and dashboard screens share one React context. Payments from both UI and AI paths update the same state.
-- **Dual persistence** — UI payments tracked in `localStorage` (`bottie_v1`). All payments (UI + AI chat) also written to Postgres `payments` table so the AI's `get_payment_history` tool reflects the full history.
+- **Dual persistence** — UI payments tracked in `localStorage` (`bluvfi_v1`). All payments (UI + AI chat) also written to Postgres `payments` table so the AI's `get_payment_history` tool reflects the full history.
 - **Demo data** — 16 bills and 10 assets hardcoded in `src/lib/demo-data.ts`. Pre-loaded and feels like a real app.
 - **Web2-friendly UX** — No crypto jargon. "Payment cancelled" not "transaction rejected". Receiver wallet never shown in the UI.
 - **Time-aware greeting** — Dashboard and chat greet the user by first name with Good morning / afternoon / evening / night based on local time.
@@ -50,7 +50,7 @@ Bottie is a mobile-first AI financial assistant that lets you manage recurring s
 | Chat confirm — investments | `src/components/chat/buy-asset-confirm-card.tsx` | Same `arcKit.send()` path for investment purchases from chat |
 | Fund wallet — Send | `src/components/dashboard/fund-wallet-sheet.tsx` | Send USDC from a browser wallet to the agent wallet |
 | Fund wallet — Bridge | `src/components/dashboard/fund-wallet-sheet.tsx` | Bridge USDC from 8 source chains into the agent wallet |
-| Config | `src/lib/arc-kit.ts` | `arcKit` singleton, `AGENT_CHAIN = Blockchain.Base_Sepolia`, 8 bridge source options |
+| Config | `src/lib/arc-kit.ts` | `arcKit` singleton, `AGENT_CHAIN = Blockchain.Base`, 7 mainnet bridge source options |
 
 **Payment call pattern (Privy embedded wallet):**
 ```ts
@@ -58,7 +58,7 @@ const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? walle
 const provider = await privyWallet.getEthereumProvider();
 const adapter = await createViemAdapterFromProvider({ provider: provider as any });
 await arcKit.send({
-  from: { adapter, chain: Blockchain.Base_Sepolia },
+  from: { adapter, chain: Blockchain.Base },
   to: RECEIVER,
   amount: amount.toFixed(6),
   token: "USDC",
@@ -68,8 +68,8 @@ await arcKit.send({
 **Bridge call pattern:**
 ```ts
 await arcKit.bridge({
-  from: { adapter, chain: BridgeChain.Ethereum_Sepolia },
-  to: { adapter, chain: Blockchain.Base_Sepolia, recipientAddress: agentAddress },
+  from: { adapter, chain: BridgeChain.Ethereum },
+  to: { adapter, chain: Blockchain.Base, recipientAddress: agentAddress },
   amount: "50.00",
   token: "USDC",
 });
@@ -105,7 +105,7 @@ await arcKit.bridge({
 | `buy_investment` | Looks up asset, returns `{ pendingPurchase: true, ... }` — UI renders a Confirm card; on tap, `arcKit.send()` executes and `buyAsset` updates state |
 | `get_market_prices` | Current prices filtered by type (stock / ipo / etf) or symbol |
 | `get_payment_history` | Recent payments from Postgres `payments` table |
-| `get_nanopay_balance` | Agent's Circle Gateway balance on Base Sepolia |
+| `get_nanopay_balance` | Agent's Circle Gateway balance on Base mainnet |
 | `nanopay_deposit` | Deposit USDC into Gateway for gas-free spending |
 | `nanopay_pay` | Pay any x402-protected URL using Gateway |
 | `nanopay_withdraw` | Withdraw unused Gateway balance back to wallet |
@@ -145,7 +145,7 @@ await arcKit.bridge({
 | Circle Gateway | `@circle-fin/x402-batching` (buyer + facilitator) |
 | Database | Neon Postgres, Drizzle ORM |
 | State | React context + localStorage (UI), Postgres (all payments) |
-| Network | Base Sepolia only (chain ID 84532) |
+| Network | Base mainnet (chain ID 8453) |
 | Hosting | Vercel |
 
 ---
@@ -177,7 +177,7 @@ src/
 │   │   ├── value-props.tsx               # "Just talk / Gas-free / Any wallet"
 │   │   ├── how-it-works.tsx              # 3-step explainer
 │   │   ├── trust-signals.tsx             # "Powered by Circle" — no YO Protocol references
-│   │   └── footer.tsx                    # "built with Bottie"
+│   │   └── footer.tsx                    # "built with Bluvfi"
 │   ├── dashboard/
 │   │   ├── bills-screen.tsx              # 16 hardcoded bills, subscribe → PaymentModal flow
 │   │   ├── investments-screen.tsx        # 10 hardcoded assets, buy → BuySheet flow
@@ -292,7 +292,7 @@ The `provider as any` cast is required because Privy's `EIP1193Provider` type is
 ### Fund wallet sheet (EIP-6963)
 
 `fund-wallet-sheet.tsx` uses a `useFundingWallets()` hook that merges two sources:
-- Privy embedded wallet (surfaced as "Bottie Wallet" with address pre-populated)
+- Privy embedded wallet (surfaced as "Bluvfi Wallet" with address pre-populated)
 - EIP-6963 discovered wallets (MetaMask, Coinbase Wallet, etc.)
 
 This means any wallet type works for funding, while payments always use the Privy wallet.
@@ -342,13 +342,13 @@ cp .env.example .env
 |----------|----------|-------------|-----------------|
 | `NEXT_PUBLIC_PRIVY_APP_ID` | Yes | Privy app public ID | [console.privy.io](https://console.privy.io) |
 | `PRIVY_APP_SECRET` | Yes | Privy app secret (server-only) | [console.privy.io](https://console.privy.io) |
-| `NEXT_PUBLIC_ALCHEMY_API_KEY` | Yes | Alchemy RPC key for Base Sepolia | [dashboard.alchemy.com](https://dashboard.alchemy.com) |
+| `NEXT_PUBLIC_ALCHEMY_API_KEY` | Yes | Alchemy RPC key for Base mainnet | [dashboard.alchemy.com](https://dashboard.alchemy.com) |
 | `DATABASE_URL` | Yes | Neon Postgres connection string | [neon.tech](https://neon.tech) |
 | `OPENAI_API_KEY` | Yes | OpenAI key for GPT-4o-mini chat and Whisper voice | [platform.openai.com](https://platform.openai.com) |
-| `CIRCLE_BUYER_PRIVATE_KEY` | Yes | Private key of agent EOA wallet for server-side nanopayments (server-only, never `NEXT_PUBLIC_`) | Generate a new wallet, export private key, fund with Base Sepolia USDC at [faucet.circle.com](https://faucet.circle.com) |
+| `CIRCLE_BUYER_PRIVATE_KEY` | Yes | Private key of agent EOA wallet for server-side nanopayments (server-only, never `NEXT_PUBLIC_`) | Generate a new wallet, export private key, fund with Base mainnet USDC |
 | `CIRCLE_SELLER_ADDRESS` | Yes | EVM address that receives x402 seller payments | Any wallet address you control |
 | `NEXT_PUBLIC_APP_URL` | Yes | Deployed app URL (used by AI tools for internal API calls) | Your Vercel URL or `http://localhost:3000` locally |
-| `CIRCLE_USDC_ADDRESS` | No | Override USDC address on Base Sepolia | Default: `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| `CIRCLE_USDC_ADDRESS` | No | Override USDC address on Base mainnet | Default: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
 | `CIRCLE_GATEWAY_WALLET_ADDRESS` | No | Override Circle GatewayWallet contract | Default: fetched from facilitator |
 
 > `CIRCLE_BUYER_PRIVATE_KEY` is server-only and **never** prefixed with `NEXT_PUBLIC_`. Keep it out of version control.
@@ -360,15 +360,15 @@ cp .env.example .env
 ### Prerequisites
 
 - Node.js 20+ or Bun
-- A [Privy](https://privy.io) app (EOA wallets enabled, Base Sepolia)
+- A [Privy](https://privy.io) app (EOA wallets enabled, Base mainnet)
 - A [Neon](https://neon.tech) Postgres database
 - An [OpenAI](https://platform.openai.com) API key
 
 ### Setup
 
 ```bash
-git clone https://github.com/Afoxcute/bottieAI.git
-cd bottieAI
+git clone https://github.com/Afoxcute/bluvfiAI.git
+cd bluvfiAI
 npm install --legacy-peer-deps
 ```
 

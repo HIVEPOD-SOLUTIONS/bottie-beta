@@ -1,6 +1,9 @@
 import { verifyAuth } from "@/lib/auth";
 import { getProvider } from "@/lib/banking/registry";
+import { db } from "@/lib/db";
+import { payments } from "@/lib/db/schema";
 
+// GET /api/banking/[provider]/offramp/order?order_id=xxx
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ provider: string }> },
@@ -23,6 +26,7 @@ export async function GET(
   }
 }
 
+// POST /api/banking/[provider]/offramp/order — create an offramp order and record it as pending
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ provider: string }> },
@@ -49,7 +53,27 @@ export async function POST(
     const provider = getProvider(providerId) as any;
     if (typeof provider.createOfframpOrder !== "function")
       return Response.json({ error: "Offramp not supported by this provider" }, { status: 501 });
-    const data = await provider.createOfframpOrder({ pair_id, amount, customer_id: userId, first_name, last_name, bank_account_id });
+    const data = await provider.createOfframpOrder({
+      pair_id, amount, customer_id: userId, first_name, last_name, bank_account_id,
+    });
+
+    // Record pending offramp — webhook updates status to completed/failed
+    const orderId = data?.data?.order_id ?? data?.order_id ?? null;
+    if (orderId) {
+      // Detect which chain the user will be sending from (embedded in the pair_id suffix)
+      const pairChain = (pair_id as string).split("-").pop() ?? "evm";
+      const chain = pairChain === "solana" ? "solana" : "evm";
+      db.insert(payments).values({
+        userId,
+        type: "offramp",
+        referenceId: orderId,
+        description: `Offramp: ${amount} ${(pair_id as string).split("-")[0]?.toUpperCase() ?? "crypto"} via ${providerId} (${pair_id})`,
+        amountUsdc: String(amount),
+        status: "pending",
+        chain,
+      }).catch(() => {});
+    }
+
     return Response.json(data);
   } catch (err: any) {
     return Response.json({ error: err?.message ?? "Failed" }, { status: 502 });

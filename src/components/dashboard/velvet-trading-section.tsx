@@ -766,7 +766,7 @@ export function VelvetTradingSection() {
               onClick={() => { sendMessage("How do I get started with Velvet Capital on-chain vaults?"); openChat(); }}
               className="w-full rounded-2xl border border-[#2A2B27] py-3 text-sm font-medium text-[#A7A79A] text-center hover:bg-white/[0.04] transition-colors"
             >
-              💬 Ask Bottie how to get started
+              💬 Ask Bluvfi how to get started
             </button>
           </div>
           {walletAddress && (
@@ -794,7 +794,7 @@ export function VelvetTradingSection() {
           onClick={() => { sendMessage("Help me manage my Velvet Capital vaults."); openChat(); }}
           className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-medium text-[#A7A79A] text-center hover:bg-white/[0.07] transition-colors"
         >
-          💬 Ask Bottie for vault advice
+          💬 Ask Bluvfi for vault advice
         </button>
       )}
 

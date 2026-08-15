@@ -1,17 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useChatSheet } from "@/contexts/chat-context";
 import { useDemoState } from "@/contexts/demo-state-context";
 import { BillsScreen } from "@/components/dashboard/bills-screen";
-import { InvestmentsScreen } from "@/components/dashboard/investments-screen";
 import { PaymentsScreen } from "@/components/dashboard/payments-screen";
-import { BankingScreen } from "@/components/dashboard/banking-screen";
+
+function ComingSoon({ icon, title, description }: { icon: string; title: string; description: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.06] text-3xl">
+        {icon}
+      </div>
+      <div>
+        <p className="text-lg font-semibold text-[#F2F0E8]">{title} — Coming Soon</p>
+        <p className="mt-1.5 max-w-xs text-sm text-[#A7A79A] leading-relaxed">{description}</p>
+      </div>
+      <span className="mt-2 rounded-full border border-[#8FAE82]/40 bg-[#8FAE82]/10 px-4 py-1.5 text-xs font-medium text-[#8FAE82]">
+        In development
+      </span>
+    </div>
+  );
+}
 import { FundWalletSheet } from "@/components/dashboard/fund-wallet-sheet";
-import { useUsdcBalance, LOW_BALANCE_THRESHOLD_USD } from "@/hooks/use-usdc-balance";
-import { useSolanaBalance } from "@/hooks/use-solana-balance";
-import { DEMO_BILLS, ASSET_PRICES } from "@/lib/demo-data";
+import { LOW_BALANCE_THRESHOLD_USD } from "@/hooks/use-usdc-balance";
+import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
+import { usePayments } from "@/hooks/use-payments";
+import { ASSET_PRICES } from "@/lib/demo-data";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
 
 type Tab = "bills" | "investments" | "payments" | "banking" | "chat";
@@ -25,21 +41,37 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 ];
 
 function DashboardInner() {
-  const { openSidebar, open: openChat } = useChatSheet();
+  const { openSidebar, open: openChat, registerDashboardData } = useChatSheet();
   const { user } = usePrivy();
   const [activeTab, setActiveTab] = useState<Tab>("bills");
   const [showFundSheet, setShowFundSheet] = useState(false);
   const { paidBillIds, portfolio } = useDemoState();
 
   const accounts = (user?.linkedAccounts as any[]) ?? [];
-  const agentAddress = user?.wallet?.address as `0x${string}` | undefined;
-  const evmWallet = accounts.find((a: any) => a.chainType === "ethereum" && a.walletClientType === "privy");
-  const { balance: usdcBalance, isLow: balanceIsLow, formatted: balanceFormatted } =
-    useUsdcBalance(agentAddress, evmWallet?.id);
+  // Prefer smart-wallet address; fall back to embedded wallet. Matches settings-sidebar.tsx.
+  const agentAddress = (
+    (user as any)?.smartWallet?.address ?? user?.wallet?.address
+  ) as `0x${string}` | undefined;
 
   const solanaWallet = accounts.find((a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
   const solanaAddr = solanaWallet?.address as string | undefined;
-  const { balance: solBalance, formatted: solFormatted } = useSolanaBalance(solanaAddr, solanaWallet?.id);
+
+  // All four stablecoin balances — drives sidebar rows, dashboard totals, and the banner
+  const {
+    evmUsdc,
+    evmUsdt,
+    solUsdc,
+    solUsdt,
+    isLoading: sbLoading,
+  } = useStablecoinBalances();
+
+  // Total across all networks and tokens — used for the low-balance banner.
+  // Note: totalBalance > 0 guard removed — a zero or near-zero balance is the most
+  // important case to warn about. The isLoading gate (sbLoading=true on first render)
+  // already prevents a false-positive flash before the first fetch completes.
+  const totalBalance = evmUsdc + evmUsdt + solUsdc + solUsdt;
+  const balanceIsLow = !sbLoading && totalBalance < LOW_BALANCE_THRESHOLD_USD;
+  const balanceFormatted = `$${totalBalance.toFixed(2)}`;
   const firstName = getUserFirstName(user);
   const greeting = getTimeBasedGreeting();
 
@@ -51,17 +83,38 @@ function DashboardInner() {
     }
   };
 
-  const monthlyBills = DEMO_BILLS.filter((b) => paidBillIds.includes(b.id)).reduce(
-    (sum, b) => sum + b.amount,
-    0
-  );
+  // monthlyBills tracks only purchases recorded in the session
+  const monthlyBills = paidBillIds.length * 0; // placeholder — real amounts tracked in payments history
 
   const portfolioValue = portfolio.reduce(
     (sum, p) => sum + p.shares * (ASSET_PRICES[p.symbol] ?? p.avgPriceUsd),
     0
   );
 
-  const pendingCount = DEMO_BILLS.length - paidBillIds.length;
+  // Pull completed bill count from DB — includes AI-initiated purchases,
+  // not just ones made through the Bills UI (which paidBillIds tracks).
+  const { payments: billPayments } = usePayments("bill");
+  const dbBillCount = billPayments.filter((p) => p.status === "completed").length;
+  const purchasedCount = Math.max(paidBillIds.length, dbBillCount);
+
+  // Keep the AI agent's financial context in sync with the live dashboard values.
+  // registerDashboardData writes to a ref so this never triggers re-renders in ChatSheet.
+  // Balance fields (evmUsdc etc.) are included so chat-sheet reads from here instead of
+  // running its own independent useStablecoinBalances() fetch.
+  // Only register balance data once the stablecoin fetch has completed.
+  // This prevents the AI from seeing $0 balances during the loading phase.
+  useEffect(() => {
+    if (sbLoading) return;
+    registerDashboardData({
+      totalBillsDueUsd: monthlyBills,
+      portfolioValueUsd: portfolioValue,
+      billCount: purchasedCount,
+      evmUsdc,
+      evmUsdt,
+      solUsdc,
+      solUsdt,
+    });
+  }, [sbLoading, monthlyBills, portfolioValue, purchasedCount, evmUsdc, evmUsdt, solUsdc, solUsdt, registerDashboardData]);
 
   return (
     <div className="relative min-h-dvh">
@@ -78,7 +131,10 @@ function DashboardInner() {
         </button>
 
         <div className="text-center">
-          <p className="text-xs font-medium text-ink-light/50 uppercase tracking-wide">Bottie</p>
+          <p className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-light/50 uppercase tracking-wide">
+            Bluvfi
+            <span className="rounded text-[9px] font-bold tracking-wide uppercase bg-violet-500/20 text-violet-400 px-1 py-px leading-none normal-case">beta</span>
+          </p>
         </div>
 
         <button
@@ -131,15 +187,13 @@ function DashboardInner() {
         </p>
 
         <div className="flex gap-3">
-          {/* Bills card */}
+          {/* Digital Products card */}
           <div className="flex-1 rounded-2xl bg-[#1B1C19] border border-[#2A2B27] p-4">
-            <p className="text-xs text-[#A7A79A] font-medium">Monthly Bills</p>
+            <p className="text-xs text-[#A7A79A] font-medium">Digital Products</p>
             <p className="text-xl font-bold text-[#F2F0E8] mt-0.5">
-              ${monthlyBills.toFixed(2)}
+              {purchasedCount}
             </p>
-            {pendingCount > 0 && (
-              <p className="text-xs text-amber-400 mt-0.5">{pendingCount} not subscribed</p>
-            )}
+            <p className="text-xs text-[#8FAE82] mt-0.5">purchased</p>
           </div>
 
           {/* Portfolio card */}
@@ -156,7 +210,7 @@ function DashboardInner() {
           {/* Wallet balance card */}
           {agentAddress && (
             <div
-              className="w-[100px] shrink-0 cursor-pointer rounded-2xl border p-4 flex flex-col gap-1.5 transition-colors hover:border-[#8FAE82]/50"
+              className="w-[116px] shrink-0 cursor-pointer rounded-2xl border p-3 flex flex-col gap-2 transition-colors hover:border-[#8FAE82]/50"
               style={{
                 background: "#1B1C19",
                 borderColor: balanceIsLow ? "rgba(251,191,36,0.4)" : "#2A2B27",
@@ -164,31 +218,40 @@ function DashboardInner() {
               onClick={() => setShowFundSheet(true)}
             >
               <p className="text-[10px] text-[#A7A79A] font-medium leading-tight">Wallets</p>
-              <div>
-                <p className="text-[9px] text-[#A7A79A] leading-tight">EVM</p>
-                <p
-                  className="text-xs font-bold leading-tight"
+
+              {/* EVM total — USDC + USDT across all EVM chains */}
+              <div className="flex items-baseline justify-between gap-1">
+                <span className="text-[9px] text-[#A7A79A] leading-tight font-medium">EVM</span>
+                <span
+                  className="text-xs font-bold leading-tight tabular-nums"
                   style={{ color: balanceIsLow ? "#fbbf24" : "#F2F0E8" }}
                 >
-                  {balanceFormatted}
-                </p>
+                  {sbLoading ? "…" : `$${(evmUsdc + evmUsdt).toFixed(2)}`}
+                </span>
               </div>
+
+              {/* Solana total — USDC + USDT on Solana */}
               {solanaAddr && (
-                <div>
-                  <p className="text-[9px] text-[#A7A79A] leading-tight">Solana</p>
-                  <p className="text-xs font-bold leading-tight text-[#F2F0E8]">
-                    {solFormatted}
-                  </p>
+                <div className="flex items-baseline justify-between gap-1">
+                  <span className="text-[9px] text-[#A7A79A] leading-tight font-medium">Solana</span>
+                  <span className="text-xs font-bold leading-tight tabular-nums text-[#F2F0E8]">
+                    {sbLoading ? "…" : `$${(solUsdc + solUsdt).toFixed(2)}`}
+                  </span>
                 </div>
               )}
+
               <p className="text-[10px] text-[#8FAE82]">+ Add</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Tab navigation */}
-      <div className="sticky top-[calc(env(safe-area-inset-top)+56px)] z-20 flex gap-1 bg-cream-dark/90 backdrop-blur-sm px-5 py-2 border-b border-[#2A2B27]">
+      {/* Tab navigation — sticks BELOW the low-balance banner when it is visible */}
+      <div className={`sticky ${
+        balanceIsLow && agentAddress
+          ? "top-[calc(env(safe-area-inset-top)+100px)]"
+          : "top-[calc(env(safe-area-inset-top)+56px)]"
+      } z-20 flex gap-1 bg-cream-dark/90 backdrop-blur-sm px-5 py-2 border-b border-[#2A2B27]`}>
         {TABS.filter((t) => t.key !== "chat").map((tab) => (
           <button
             key={tab.key}
@@ -208,8 +271,8 @@ function DashboardInner() {
       {/* Content */}
       <div className="px-5 py-4">
         {activeTab === "bills"       && <BillsScreen />}
-        {activeTab === "investments" && <InvestmentsScreen />}
-        {activeTab === "banking"     && <BankingScreen />}
+        {activeTab === "investments" && <ComingSoon icon="📈" title="Invest" description="Stock, ETF & pre-IPO investing is on its way. You'll be able to build your portfolio right here." />}
+        {activeTab === "banking"     && <ComingSoon icon="🏦" title="Banking" description="Onramp, offramp, payouts & stablecoin banking are coming soon. Global fiat ↔ crypto rails, all in one place." />}
         {activeTab === "payments"    && <PaymentsScreen />}
       </div>
 
@@ -217,6 +280,7 @@ function DashboardInner() {
       {showFundSheet && agentAddress && (
         <FundWalletSheet
           agentAddress={agentAddress}
+          solanaAddress={solanaAddr}
           onClose={() => setShowFundSheet(false)}
         />
       )}

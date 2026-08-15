@@ -26,23 +26,23 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bottie — Your AI Finance Assistant",
+  title: "Bluvfi — Your AI Finance Assistant",
   description:
     "Pay bills, invest in assets, and manage your finances with an AI assistant. Powered by Circle and Arc.",
   manifest: "/manifest.json",
   icons: {
-    icon: "/Bottie.jpg",
-    apple: "/Bottie.jpg",
+    icon: "/Bluvfiv2.jpg",
+    apple: "/Bluvfiv2.jpg",
   },
   openGraph: {
-    title: "Bottie — Your AI Finance Assistant",
+    title: "Bluvfi — Your AI Finance Assistant",
     description: "Pay bills, invest in assets, and manage your finances with an AI assistant.",
     type: "website",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Bottie",
+    title: "Bluvfi",
   },
 };
 
@@ -68,7 +68,7 @@ export default function RootLayout({
         <Providers>{children}</Providers>
         {/* Desktop blocker — mobile only app */}
         <div className="pointer-events-none fixed inset-0 z-[9999] hidden flex-col items-center justify-center gap-4 bg-cream md:flex">
-          <img src="/Bottie.jpg" alt="Bottie" className="h-24 w-24 rounded-full object-cover" />
+          <img src="/Bluvfiv2.jpg" alt="Bluvfi" className="h-24 w-24 rounded-full object-cover" />
           <p className="font-body text-base text-ink-light">designed for mobile — open on your phone</p>
         </div>
       </body>

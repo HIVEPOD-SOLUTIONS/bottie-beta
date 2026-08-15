@@ -16,11 +16,15 @@ export async function GET(
   const customer_id = searchParams.get("customer_id") ?? undefined;
   try {
     const provider = getProvider(providerId) as any;
+    if (typeof provider.isConfigured === "function" && !provider.isConfigured())
+      return Response.json({ error: `${providerId} API credentials not configured` }, { status: 503 });
     if (typeof provider.listOfframpOrders !== "function")
       return Response.json({ error: "Offramp not supported by this provider" }, { status: 501 });
     const data = await provider.listOfframpOrders({ page, limit, status, customer_id });
     return Response.json(data);
   } catch (err: any) {
-    return Response.json({ error: err?.message ?? "Failed" }, { status: 502 });
+    const message = err?.message ?? "Failed";
+    console.error(`[banking/${providerId}/offramp/orders]`, message);
+    return Response.json({ error: message }, { status: 502 });
   }
 }

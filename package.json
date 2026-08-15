@@ -1,21 +1,24 @@
 {
-  "name": "bottie",
+  "name": "bluvfi",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^2.0.24",
     "@ai-sdk/openai": "2.0.110",
     "@ai-sdk/react": "^3.0.118",
+    "@bitrefill/cli": "^0.3.0",
+    "@circle-fin/adapter-solana": "^1.6.5",
     "@circle-fin/adapter-viem-v2": "^1.12.1",
     "@circle-fin/app-kit": "^1.8.1",
     "@circle-fin/x402-batching": "^3.2.0",
     "@coral-xyz/anchor": "^0.32.1",
     "@flash_trade/flash-sdk-v2": "^1.1.0",
+    "@google/genai": "^2.17.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@neondatabase/serverless": "^1.0.2",
     "@privy-io/react-auth": "^3.17.0",
     "@privy-io/server-auth": "^1.32.5",
@@ -35,6 +38,7 @@
     "ai": "^6.0.116",
     "drizzle-orm": "^0.45.1",
     "framer-motion": "^12.35.0",
+    "libphonenumber-js": "^1.13.10",
     "next": "^16.1.6",
     "permissionless": "^0.3.4",
     "qrcode.react": "^4.2.0",
@@ -55,7 +59,12 @@
     "typescript": "^5.7.0"
   },
   "overrides": {
-    "wagmi": "~2.19.5"
+    "wagmi": "~2.19.5",
+    "@solana/pay-kit": {
+      "@solana-program/token": "^0.15.0",
+      "@solana-program/compute-budget": "^0.17.0",
+      "@solana-program/token-2022": "^0.13.0"
+    }
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

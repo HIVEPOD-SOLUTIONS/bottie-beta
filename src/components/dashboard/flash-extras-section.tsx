@@ -657,7 +657,7 @@ function SessionPanel({ solanaAddress, signTransaction }: { solanaAddress: strin
   return (
     <div className="space-y-3">
       <p className="text-xs text-zinc-400">
-        A trading session lets Bottie execute Flash trades without a wallet popup every time. The session keypair is stored locally in your browser and expires automatically.
+        A trading session lets Bluvfi execute Flash trades without a wallet popup every time. The session keypair is stored locally in your browser and expires automatically.
       </p>
 
       {session ? (

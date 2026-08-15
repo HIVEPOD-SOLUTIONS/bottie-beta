@@ -4,8 +4,10 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useWallets } from "@privy-io/react-auth";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
-import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS } from "@/lib/arc-kit";
+import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS, SOLANA_ARC_MAINNET_ENABLED } from "@/lib/arc-kit";
 import type { BridgeSourceChain } from "@/lib/arc-kit";
+import { UnifiedBalanceCard } from "./unified-balance-card";
+import { useSolanaBalance } from "@/hooks/use-solana-balance";
 
 // ─── Unified wallet option — merges the user's Privy embedded wallet with any
 // injected (EIP-6963) browser wallets, so funding works with or without a
@@ -56,7 +58,7 @@ function useFundingWallets() {
       .filter((w) => w.walletClientType === "privy")
       .map((w) => ({
         id: `privy-${w.address}`,
-        name: "Bottie Wallet",
+        name: "Bluvfi Wallet",
         address: w.address,
         provider: {
           request: async (args) => {
@@ -185,7 +187,7 @@ function WalletSelector({
           <div className="flex-1">
             <p className="text-sm font-medium text-[#F2F0E8]">{option.name}</p>
             <p className="text-xs text-[#A7A79A]">
-              {option.address ? "Your Bottie wallet" : "Click to connect"}
+              {option.address ? "Your Bluvfi wallet" : "Click to connect"}
             </p>
           </div>
           <span className="text-[#8FAE82] text-xs font-medium">
@@ -255,11 +257,29 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
         token: "USDC",
       });
 
+      const sendSuccess = result.state === "success";
       setTxState({
-        status: result.state === "success" ? "success" : "error",
+        status: sendSuccess ? "success" : "error",
         explorerUrl: (result as any).explorerUrl,
-        message: result.state !== "success" ? "Transfer could not be completed." : "",
+        message: !sendSuccess ? "Transfer could not be completed." : "",
       } as TxState);
+
+      // Persist the send to the payments ledger
+      if (sendSuccess) {
+        fetch("/api/payments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "transfer",
+            referenceId: (result as any).hash ?? (result as any).transactionHash ?? null,
+            description: `Arc send: ${amount} USDC → agent wallet`,
+            amountUsdc: amount,
+            status: "completed",
+            txHash: (result as any).hash ?? (result as any).transactionHash ?? null,
+            chain: "evm",
+          }),
+        }).catch(() => {});
+      }
     } catch (err: any) {
       const msg = err?.message ?? "";
       setTxState({
@@ -286,7 +306,7 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
           </button>
         </div>
         <p className="mt-1.5 text-[11px] text-[#A7A79A]">
-          Share this address to receive funds from any wallet on Base Sepolia.
+          Share this address to receive funds from any wallet on Base.
         </p>
       </div>
 
@@ -299,7 +319,7 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
       {/* Wallet selector */}
       <div>
         <p className="mb-1.5 text-xs font-medium text-[#A7A79A]">
-          Choose a wallet (Base Sepolia)
+          Choose a wallet (Base)
         </p>
         <WalletSelector
           options={options}
@@ -376,11 +396,29 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
         token: "USDC",
       });
 
+      const bridgeSuccess = result.state === "success";
       setTxState({
-        status: result.state === "success" ? "success" : "error",
+        status: bridgeSuccess ? "success" : "error",
         explorerUrl: (result as any).explorerUrl,
-        message: result.state !== "success" ? "Bridge could not be completed." : "",
+        message: !bridgeSuccess ? "Bridge could not be completed." : "",
       } as TxState);
+
+      // Persist bridge transaction
+      if (bridgeSuccess) {
+        fetch("/api/payments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "bridge",
+            referenceId: (result as any).hash ?? (result as any).transactionHash ?? null,
+            description: `Arc bridge: ${amount} USDC from ${selectedSource.label} → Base`,
+            amountUsdc: amount,
+            status: "completed",
+            txHash: (result as any).hash ?? (result as any).transactionHash ?? null,
+            chain: "evm",
+          }),
+        }).catch(() => {});
+      }
     } catch (err: any) {
       const msg = err?.message ?? "";
       setTxState({
@@ -396,7 +434,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
     <div className="flex flex-col gap-4">
       {/* Info blurb */}
       <div className="rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3 text-xs text-[#A7A79A] leading-relaxed">
-        Bridge moves funds from another network into your wallet on Base Sepolia automatically — no manual steps needed.
+        Bridge moves funds from another network into your wallet on Base automatically — no manual steps needed.
       </div>
 
       {/* Source chain selector */}
@@ -406,18 +444,35 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
         </label>
         <div className="flex flex-wrap gap-2">
           {BRIDGE_SOURCE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setSourceChain(opt.value as BridgeSourceChain)}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                sourceChain === opt.value
-                  ? "bg-[#F2F0E8] text-[#141513]"
-                  : "bg-white/[0.06] text-[#A7A79A]"
-              }`}
-            >
-              <span>{opt.icon}</span>
-              {opt.label}
-            </button>
+            <div key={opt.value} className="relative group">
+              <button
+                onClick={() => !opt.disabled && setSourceChain(opt.value as BridgeSourceChain)}
+                disabled={opt.disabled}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                  opt.disabled
+                    ? "cursor-not-allowed opacity-40 bg-white/[0.03] text-[#A7A79A]"
+                    : sourceChain === opt.value
+                    ? "bg-[#F2F0E8] text-[#141513]"
+                    : "bg-white/[0.06] text-[#A7A79A] hover:bg-white/[0.10]"
+                }`}
+              >
+                <span>{opt.icon}</span>
+                {opt.label}
+                {opt.disabled && (
+                  <span className="ml-1 rounded px-1 py-0.5 text-[9px] font-semibold bg-[#9945FF]/20 text-[#9945FF] leading-none">
+                    MAINNET
+                  </span>
+                )}
+              </button>
+              {/* Tooltip shown on hover when disabled */}
+              {opt.disabled && (
+                <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1E1F1B] border border-[#2A2B27] px-3 py-1.5 text-[11px] text-[#A7A79A] opacity-0 group-hover:opacity-100 transition-opacity z-50">
+                  {SOLANA_ARC_MAINNET_ENABLED
+                    ? "Not available"
+                    : "Available on Solana mainnet"}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -426,7 +481,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
       <div className="flex items-center justify-between rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3">
         <div>
           <p className="text-xs text-[#A7A79A]">To network</p>
-          <p className="text-sm font-medium text-[#F2F0E8]">🔷 Base Sepolia</p>
+          <p className="text-sm font-medium text-[#F2F0E8]">🔷 Base</p>
         </div>
         <div className="text-right">
           <p className="text-xs text-[#A7A79A]">Recipient</p>
@@ -475,7 +530,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
             >
               {txState.status === "pending"
                 ? txState.label
-                : `Bridge $${amount || "0.00"} → Base Sepolia`}
+                : `Bridge $${amount || "0.00"} → Base`}
             </button>
           )}
         </>
@@ -484,22 +539,88 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
   );
 }
 
+// ─── Solana receive tab ───────────────────────────────────────────────────────
+
+function SolanaReceiveTab({ solanaAddress }: { solanaAddress: string }) {
+  const { wallets } = useWallets();
+  const solWallet = wallets.find((w) => (w as any).chainType === "solana") as any;
+  const { balance, isLoading } = useSolanaBalance(solanaAddress, solWallet?.id);
+  const { copied, copy } = useCopy(solanaAddress);
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Balance */}
+      <div className="rounded-2xl bg-[#141513] border border-[#2A2B27] px-5 py-4">
+        <p className="text-xs text-[#A7A79A] font-medium">Solana USDC Balance</p>
+        <p className="mt-1 text-2xl font-bold text-[#F2F0E8]">
+          {isLoading ? (
+            <span className="text-base text-[#A7A79A]">Loading…</span>
+          ) : (
+            `$${balance.toFixed(2)}`
+          )}
+        </p>
+        <p className="mt-0.5 text-[11px] text-[#A7A79A]">Mainnet USDC (◎ Solana)</p>
+      </div>
+
+      {/* Address card */}
+      <div>
+        <p className="mb-1.5 text-xs font-medium text-[#A7A79A]">Your Solana wallet address</p>
+        <div className="flex items-center gap-2 rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3">
+          <p className="flex-1 font-mono text-xs text-[#F2F0E8] truncate">{solanaAddress}</p>
+          <button
+            onClick={copy}
+            className="shrink-0 rounded-lg bg-[#9945FF]/20 px-3 py-1 text-xs font-medium text-[#9945FF]"
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* Instructions */}
+      <div className="rounded-xl bg-[#9945FF]/[0.06] border border-[#9945FF]/20 px-4 py-3 space-y-2">
+        <p className="text-xs font-semibold text-[#9945FF]">◎ Fund your Solana wallet</p>
+        <ul className="space-y-1 text-xs text-[#A7A79A] list-disc list-inside">
+          <li>Send <strong className="text-[#F2F0E8]">USDC on Solana mainnet</strong> to the address above</li>
+          <li>From Phantom, Backpack, Coinbase Wallet, or any Solana wallet</li>
+          <li>Only send USDC — other tokens won&apos;t be used for payments</li>
+          <li>Balance updates automatically every 30 seconds</li>
+        </ul>
+      </div>
+
+      {/* Refresh hint */}
+      <p className="text-center text-[11px] text-[#A7A79A]">
+        Sent funds? Wait 10–30 seconds for confirmation, then balance updates automatically.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main exported component ──────────────────────────────────────────────────
 
 interface FundWalletSheetProps {
   agentAddress: string;
+  /** User's Privy Solana wallet address — when provided, a Solana receive tab is shown */
+  solanaAddress?: string;
   onClose: () => void;
 }
 
-export function FundWalletSheet({ agentAddress, onClose }: FundWalletSheetProps) {
-  const [tab, setTab] = useState<"send" | "bridge">("send");
+export function FundWalletSheet({ agentAddress, solanaAddress, onClose }: FundWalletSheetProps) {
+  type Tab = "balances" | "send" | "bridge" | "solana";
+  const [tab, setTab] = useState<Tab>("balances");
+
+  const TABS: { key: Tab; label: string }[] = [
+    { key: "balances", label: "⊞ Balances" },
+    { key: "send",     label: "↗ Send"     },
+    { key: "bridge",   label: "⇌ Bridge"   },
+    ...(solanaAddress ? [{ key: "solana" as Tab, label: "◎ Solana" }] : []),
+  ];
 
   const sheet = (
     <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-lg rounded-t-3xl bg-[#1B1C19] border-t border-[#2A2B27] flex flex-col max-h-[90dvh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-4">
-          <h3 className="text-lg font-semibold text-[#F2F0E8]">Add Funds</h3>
+          <h3 className="text-lg font-semibold text-[#F2F0E8]">Wallet</h3>
           <button
             onClick={onClose}
             className="rounded-full p-1.5 text-[#A7A79A] hover:bg-white/[0.06]"
@@ -509,26 +630,34 @@ export function FundWalletSheet({ agentAddress, onClose }: FundWalletSheetProps)
         </div>
 
         {/* Tab switcher */}
-        <div className="flex gap-2 px-6 pb-4">
-          {(["send", "bridge"] as const).map((t) => (
+        <div className="flex gap-2 px-6 pb-4 overflow-x-auto">
+          {TABS.map((t) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`flex-1 rounded-full py-2 text-sm font-medium transition-colors ${
-                tab === t
-                  ? "bg-[#F2F0E8] text-[#141513]"
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`shrink-0 flex-1 min-w-fit rounded-full py-2 px-3 text-xs font-medium transition-colors ${
+                tab === t.key
+                  ? t.key === "solana"
+                    ? "bg-[#9945FF] text-white"
+                    : "bg-[#F2F0E8] text-[#141513]"
                   : "bg-white/[0.06] text-[#A7A79A]"
               }`}
             >
-              {t === "send" ? "↗ Send" : "⇌ Bridge"}
+              {t.label}
             </button>
           ))}
         </div>
 
         {/* Scrollable content */}
         <div className="overflow-y-auto px-6 pb-10 flex-1">
-          {tab === "send" && <SendTab agentAddress={agentAddress} />}
-          {tab === "bridge" && <BridgeTab agentAddress={agentAddress} />}
+          {tab === "balances" && (
+            <UnifiedBalanceCard onBridge={() => setTab("bridge")} />
+          )}
+          {tab === "send"     && <SendTab agentAddress={agentAddress} />}
+          {tab === "bridge"   && <BridgeTab agentAddress={agentAddress} />}
+          {tab === "solana"   && solanaAddress && (
+            <SolanaReceiveTab solanaAddress={solanaAddress} />
+          )}
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import type { PrivyClientConfig } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
-import { baseSepolia } from "viem/chains";
+import { base } from "viem/chains";
 
 export const privyConfig: PrivyClientConfig = {
   loginMethods: ["email", "google", "passkey"],
@@ -24,6 +24,6 @@ export const privyConfig: PrivyClientConfig = {
       connectors: toSolanaWalletConnectors(),
     },
   },
-  defaultChain: baseSepolia,
-  supportedChains: [baseSepolia],
+  defaultChain: base,
+  supportedChains: [base],
 };

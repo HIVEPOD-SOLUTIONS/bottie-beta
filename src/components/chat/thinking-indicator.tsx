@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const SPINNER_FRAMES = ["✦", "✧", "✶", "✷", "✸", "✹", "✺", "✻"];
 
-const BOTTIE_PHRASES = [
+const BLUVFI_PHRASES = [
   "Checking bills",
   "Crunching numbers",
   "Looking up prices",
@@ -19,7 +19,7 @@ const BOTTIE_PHRASES = [
 export function ThinkingIndicator() {
   const [frameIndex, setFrameIndex] = useState(0);
   const [phraseIndex, setPhraseIndex] = useState(
-    Math.floor(Math.random() * BOTTIE_PHRASES.length),
+    Math.floor(Math.random() * BLUVFI_PHRASES.length),
   );
 
   useEffect(() => {
@@ -31,7 +31,7 @@ export function ThinkingIndicator() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setPhraseIndex((prev) => (prev + 1) % BOTTIE_PHRASES.length);
+      setPhraseIndex((prev) => (prev + 1) % BLUVFI_PHRASES.length);
     }, 1500);
     return () => clearInterval(interval);
   }, []);
@@ -57,7 +57,7 @@ export function ThinkingIndicator() {
           transition={{ duration: 0.3 }}
           className="font-body text-xs text-sage"
         >
-          {BOTTIE_PHRASES[phraseIndex]}...
+          {BLUVFI_PHRASES[phraseIndex]}...
         </motion.span>
       </AnimatePresence>
     </motion.div>

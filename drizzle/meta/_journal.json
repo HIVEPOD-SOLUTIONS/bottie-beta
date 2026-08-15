@@ -8,6 +8,13 @@
       "when": 1783278090523,
       "tag": "0000_nice_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786696353367,
+      "tag": "0001_magical_robin_chapel",
+      "breakpoints": true
     }
   ]
 }

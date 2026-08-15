@@ -1,5 +1,7 @@
 import { verifyAuth } from "@/lib/auth";
 import { getProvider } from "@/lib/banking/registry";
+import { db } from "@/lib/db";
+import { payments } from "@/lib/db/schema";
 
 export async function POST(
   req: Request,
@@ -46,6 +48,21 @@ export async function POST(
     } else {
       return Response.json({ error: `Unsupported payout currency: ${currency}` }, { status: 422 });
     }
+
+    // Record pending payout — webhook updates to completed/failed via merchant_payout_id
+    const payoutId = data?.data?.payout_id ?? data?.payout_id ?? null;
+    const merchantPayoutId = data?.data?.merchant_payout_id ?? data?.merchant_payout_id ?? payoutId;
+    const amount = rest.amount as number;
+    db.insert(payments).values({
+      userId,
+      type: "offramp",
+      referenceId: merchantPayoutId ? String(merchantPayoutId) : null,
+      description: `${cur.toUpperCase()} payout: ${amount} via ${providerId}`,
+      amountUsdc: String(amount),
+      status: "pending",
+      chain: "evm",
+    }).catch(() => {});
+
     return Response.json(data);
   } catch (err: any) {
     return Response.json({ error: err?.message ?? "Failed" }, { status: 502 });

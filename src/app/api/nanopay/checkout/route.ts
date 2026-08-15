@@ -6,10 +6,13 @@
  */
 import { NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { payments } from "@/lib/db/schema";
 
 export async function POST(req: Request) {
+  let userId: string;
   try {
-    await verifyAuth();
+    ({ userId } = await verifyAuth());
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -30,6 +33,20 @@ export async function POST(req: Request) {
     }
 
     const result = await client.pay(resourceUrl);
+
+    // Record the checkout nanopayment in the DB
+    const paidUsdc = result?.amount != null ? Number(result.amount) / 1_000_000 : 0;
+    db.insert(payments).values({
+      userId,
+      type: "nanopay",
+      referenceId: result?.transaction ?? null,
+      description: "Circle nanopay checkout: post-bill/investment settlement",
+      amountUsdc: String(paidUsdc),
+      status: "completed",
+      txHash: result?.transaction ?? null,
+      chain: "evm",
+    }).catch(() => {});
+
     return NextResponse.json({
       usedNanopay: true,
       txHash: result?.transaction ?? null,
