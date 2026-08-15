@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
 import { investments, payments } from "@/lib/db/schema";
 import { DEMO_ASSETS } from "@/lib/demo-data";
@@ -10,8 +11,8 @@ export async function POST(req: Request) {
   try {
     const auth = await verifyAuth();
     userId = auth.userId;
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   let body: Record<string, unknown>;

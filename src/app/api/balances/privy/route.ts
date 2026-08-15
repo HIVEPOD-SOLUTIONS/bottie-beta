@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 
 const PRIVY_API = "https://api.privy.io/v1";
 
@@ -114,8 +115,8 @@ async function fetchSolanaWallet(
 export async function GET(req: NextRequest) {
   try {
     await verifyAuth();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   const appId     = process.env.NEXT_PUBLIC_PRIVY_APP_ID;

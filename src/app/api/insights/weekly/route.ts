@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { eq, desc, gte, and } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
 import { payments, balanceSnapshots, weeklyInsights } from "@/lib/db/schema";
 import { geminiGenerateText } from "@/lib/gemini";
@@ -43,8 +44,8 @@ export async function GET() {
   let userId: string;
   try {
     ({ userId } = await verifyAuth());
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   try {
@@ -67,8 +68,8 @@ export async function POST() {
   let userId: string;
   try {
     ({ userId } = await verifyAuth());
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   // Per-user rate limit — each POST hits Gemini with a large DB-backed prompt.

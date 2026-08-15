@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
 import { bitrefillOrders } from "@/lib/db/schema";
 
@@ -17,8 +18,8 @@ export async function GET(req: Request) {
   let userId: string;
   try {
     ({ userId } = await verifyAuth());
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   const { searchParams } = new URL(req.url);
@@ -47,8 +48,8 @@ export async function POST(req: Request) {
   let userId: string;
   try {
     ({ userId } = await verifyAuth());
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   let body: Record<string, unknown>;

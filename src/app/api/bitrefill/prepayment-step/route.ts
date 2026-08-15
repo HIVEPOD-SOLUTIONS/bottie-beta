@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mcpSubmitPrepaymentStep } from "@/lib/bitrefill-mcp";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 
 /**
  * POST /api/bitrefill/prepayment-step
@@ -16,8 +17,8 @@ import { verifyAuth } from "@/lib/auth";
 export async function POST(req: NextRequest) {
   try {
     await verifyAuth();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   try {

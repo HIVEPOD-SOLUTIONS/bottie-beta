@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { authFetch } from "@/lib/api-auth-fetch";
+import { AuthTokenUnavailableError, authFetch } from "@/lib/api-auth-fetch";
 
 export interface Payment {
   id: string;
@@ -62,6 +62,10 @@ export function usePayments(type?: "bill" | "investment") {
       const data = await res.json();
       setPayments(data.payments ?? []);
     } catch (err: any) {
+      if (err instanceof AuthTokenUnavailableError) {
+        setError(null);
+        return;
+      }
       setError(err?.message ?? "Unknown error");
     } finally {
       setLoading(false);

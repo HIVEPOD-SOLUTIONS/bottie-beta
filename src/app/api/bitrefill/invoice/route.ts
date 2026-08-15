@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mcpBuyProducts } from "@/lib/bitrefill-mcp";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
 import { bitrefillOrders, payments } from "@/lib/db/schema";
 
@@ -24,8 +25,8 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await verifyAuth();
     userId = auth.userId;
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   let body: {

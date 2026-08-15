@@ -3,13 +3,26 @@ import { cookies, headers } from "next/headers";
 
 let privy: PrivyClient | undefined;
 
+type AuthErrorCode = "missing_token" | "auth_not_configured" | "invalid_token";
+
+export class AuthError extends Error {
+  constructor(
+    public readonly code: AuthErrorCode,
+    message: string,
+    public readonly status = code === "auth_not_configured" ? 503 : 401,
+  ) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
 function getPrivyClient() {
   if (privy) return privy;
 
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const appSecret = process.env.PRIVY_APP_SECRET;
   if (!appId || !appSecret) {
-    throw new Error("Privy server credentials are not configured");
+    throw new AuthError("auth_not_configured", "Privy server credentials are not configured");
   }
 
   privy = new PrivyClient(appId, appSecret);
@@ -35,17 +48,18 @@ export async function verifyAuth(): Promise<{ userId: string }> {
       cookieStore.get("privy-id-token")?.value;
   }
 
-  if (!token) throw new Error("Unauthorized");
+  if (!token) throw new AuthError("missing_token", "Missing authentication token");
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = await getPrivyClient().verifyAuthToken(token);
       return { userId: result.userId };
-    } catch {
-      if (attempt === 1) throw new Error("Unauthorized");
+    } catch (err) {
+      if (err instanceof AuthError && err.code === "auth_not_configured") throw err;
+      if (attempt === 1) throw new AuthError("invalid_token", "Invalid authentication token");
       await new Promise((r) => setTimeout(r, 50));
     }
   }
 
-  throw new Error("Unauthorized");
+  throw new AuthError("invalid_token", "Invalid authentication token");
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
 import { payments, bitrefillOrders } from "@/lib/db/schema";
 import { mcpGetInvoice } from "@/lib/bitrefill-mcp";
@@ -20,8 +21,8 @@ export async function POST() {
   try {
     const auth = await verifyAuth();
     userId = auth.userId;
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (err) {
+    return authErrorResponse(err);
   }
 
   try {
