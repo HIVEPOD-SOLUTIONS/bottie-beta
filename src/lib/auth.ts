@@ -1,6 +1,6 @@
 import { PrivyClient } from "@privy-io/server-auth";
 import { cookies, headers } from "next/headers";
-import { getServerEnv } from "@/lib/server-env";
+import { getServerEnv, getServerEnvDiagnostic } from "@/lib/server-env";
 
 let privy: PrivyClient | undefined;
 
@@ -23,9 +23,38 @@ function getPrivyClient() {
   const appId = getServerEnv("NEXT_PUBLIC_PRIVY_APP_ID");
   const appSecret = getServerEnv("PRIVY_APP_SECRET");
   if (!appId || !appSecret) {
+    const appIdDiag = getServerEnvDiagnostic("NEXT_PUBLIC_PRIVY_APP_ID");
+    const appSecretDiag = getServerEnvDiagnostic("PRIVY_APP_SECRET");
+    console.error("[auth] Privy server credentials are not configured", {
+      appId: {
+        configured: appIdDiag.configured,
+        source: appIdDiag.source,
+        directPresent: appIdDiag.direct.present,
+        directTrimmedLength: appIdDiag.direct.trimmedLength,
+      },
+      appSecret: {
+        configured: appSecretDiag.configured,
+        source: appSecretDiag.source,
+        directPresent: appSecretDiag.direct.present,
+        directTrimmedLength: appSecretDiag.direct.trimmedLength,
+        secretStores: appSecretDiag.secretStores.map((store) => ({
+          envName: store.envName,
+          present: store.present,
+          parses: store.parses,
+          containsKey: store.containsKey,
+          valueTrimmedLength: store.valueTrimmedLength,
+        })),
+      },
+    });
     throw new AuthError("auth_not_configured", "Privy server credentials are not configured");
   }
 
+  console.info("[auth] Constructing Privy server client", {
+    appIdSource: getServerEnvDiagnostic("NEXT_PUBLIC_PRIVY_APP_ID").source,
+    appSecretSource: getServerEnvDiagnostic("PRIVY_APP_SECRET").source,
+    appIdLength: appId.length,
+    appSecretLength: appSecret.length,
+  });
   privy = new PrivyClient(appId, appSecret);
   return privy;
 }
