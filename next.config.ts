@@ -1,6 +1,5 @@
 import withSerwistInit from "@serwist/next";
 import type { NextConfig } from "next";
-import path from "path";
 
 const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
@@ -11,19 +10,6 @@ const withSerwist = withSerwistInit({
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   turbopack: {},
-
-  // De-duplicate nested viem copies bundled inside @walletconnect/utils.
-  // Those nested copies have incomplete ESM builds (missing parseAvatarRecord.js
-  // and recoverAuthorizationAddress.js). Aliasing to the package *directory*
-  // (not the entry file) preserves sub-path exports (viem/chains, viem/accounts)
-  // while forcing every importer to use the same root viem install.
-  webpack(config) {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      viem: path.resolve(process.cwd(), "node_modules/viem"),
-    };
-    return config;
-  },
 
   serverExternalPackages: [
     "@solana/pay-kit",
