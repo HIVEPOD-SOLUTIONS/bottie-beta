@@ -6,7 +6,6 @@ Bluvfi is a mobile-first AI financial assistant that lets you manage recurring s
 
 ---
 
-
 ## How it works
 
 1. **Sign up with email or social.** Privy creates an embedded EOA wallet — no seed phrases, no browser extension required.
