@@ -109,11 +109,20 @@ function buildCSP(): string {
       "https://avax-mainnet.g.alchemy.com",
       "https://solana-mainnet.g.alchemy.com",
       "https://api.mainnet-beta.solana.com",
-      // Public Base RPC fallbacks used by Circle's viem adapter
+      // Public RPC endpoints used by Circle's Arc AppKit viem adapter.
+      // These are the adapter's built-in fallback RPCs for each supported chain.
+      // Arbitrum
+      "https://arb1.arbitrum.io",
+      // Polygon
+      "https://polygon.drpc.org",
+      // Avalanche
+      "https://api.avax.network",
+      // Base fallbacks
       "https://mainnet.base.org",
       "https://base.publicnode.com",
       "https://base.meowrpc.com",
       "https://base.drpc.org",
+      // Covers ethereum.publicnode.com, polygon.publicnode.com, etc.
       "https://*.publicnode.com",
       "https://*.neon.tech",
       "wss://*.privy.io",

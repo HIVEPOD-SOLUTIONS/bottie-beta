@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mcpBuyProducts } from "@/lib/bitrefill-mcp";
+import { mcpBuyProducts, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
@@ -68,14 +68,26 @@ export async function POST(req: NextRequest) {
   const resolvedPackageId = packageId ?? String(body.packageAmount ?? body.customValue ?? "");
 
   // Link-only methods (fiat, exchange pay) need the web checkout URL.
-  // All crypto methods — whether we pay via ArcKit or show a deposit address —
-  // need the raw payment_info (address + amount), so returnPaymentLink must be false.
+  // Auto-pay methods (usdc_base, usdt_erc20, etc.) — our wallet cascade sends to
+  // payment_info.address, so returnPaymentLink must stay false for those.
+  // Address-based (manual deposit) methods — verified Bitrefill still returns
+  // payment_info.address with returnPaymentLink=true (bitcoin/ton/solana/ark all
+  // confirmed), so we request it for these too: several of them (bitcoin, ton,
+  // usdt_ton, ark, solana under guest checkout) never return an altcoinPrice/amount
+  // at all, and payment_link is the only way to show the user the exact amount.
   const LINK_ONLY_METHODS = new Set([
     "fiat_card", "google_pay", "apple_pay", "ideal", "eps", "p24", "bancontact",
     "binance_pay", "kraken_pay",
   ]);
   const pm = paymentMethod ?? "usdc_base";
-  const returnPaymentLink = LINK_ONLY_METHODS.has(pm);
+  const returnPaymentLink = LINK_ONLY_METHODS.has(pm) || ADDRESS_BASED_PAYMENT_METHODS.has(pm);
+
+  // Build the webhook URL — only send to Bitrefill when we have a public HTTPS base URL.
+  // Localhost webhooks can't be reached by Bitrefill's servers, so we omit them.
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const webhookUrl = appUrl.startsWith("https://")
+    ? `${appUrl}/api/bitrefill/webhook`
+    : undefined;
 
   try {
     const invoice = await mcpBuyProducts({
@@ -87,6 +99,7 @@ export async function POST(req: NextRequest) {
       refillInput:   sendTo,
       gift,
       returnPaymentLink,
+      webhookUrl,
     });
 
     // ── Persist pending invoice to DB ────────────────────────────────────────
@@ -95,7 +108,11 @@ export async function POST(req: NextRequest) {
     const invoiceId: string = (invoice as any)?.id ?? (invoice as any)?.invoiceId ?? "";
     const productName: string | undefined = (invoice as any)?.product?.name ?? (invoice as any)?.productName;
     const payInfo = (invoice as any)?.payment_info ?? {};
-    const isAddressBased: boolean = !!(invoice as any)?.payment_info?.address;
+    // Bitrefill returns a payment_info.address for EVERY crypto method — including
+    // the automatic-pay ones our wallet cascade sends to — so `!!address` can't
+    // distinguish "user must send manually" from "app pays automatically". Classify
+    // by method id instead, using the same set the AI's buy_bitrefill_product uses.
+    const isAddressBased: boolean = ADDRESS_BASED_PAYMENT_METHODS.has(pm);
     const paymentAddress: string | undefined = payInfo?.address;
     const paymentAmount: string | undefined = payInfo?.amount != null ? String(payInfo.amount) : undefined;
     const paymentCurrency: string | undefined = payInfo?.currency;
@@ -138,8 +155,21 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(invoice);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Invoice creation failed";
-    console.error("[/api/bitrefill/invoice POST]", message);
-    return NextResponse.json({ error: message }, { status: 502 });
+    const raw = err instanceof Error ? err.message : "Invoice creation failed";
+    console.error("[/api/bitrefill/invoice POST]", raw);
+
+    // Strip the MCP transport wrapper so callers get the real Bitrefill message.
+    // "Streamable HTTP error: Error POSTing to endpoint: {…json…}"
+    let message = raw;
+    const jsonStart = raw.indexOf("{");
+    if (raw.includes("Streamable HTTP") && jsonStart !== -1) {
+      try {
+        const inner = JSON.parse(raw.slice(jsonStart)) as { message?: string; status?: string };
+        message = inner.message ?? inner.status ?? raw;
+      } catch { /* keep raw */ }
+    }
+
+    const status = message.toLowerCase().includes("rate_limit") || message.toLowerCase().includes("quota") ? 429 : 502;
+    return NextResponse.json({ error: message }, { status });
   }
 }

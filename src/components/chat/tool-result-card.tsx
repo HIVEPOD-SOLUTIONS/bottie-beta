@@ -69,7 +69,8 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
       <div className="my-2 rounded-xl border border-[#2A2B27] bg-[#1B1C19] px-4 py-3 space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold text-[#F2F0E8]">
-            {pmMeta.icon} {pmMeta.label} · {data.paymentAmount ?? "?"} {data.paymentCurrency ?? ""}
+            {pmMeta.icon} {pmMeta.label}
+            {data.paymentAmount != null ? ` · ${data.paymentAmount} ${data.paymentCurrency ?? ""}` : ""}
           </p>
           {data.expiresInMinutes && (
             <span className="text-[10px] text-[#A7A79A]">Expires in {data.expiresInMinutes}m</span>
@@ -87,9 +88,27 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
               </p>
               <p className="font-mono text-[10px] text-[#F2F0E8] break-all">{data.paymentAddress}</p>
             </div>
-            <p className="text-[10px] text-[#A7A79A]">
-              Send exactly <span className="text-[#F2F0E8] font-mono">{data.paymentAmount} {data.paymentCurrency}</span> to the address above.
-            </p>
+            {data.paymentAmount != null ? (
+              <p className="text-[10px] text-[#A7A79A]">
+                Send exactly <span className="text-[#F2F0E8] font-mono">{data.paymentAmount} {data.paymentCurrency}</span> to the address above.
+              </p>
+            ) : data.paymentLink ? (
+              // Bitcoin, TON, usdt_ton, ark, and Solana never return an exact
+              // amount under guest checkout — Bitrefill's own hosted checkout
+              // page is the only place that shows it.
+              <a
+                href={data.paymentLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-[10px] font-semibold text-amber-300 hover:text-amber-200"
+              >
+                ⚠ Bitrefill didn&apos;t provide an exact amount — view it on Bitrefill →
+              </a>
+            ) : (
+              <p className="text-[10px] text-amber-400/90">
+                ⚠ Bitrefill didn&apos;t provide an exact amount for this network.
+              </p>
+            )}
           </>
         ) : (
           <p className="text-xs text-[#A7A79A]">

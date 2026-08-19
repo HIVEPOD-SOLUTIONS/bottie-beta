@@ -23,12 +23,6 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import {
-  cliSearchProducts,
-  cliGetProductDetails,
-  cliBuyProducts,
-  cliGetInvoice,
-} from "./bitrefill-cli";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
@@ -150,6 +144,16 @@ function buildMcpUrl(): string {
 }
 
 const MCP_URL = buildMcpUrl();
+
+// One-time boot log — confirms whether BITREFILL_AFFILIATE_CODE was picked up.
+// It's baked into MCP_URL above, so every search/details/buy/poll call carries
+// it automatically; this just makes a missing/empty value visible in deploy logs
+// instead of silently costing affiliate revenue with no signal anywhere.
+console.log(
+  process.env.BITREFILL_AFFILIATE_CODE?.trim()
+    ? "[bitrefill-mcp] Affiliate code detected — ref param attached to all MCP requests."
+    : "[bitrefill-mcp] No BITREFILL_AFFILIATE_CODE set — purchases will NOT be attributed to an affiliate.",
+);
 
 /**
  * True only when an API key is embedded in the URL path (not just a bare base URL).
@@ -854,6 +858,12 @@ export async function mcpBuyProducts(opts: {
     theme?: string;
     send_date?: string;
   };
+  /**
+   * HTTPS URL that Bitrefill will POST to when the invoice reaches a terminal state
+   * (complete | denied | payment_error). Only pass when the app is deployed publicly
+   * (i.e. NEXT_PUBLIC_APP_URL starts with https://). Never pass localhost URLs.
+   */
+  webhookUrl?: string;
 }): Promise<MCPInvoice> {
   // Resolve the receipt/delivery email.
   // buy-products requires a top-level `email` field (for the receipt).
@@ -885,12 +895,17 @@ export async function mcpBuyProducts(opts: {
     };
   }
 
-  const raw = await callTool("buy-products", {
+  const buyArgs: Record<string, unknown> = {
     cart_items:          [cartItem],
     payment_method:      opts.paymentMethod ?? "usdc_base",
     email:               receiptEmail,
     return_payment_link: opts.returnPaymentLink ?? false,
-  });
+  };
+  // Only include webhook_url for publicly reachable HTTPS URLs (never localhost)
+  if (opts.webhookUrl?.startsWith("https://")) {
+    buyArgs.webhook_url = opts.webhookUrl;
+  }
+  const raw = await callTool("buy-products", buyArgs);
 
   return normalizeInvoice(raw);
 }
@@ -1144,6 +1159,30 @@ export async function mcpSubmitPrepaymentStep(opts: {
 }
 
 // ── Code extraction ───────────────────────────────────────────────────────────
+
+/**
+ * Payment method ids where the client shows a raw deposit address for the user
+ * to send funds to manually — as opposed to the "automatic pay" USDC/USDT
+ * methods, where the app's own wallet (Privy smart wallet → Privy EOA →
+ * ArcKit cascade) sends the payment without any user action.
+ *
+ * Bitrefill returns a `payment_info.address` for *every* crypto payment
+ * method (including the automatic-pay ones — it's the address our wallet
+ * cascade sends to), so `!!payment_info.address` is NOT a valid way to derive
+ * this distinction. Always classify by method id against this set instead.
+ *
+ * Single source of truth for both purchase paths — the AI's buy_bitrefill_product
+ * (src/lib/ai/tools.ts) and the dashboard's invoice route
+ * (src/app/api/bitrefill/invoice/route.ts) — so bitrefill_orders.isAddressBased
+ * means the same thing regardless of which path created the row.
+ */
+export const ADDRESS_BASED_PAYMENT_METHODS = new Set([
+  "usdt_bsc", "usdc_bsc", "usdt_trc20", "usdt_ton", "usdt_sui", "usdc_sui",
+  "usdt_lightning", "usdc_tempo", "usdt_tempo",
+  "brusd_base", "brusd_erc20", "brusd_polygon", "brusd_arbitrum", "brusd_bsc",
+  "ethereum", "eth_base", "eth_arbitrum", "solana", "sui",
+  "bnb_bsc", "bitcoin", "lightning", "ton", "litecoin", "dogecoin", "dash", "ark", "brc_solana",
+]);
 
 /**
  * Extract the redemption code from a completed invoice.

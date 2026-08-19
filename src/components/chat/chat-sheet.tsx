@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
-import { useSignTransaction } from "@privy-io/react-auth/solana";
-import { Connection, Keypair, Transaction } from "@solana/web3.js";
+import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
+import { Connection, Keypair, Transaction, VersionedTransaction } from "@solana/web3.js";
+import type { Chain } from "viem";
 import { useChatSheet } from "@/contexts/chat-context";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
 import { useDemoState } from "@/contexts/demo-state-context";
@@ -258,7 +258,22 @@ const BITREFILL_SMART_WALLET_TOKENS: Record<string, { contract: `0x${string}`; c
   usdt_arbitrum: { contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", chainId: 42161 },
   usdc_optimism: { contract: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", chainId: 10    },
   usdt_optimism: { contract: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", chainId: 10    },
+  // BSC (usdt_bsc) is intentionally absent — Privy's paymaster has no BSC support.
+  // usdt_bsc bypasses smart wallet entirely and goes straight to manual deposit address.
 };
+
+/** Human-readable network name for a Bitrefill payment method ID. */
+function evmNetworkLabel(pm: string): string {
+  const map: Record<string, string> = {
+    usdc_base:     "Base",      usdt_base:     "Base",
+    usdc_erc20:    "Ethereum",  usdt_erc20:    "Ethereum",
+    usdc_polygon:  "Polygon",   usdt_polygon:  "Polygon",
+    usdc_arbitrum: "Arbitrum",  usdt_arbitrum: "Arbitrum",
+    usdc_optimism: "Optimism",  usdt_optimism: "Optimism",
+    usdt_bsc:      "BSC (BEP-20)",
+  };
+  return map[pm] ?? pm;
+}
 
 function BitrefillPaymentCard({
   toolCallId,
@@ -278,78 +293,298 @@ function BitrefillPaymentCard({
   addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { wallets } = useWallets();
-  const { client: smartWalletClient } = useSmartWallets();
-  const [state, setState] = useState<"idle" | "paying" | "done" | "error">("idle");
+  const { wallets: solanaWallets } = useSolanaWallets();
+  // `sendTransaction(..., { sponsor: true })` triggers Privy's native gas
+  // sponsorship (EIP-7702) on the user's existing embedded wallet — the
+  // "Gas management" dashboard feature. Falls back to Layer 2 (user pays
+  // native gas) and Layer 3 (ArcKit) if unavailable.
+  const { user: privyUser, sendTransaction: privySendTransaction } = usePrivy();
+  const [state, setState] = useState<"idle" | "paying" | "done" | "error" | "manual">("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [manualAddress, setManualAddress] = useState<string | null>(null);
+  const [manualCopied, setManualCopied] = useState(false);
 
-  // Derive a human-readable currency label from paymentMethod when paymentCurrency is absent.
-  // Bitrefill's invoice sometimes omits the currency string for EVM methods.
+  // Derive the payment method ID and human-readable currency label.
+  // paymentCurrency is sometimes omitted by Bitrefill for EVM methods.
+  const pm = (output.paymentMethod ?? "usdc_base") as string;
   const currencyLabel =
     output.paymentCurrency ||
-    (output.paymentMethod?.includes("usdt") ? "USDT" : "USDC");
+    (pm.includes("usdt") ? "USDT" : "USDC");
 
   const handlePay = async () => {
     setState("paying");
     setErrMsg(null);
     try {
-      const pm = output.paymentMethod ?? "usdc_base";
       const isSolana = pm.includes("solana");
 
       if (isSolana) {
-        const solWallet = wallets.find((w) => (w as any).chainType === "solana");
+        // Direct SPL token transfer — mirrors the EVM USDT direct-viem path.
+        // Uses @solana/spl-token to find ATAs, run a pre-flight balance check,
+        // and build the instruction. The Privy Solana wallet signs the tx bytes.
+        const solWallet = solanaWallets[0];
         if (!solWallet) throw new Error("No Solana wallet connected");
-        const provider = await (solWallet as any).getSolanaProvider?.();
-        if (!provider) throw new Error("Solana provider unavailable");
-        const { createSolanaAdapterFromProvider } = await import("@circle-fin/adapter-solana");
-        const { arcKit, SOLANA_ARC_CHAIN } = await import("@/lib/arc-kit");
-        const adapter = await createSolanaAdapterFromProvider({ provider });
-        const token = pm.includes("usdt") ? "USDT" : "USDC";
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await arcKit.send({ from: { adapter: adapter as any, chain: SOLANA_ARC_CHAIN }, to: output.paymentAddress, amount: String(output.paymentAmount), token });
+
+        const { PublicKey, Transaction: SolTx, Connection: SolConnection } = await import("@solana/web3.js");
+        const { getAssociatedTokenAddress, createTransferInstruction, getAccount, TOKEN_PROGRAM_ID } =
+          await import("@solana/spl-token");
+
+        const solRpc = `https://solana-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`;
+        const connection = new SolConnection(solRpc, "confirmed");
+
+        // Resolve SPL mint — USDC or USDT on Solana mainnet
+        const SOLANA_MINTS: Record<string, string> = {
+          USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        };
+        const token          = pm.includes("usdt") ? "USDT" : "USDC";
+        const mint           = new PublicKey(SOLANA_MINTS[token]);
+        const senderPubkey   = new PublicKey(solWallet.address);
+        const receiverPubkey = new PublicKey(output.paymentAddress);
+
+        // Pre-flight: verify the sender has an ATA with sufficient balance
+        const senderAta     = await getAssociatedTokenAddress(mint, senderPubkey);
+        const senderAccount = await getAccount(connection, senderAta).catch(() => null);
+        if (!senderAccount) {
+          throw new Error(`Insufficient ${token} balance on Solana. Please add funds and try again.`);
+        }
+        const requiredMicro = BigInt(Math.round(Number(output.paymentAmount) * 1_000_000));
+        if (senderAccount.amount < requiredMicro) {
+          const bal = (Number(senderAccount.amount) / 1_000_000).toFixed(2);
+          throw new Error(
+            `Insufficient ${token} on Solana. You have $${bal} but need $${Number(output.paymentAmount).toFixed(2)}.`
+          );
+        }
+
+        // Receiver ATA (Bitrefill maintains their token accounts — no creation needed)
+        const receiverAta = await getAssociatedTokenAddress(mint, receiverPubkey);
+
+        // Build, sign, and send
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        const tx = new SolTx({ recentBlockhash: blockhash, feePayer: senderPubkey }).add(
+          createTransferInstruction(senderAta, receiverAta, senderPubkey, requiredMicro, [], TOKEN_PROGRAM_ID),
+        );
+        const txBytes = Buffer.from(tx.serialize({ requireAllSignatures: false }));
+        const { signedTransaction } = await solWallet.signTransaction({ transaction: txBytes });
+        const txSig = await connection.sendRawTransaction(SolTx.from(signedTransaction).serialize(), {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
+        await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
       } else {
+        // ── EVM payment ───────────────────────────────────────────────────────
+        // Layer 1: Privy native gas sponsorship (EIP-7702, `sponsor: true`) on the
+        //   embedded wallet — configured in the dashboard under Wallet
+        //   infrastructure → Gas management. NOT the same as ERC-4337 smart
+        //   *contract* wallets (@privy-io/react-auth/smart-wallets); that feature
+        //   creates a separate 4337 account and requires `user.smartWallet` to be
+        //   provisioned, which this app doesn't use.
+        // Layer 2: Privy EOA — direct ERC-20 transfer, user pays native gas (ETH/MATIC/etc.).
+        // Layer 3: ArcKit EOA fallback (Circle) for all EVM chains except BSC.
+        // BSC fallback: manual deposit address shown directly in the card UI.
+
+        // Turn a raw error into a short, human-readable one-liner for console
+        // logs. Some errors are already clean (e.g. ArcKit's own pre-flight
+        // check: "Insufficient token balance on Arbitrum"); others are a
+        // multi-hundred-character RPC/simulation dump (USDT on Ethereum reverts
+        // with a bare "invalid opcode" instead of a message when the balance is
+        // too low). Detect the known-noisy cases and say the real reason instead
+        // — the raw error is still passed as a separate console.error argument
+        // for anyone who needs the full trace.
+        const summarizeError = (err: unknown, pmId: string): string => {
+          const raw = (err as Error)?.message ?? String(err);
+          const m = raw.toLowerCase();
+          const network = pmId.includes("erc20") ? "Ethereum"
+            : pmId.includes("polygon") ? "Polygon"
+            : pmId.includes("arbitrum") ? "Arbitrum"
+            : pmId.includes("optimism") ? "Optimism"
+            : pmId.includes("base") ? "Base"
+            : "this network";
+          if (m.includes("balance_insufficient") || m.includes("insufficient token balance")) {
+            return raw.split("\n")[0]; // already clean, e.g. "Insufficient token balance on Arbitrum"
+          }
+          if (m.includes("invalid opcode") || m.includes("invalidfeopcode") || m.includes("fe opcode")) {
+            const token = pmId.includes("usdt") ? "USDT" : pmId.includes("usdc") ? "USDC" : "the token";
+            return `Insufficient ${token} balance on ${network} (contract reverted without a reason string)`;
+          }
+          if (m.includes("insufficient funds for gas") || m.includes("gas required exceeds allowance")) {
+            return `Insufficient native gas balance on ${network}`;
+          }
+          // Otherwise: RPC/simulation dumps are one giant multi-line string —
+          // the first line is almost always the actual message.
+          return raw.split("\n")[0];
+        };
+
         const swConfig = BITREFILL_SMART_WALLET_TOKENS[pm];
         let swSucceeded = false;
 
-        if (swConfig && smartWalletClient) {
+        if (swConfig) {
           try {
-            const { encodeFunctionData, erc20Abi, parseUnits } = await import("viem");
+            const { encodeFunctionData, erc20Abi, parseAbi, parseUnits } = await import("viem");
+            // USDT contracts (Ethereum, Polygon, Arbitrum) use a non-standard
+            // transfer() with no bool return — use a stripped ABI for all USDT.
+            const isUsdt = pm.includes("usdt");
+            const transferAbi = isUsdt
+              ? parseAbi(["function transfer(address to, uint256 amount)"])
+              : erc20Abi;
             const calldata = encodeFunctionData({
-              abi: erc20Abi,
+              abi: transferAbi,
               functionName: "transfer",
               args: [output.paymentAddress as `0x${string}`, parseUnits(String(output.paymentAmount), 6)],
             });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await smartWalletClient.sendTransaction({ calls: [{ to: swConfig.contract, data: calldata }], chain: { id: swConfig.chainId } as any });
+            await privySendTransaction(
+              {
+                to: swConfig.contract,
+                data: calldata,
+                chainId: swConfig.chainId,
+              },
+              { sponsor: true },
+            );
             swSucceeded = true;
           } catch (swErr: unknown) {
-            console.warn("[chat/bitrefill] Smart wallet failed, falling back to EOA:", (swErr as Error)?.message);
+            console.error(`[chat/bitrefill] Layer 1 ❌ Native gas sponsorship failed (${pm}):`, summarizeError(swErr, pm), swErr);
           }
         }
 
         if (!swSucceeded) {
-          const { createViemAdapterFromProvider } = await import("@circle-fin/adapter-viem-v2");
-          const { arcKit, AGENT_CHAIN } = await import("@/lib/arc-kit");
-          const { Blockchain } = await import("@circle-fin/app-kit");
-          const EVM_CHAIN_MAP: Record<string, typeof Blockchain[keyof typeof Blockchain]> = {
-            usdc_base:     Blockchain.Base,
-            usdc_erc20:    Blockchain.Ethereum,
-            usdt_erc20:    Blockchain.Ethereum,
-            usdc_polygon:  Blockchain.Polygon,
-            usdt_polygon:  Blockchain.Polygon,
-            usdc_arbitrum: Blockchain.Arbitrum,
-            usdt_arbitrum: Blockchain.Arbitrum,
-          };
-          const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-          if (!privyWallet) throw new Error("No EVM wallet connected");
-          const provider = await privyWallet.getEthereumProvider();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const adapter = await createViemAdapterFromProvider({ provider: provider as any });
-          const chain = EVM_CHAIN_MAP[pm] ?? AGENT_CHAIN;
-          const token = pm.includes("usdt") ? "USDT" : "USDC";
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = await arcKit.send({ from: { adapter, chain: chain as any }, to: output.paymentAddress, amount: String(output.paymentAmount), token });
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if ((result as any)?.state && (result as any).state !== "success") throw new Error("Transfer did not complete");
+          // BSC: no smart wallet, no EOA, no ArcKit — show manual deposit address card.
+          if (pm === "usdt_bsc") {
+            const addr = output.paymentAddress;
+            if (!addr) throw new Error("No deposit address returned for BSC USDT");
+            setManualAddress(addr);
+            setState("manual");
+            addToolResult({
+              tool: "buy_bitrefill_product",
+              toolCallId,
+              output: {
+                paid: false,
+                manualTransferRequired: true,
+                depositAddress: addr,
+                depositAmount: output.paymentAmount,
+                currency: "USDT",
+                network: "BSC (BEP-20)",
+                invoiceId: output.invoiceId,
+                tip: `BSC USDT requires manual transfer. The deposit address has been shown to the user. Ask them to send ${output.paymentAmount} USDT (BEP-20) to ${addr}, then call poll_bitrefill_order(invoiceId="${output.invoiceId}", isTopup=${!!output.isTopup}) every ~5 s until the status changes.`,
+              },
+            });
+            return;
+          }
+
+          // ── Layer 2: Privy EOA — direct ERC-20 transfer, user pays native gas ──
+          // The embedded Privy wallet signs the tx; the user needs ETH/MATIC/etc.
+          // for gas. No paymaster involved — plain EOA → contract call.
+          let eoaSucceeded = false;
+          if (swConfig) {
+            try {
+              const {
+                createWalletClient, createPublicClient, custom, http,
+                encodeFunctionData, erc20Abi, parseAbi, parseUnits,
+              } = await import("viem");
+              const { base, mainnet, polygon, arbitrum, optimism } = await import("viem/chains");
+              const VIEM_CHAINS_EOA: Record<number, Chain> = {
+                1:     mainnet,
+                8453:  base,
+                137:   polygon,
+                42161: arbitrum,
+                10:    optimism,
+              };
+              const viemChain = VIEM_CHAINS_EOA[swConfig.chainId];
+              const privyEoa = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
+              if (!privyEoa) throw new Error("No EVM wallet connected");
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const eoaProvider = await privyEoa.getEthereumProvider();
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const walletClient = createWalletClient({ chain: viemChain, transport: custom(eoaProvider as any) });
+              const [eoaAccount] = await walletClient.getAddresses();
+
+              // Privy's embedded wallet fires its own gas-estimate preview for the
+              // confirm-tx UI as an *unhandled* promise (outside our await chain) —
+              // if the account has no native gas token that preview throws an
+              // uncaught rejection our try/catch never sees. Check the balance
+              // ourselves first so we throw (and catch) a clean error instead.
+              // viem's default RPC per chain isn't on the app's CSP allowlist, so
+              // point explicitly at an Alchemy endpoint (already whitelisted, same
+              // one wagmi.ts uses) — this avoids "Refused to connect" CSP errors.
+              const ALCHEMY_SUBDOMAIN: Record<number, string> = {
+                1: "eth-mainnet", 8453: "base-mainnet", 137: "polygon-mainnet",
+                42161: "arb-mainnet", 10: "opt-mainnet",
+              };
+              const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+              const rpcUrl = alchemyKey
+                ? `https://${ALCHEMY_SUBDOMAIN[swConfig.chainId]}.g.alchemy.com/v2/${alchemyKey}`
+                : undefined;
+              const publicClient = createPublicClient({ chain: viemChain, transport: http(rpcUrl) });
+              const nativeBalance = await publicClient.getBalance({ address: eoaAccount });
+              if (nativeBalance === 0n) {
+                throw new Error(`No ${viemChain.nativeCurrency.symbol} balance on ${viemChain.name} to pay gas`);
+              }
+
+              const isUsdtEoa = pm.includes("usdt");
+              const eoaAbi = isUsdtEoa
+                ? parseAbi(["function transfer(address to, uint256 amount)"])
+                : erc20Abi;
+              const eoaCalldata = encodeFunctionData({
+                abi: eoaAbi,
+                functionName: "transfer",
+                args: [output.paymentAddress as `0x${string}`, parseUnits(String(output.paymentAmount), 6)],
+              });
+              // The Privy EOA may be on a different chain (e.g. Base when we need
+              // Ethereum). Switch it to the target chain before sending.
+              await walletClient.switchChain({ id: viemChain.id });
+              await walletClient.sendTransaction({
+                account: eoaAccount,
+                to: swConfig.contract,
+                data: eoaCalldata,
+                chain: viemChain,
+              });
+              eoaSucceeded = true;
+            } catch (eoaErr: unknown) {
+              // Native gas unavailable or user rejected — fall through to ArcKit (Layer 3).
+              console.error(`[chat/bitrefill] Layer 2 ❌ Privy EOA failed (${pm}):`, summarizeError(eoaErr, pm), eoaErr);
+            }
+          }
+
+          // ── Layer 3: ArcKit EOA fallback — Circle handles gas; Privy EOA signs ──
+          if (!eoaSucceeded) {
+            const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
+            if (!privyWallet) throw new Error("No EVM wallet connected");
+            const provider = await privyWallet.getEthereumProvider();
+            const { createViemAdapterFromProvider } = await import("@circle-fin/adapter-viem-v2");
+            const { arcKit, AGENT_CHAIN } = await import("@/lib/arc-kit");
+            const { Blockchain } = await import("@circle-fin/app-kit");
+            const EVM_CHAIN_MAP: Record<string, typeof Blockchain[keyof typeof Blockchain]> = {
+              usdc_base:     Blockchain.Base,     usdt_base:     Blockchain.Base,
+              usdc_erc20:    Blockchain.Ethereum, usdt_erc20:    Blockchain.Ethereum,
+              usdc_polygon:  Blockchain.Polygon,  usdt_polygon:  Blockchain.Polygon,
+              usdc_arbitrum: Blockchain.Arbitrum, usdt_arbitrum: Blockchain.Arbitrum,
+              usdc_optimism: Blockchain.Optimism, usdt_optimism: Blockchain.Optimism,
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const adapter = await createViemAdapterFromProvider({ provider: provider as any });
+            const chain = EVM_CHAIN_MAP[pm] ?? AGENT_CHAIN;
+            // ArcKit v1.10.0 has usdtAddress: null for Polygon, Arbitrum, Optimism, and
+            // Base — it only recognises the "USDT" alias on Ethereum. Passing the raw
+            // contract address (TokenAddress) bypasses alias validation and lets ArcKit
+            // treat it as a generic ERC-20 token (it fetches decimals from the chain).
+            const swCfg = BITREFILL_SMART_WALLET_TOKENS[pm];
+            const arcKitToken: string =
+              pm.includes("usdt") && pm !== "usdt_erc20" && swCfg?.contract
+                ? swCfg.contract   // raw contract address for non-Ethereum USDT
+                : pm.includes("usdt") ? "USDT" : "USDC";  // alias for Ethereum USDT / all USDC
+            let arcKitResult: unknown;
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              arcKitResult = await arcKit.send({ from: { adapter, chain: chain as any }, to: output.paymentAddress, amount: String(output.paymentAmount), token: arcKitToken as any });
+            } catch (arcErr: unknown) {
+              console.error(`[chat/bitrefill] Layer 3 ❌ ArcKit failed (${pm}):`, summarizeError(arcErr, pm), arcErr);
+              throw arcErr;
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if ((arcKitResult as any)?.state && (arcKitResult as any).state !== "success") {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              console.error(`[chat/bitrefill] Layer 3 ❌ ArcKit returned non-success state (${pm}):`, (arcKitResult as any).state);
+              throw new Error("Transfer did not complete");
+            }
+          }
         }
       }
 
@@ -366,10 +601,102 @@ function BitrefillPaymentCard({
       });
     } catch (err: unknown) {
       const msg = (err as Error)?.message ?? "Payment failed";
-      const friendly =
-        msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("reject") || msg.toLowerCase().includes("denied")
-          ? "Payment cancelled."
-          : msg;
+
+      // Normalise raw viem/EVM errors into user-friendly messages.
+      const friendly = (() => {
+        const m = msg.toLowerCase();
+        if (m.includes("cancel") || m.includes("reject") || m.includes("denied"))
+          return "Payment cancelled.";
+        // Privy paymaster rejecting a token/chain that isn't configured.
+        if (m.includes("not supported on") || m.includes("is not supported"))
+          return "This payment method is temporarily unavailable. Please try again or use a different network.";
+        // ArcKit validates the token contract (fetches decimals) via a public chain RPC
+        // before sending. If that RPC is down or rate-limiting, this error surfaces.
+        if (
+          m.includes("validation failed for 'tokenaddress'") ||
+          m.includes("failed to fetch decimals") ||
+          (m.includes("http request failed") && (m.includes("arbitrum") || m.includes("polygon") || m.includes("optimism") || m.includes("ethereum")))
+        ) {
+          const network = (output.paymentMethod ?? "").includes("arbitrum") ? "Arbitrum"
+            : (output.paymentMethod ?? "").includes("polygon") ? "Polygon"
+            : (output.paymentMethod ?? "").includes("optimism") ? "Optimism"
+            : (output.paymentMethod ?? "").includes("erc20") ? "Ethereum"
+            : "this network";
+          return `Network RPC error on ${network}. Please wait a moment and try again.`;
+        }
+        // Bitrefill server error — MCP transport wraps HTTP 5xx responses as
+        // "Streamable HTTP error: Error POSTing to endpoint: <!doctype html>..."
+        // (Cloudflare 502/503/504 pages, or Bitrefill's own 500 page).
+        if (
+          m.includes("streamable http error") ||
+          m.includes("bad gateway") ||
+          m.includes("<!doctype html") ||
+          (m.includes("error posting to endpoint") && (m.includes("502") || m.includes("503") || m.includes("504") || m.includes("500")))
+        ) return "Bitrefill is temporarily unavailable. Please try again in a few minutes.";
+        // Bitrefill API rate limit — MCP transport wraps it as
+        // "Streamable HTTP error: Error POSTing to endpoint: {status: rate_limit_reached}"
+        if (m.includes("rate_limit") || m.includes("rate limit") || m.includes("request quota") || m.includes("quota"))
+          return "Bitrefill rate limit reached. Please wait a moment and try again.";
+        // USDT on Ethereum uses assert() for balance checks, which produces the
+        // opaque InvalidFEOpcode / "invalid opcode: INVALID" revert instead of a
+        // clear error. Catch it and surface a readable message.
+        if (
+          m.includes("invalidfeopcode") ||
+          m.includes("invalid opcode") ||
+          m.includes("fe opcode") ||
+          (m.includes("simulation failed") && m.includes("ethereum"))
+        ) {
+          const token = (output.paymentMethod ?? "").includes("usdt") ? "USDT"
+            : (output.paymentMethod ?? "").includes("usdc") ? "USDC" : "token";
+          const network = (output.paymentMethod ?? "").includes("erc20") ? "Ethereum"
+            : (output.paymentMethod ?? "").includes("polygon") ? "Polygon"
+            : (output.paymentMethod ?? "").includes("arbitrum") ? "Arbitrum"
+            : (output.paymentMethod ?? "").includes("optimism") ? "Optimism"
+            : (output.paymentMethod ?? "").includes("base") ? "Base"
+            : "this network";
+          return `Insufficient ${token} balance on ${network}. Please add funds and try again.`;
+        }
+        // eth_estimateGas rejection: wallet has no native gas token (POL, ETH, etc.)
+        if (
+          m.includes("estimategas") ||
+          m.includes("insufficient funds for gas") ||
+          m.includes("insufficient funds for transfer") ||
+          (m.includes("total cost") && m.includes("gas"))
+        ) {
+          const gasToken = (output.paymentMethod ?? "").includes("polygon") ? "POL"
+            : (output.paymentMethod ?? "").includes("solana") ? "SOL"
+            : "ETH";
+          const network = (output.paymentMethod ?? "").includes("polygon") ? "Polygon"
+            : (output.paymentMethod ?? "").includes("arbitrum") ? "Arbitrum"
+            : (output.paymentMethod ?? "").includes("optimism") ? "Optimism"
+            : (output.paymentMethod ?? "").includes("erc20") ? "Ethereum"
+            : "this network";
+          const stableToken = (output.paymentMethod ?? "").includes("usdt") ? "USDT" : "USDC";
+          return `You need ${gasToken} for gas fees and ${stableToken} to send on ${network}. Please add both to your wallet and try again.`;
+        }
+        // Pass through pre-flight Solana SPL errors — they're already user-friendly
+        // (e.g. "Insufficient USDC on Solana. You have $0.50 but need $1.00.")
+        if ((m.includes("insufficient") || m.includes("not enough")) && m.includes("solana"))
+          return msg;
+        // Insufficient funds reported by wallet/RPC
+        if (m.includes("insufficient") || m.includes("insufficient funds") || m.includes("not enough"))
+          return "Insufficient balance. Please add funds and try again.";
+        // ArcKit / Circle returns INTERNAL_ERROR for Solana payments when the wallet
+        // has insufficient token balance. "Sender token account not found" means the
+        // wallet has never received USDC/USDT on Solana (ATA doesn't exist yet — zero balance).
+        if (
+          m.includes("internal_error") ||
+          m.includes("failed to process purchase") ||
+          m.includes("token account not found") ||
+          m.includes("sender token account")
+        ) {
+          const token = (output.paymentMethod ?? "").includes("usdt") ? "USDT" : "USDC";
+          const network = (output.paymentMethod ?? "").includes("solana") ? "Solana" : "this network";
+          return `Insufficient ${token} balance on ${network}. Please add funds and try again.`;
+        }
+        return msg;
+      })();
+
       setErrMsg(friendly);
       setState("error");
       addToolResult({
@@ -387,6 +714,42 @@ function BitrefillPaymentCard({
       output: { paid: false, error: "Cancelled by user", invoiceId: output.invoiceId },
     });
   };
+
+  if (state === "manual" && manualAddress) {
+    const network = evmNetworkLabel(pm);
+    const tokenLabel = pm.includes("usdt") ? "USDT" : "USDC";
+    return (
+      <div className="my-2 rounded-xl border border-yellow-700/30 bg-yellow-900/10 px-4 py-3 space-y-2">
+        <p className="text-xs font-semibold text-yellow-300">
+          🟡 Send manually — {network} {tokenLabel}
+        </p>
+        <p className="text-xs text-[#A7A79A]">
+          Gasless payment is temporarily unavailable. Send exactly{" "}
+          <span className="font-mono font-semibold text-[#F2F0E8]">
+            {output.paymentAmount} {tokenLabel}
+          </span>{" "}
+          to the address below using the <span className="text-[#F2F0E8]">{network}</span> network.
+        </p>
+        <div className="rounded-lg bg-[#141513] px-3 py-2 flex items-center justify-between gap-2">
+          <span className="font-mono text-[11px] text-[#F2F0E8] break-all">{manualAddress}</span>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(manualAddress).then(() => {
+                setManualCopied(true);
+                setTimeout(() => setManualCopied(false), 2000);
+              });
+            }}
+            className="shrink-0 rounded-lg border border-[#2A2B27] px-2 py-1 text-[10px] text-[#A7A79A] hover:bg-white/[0.06] transition-colors"
+          >
+            {manualCopied ? "Copied ✓" : "Copy"}
+          </button>
+        </div>
+        <p className="text-[10px] text-[#A7A79A]">
+          ⚠ Only send on {network} — sending on another network will result in loss of funds.
+        </p>
+      </div>
+    );
+  }
 
   if (state === "done") {
     return (

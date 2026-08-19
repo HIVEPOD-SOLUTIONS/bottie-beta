@@ -5,7 +5,7 @@ import { DEMO_ASSETS } from "@/lib/demo-data";
 import { db } from "@/lib/db";
 import { payments, bitrefillOrders } from "@/lib/db/schema";
 import { getProvider } from "@/lib/banking/registry";
-import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice } from "@/lib/bitrefill-mcp";
+import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -111,9 +111,11 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     get_product_details: tool({
       description:
         "Get full details for a specific Bitrefill product — all denominations with exact package_value, " +
-        "range pricing, recipient_type (phone/email/account), and payment methods. " +
+        "range pricing, recipient_type (phone/email/account), and the exact payment method ids this product " +
+        "accepts (Bitrefill support for USDT/USDC on Base and Optimism varies by product). " +
         "Call this AFTER get_bills and BEFORE buy_bitrefill_product to confirm the exact package_value " +
-        "for the denomination the user wants. Required by Bitrefill docs before purchasing.",
+        "for the denomination the user wants, AND to confirm the paymentMethod you're about to pass is in " +
+        "supported_payment_methods — do not offer a network/token combo that isn't listed there.",
       inputSchema: z.object({
         productId: z
           .string()
@@ -128,6 +130,12 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       execute: async ({ productId, currency }) => {
         try {
           const product = await mcpGetProductDetails(productId);
+          const pm = product.payment_methods;
+          const supportedPaymentMethods = [
+            ...(pm?.address_based ?? []),
+            ...(pm?.link_only ?? []),
+            ...(pm?.balance ?? []),
+          ];
           return {
             id:             product.id,
             name:           product.name,
@@ -139,7 +147,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
               price_usd:     p.price_usd,
             })) ?? null,
             range:          product.range ?? null,
-            tip:            `Use package_value (e.g. "${product.packages?.[0]?.package_value ?? "15"}") as packageValue in buy_bitrefill_product.`,
+            supported_payment_methods: supportedPaymentMethods,
+            tip:            `Use package_value (e.g. "${product.packages?.[0]?.package_value ?? "15"}") as packageValue in buy_bitrefill_product. ` +
+              `Only pass a paymentMethod that appears in supported_payment_methods for this product.`,
           };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "Product fetch failed";
@@ -181,10 +191,12 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           .optional()
           .describe(
             "Bitrefill payment method id. Defaults to 'usdc_base' (USDC on Base — paid automatically by the UI). " +
-            "Other options: 'usdc_solana', 'usdc_erc20', 'usdc_polygon', 'usdc_arbitrum', " +
-            "'usdt_erc20', 'usdt_polygon', 'usdt_arbitrum', 'usdt_solana', " +
-            "'usdt_bsc', 'usdc_bsc' (BSC — deposit address shown), " +
+            "Automatic-pay USDC options: 'usdc_base', 'usdc_erc20', 'usdc_polygon', 'usdc_arbitrum', 'usdc_optimism', 'usdc_solana'. " +
+            "Automatic-pay USDT options: 'usdt_erc20', 'usdt_base', 'usdt_polygon', 'usdt_arbitrum', 'usdt_optimism', 'usdt_solana'. " +
+            "'usdt_bsc', 'usdc_bsc' (BSC — deposit address shown, no automatic-pay support). " +
             "'bitcoin', 'lightning', 'litecoin', 'dogecoin', 'ton', 'ethereum', 'solana' (native crypto — deposit address shown). " +
+            "Bitrefill's support for these ids varies per product (especially usdt_base/usdt_optimism/usdc_optimism) — " +
+            "call get_product_details first and only pass a value present in its supported_payment_methods list. " +
             "Only change from the default if the user explicitly asks for a different network or token."
           ),
         sendTo: z
@@ -205,15 +217,11 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
         const resolvedMethod = paymentMethod ?? "usdc_base";
 
         // Address-based methods: Bitrefill returns a deposit address; UI shows it to the user.
-        // Automatic-pay methods: UI sends USDC via ArcKit without user intervention.
-        const ADDRESS_BASED_METHODS = new Set([
-          "usdt_bsc", "usdc_bsc", "usdt_trc20", "usdt_ton", "usdt_sui", "usdc_sui",
-          "usdt_lightning", "usdc_tempo", "usdt_tempo",
-          "brusd_base", "brusd_erc20", "brusd_polygon", "brusd_arbitrum", "brusd_bsc",
-          "ethereum", "eth_base", "eth_arbitrum", "solana", "sui",
-          "bnb_bsc", "bitcoin", "lightning", "ton", "litecoin", "dogecoin", "dash", "ark", "brc_solana",
-        ]);
-        const isAddressBased = ADDRESS_BASED_METHODS.has(resolvedMethod);
+        // Automatic-pay methods: UI sends the payment via the Privy smart wallet →
+        // Privy EOA → ArcKit cascade without user intervention. Shared with the
+        // dashboard's invoice route so bitrefill_orders.isAddressBased means the
+        // same thing regardless of which purchase path created the row.
+        const isAddressBased = ADDRESS_BASED_PAYMENT_METHODS.has(resolvedMethod);
 
         try {
           const invoice = await mcpBuyProducts({
@@ -223,7 +231,12 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             recipientEmail,
             recipientName,
             refillInput:       sendTo,
-            returnPaymentLink: false,
+            // Address-based methods also need the payment_link: bitcoin, ton,
+            // usdt_ton, ark, and solana never return an altcoinPrice/amount under
+            // guest checkout — payment_link (Bitrefill's own hosted checkout,
+            // which does show the exact amount) is the only fallback. Verified
+            // requesting it doesn't remove payment_info.address for these methods.
+            returnPaymentLink: isAddressBased,
           });
 
           if (!invoice.payment_info?.address) {
@@ -275,6 +288,13 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             }).catch(() => {});
           }
 
+          // Bitcoin, TON, usdt_ton, ark, and solana never return an altcoinPrice/amount
+          // under guest checkout (confirmed against the live API — not a timing issue,
+          // the data is simply absent). payment_link is the only source of the exact
+          // amount for these; direct the user there instead of showing "undefined".
+          const amountKnown = depositAmount != null;
+          const paymentLink = invoice.payment_link;
+
           return {
             pendingBitrefillPayment: true,
             invoiceId:        invoice.invoice_id,
@@ -286,14 +306,17 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             paymentAmount:    depositAmount,
             paymentCurrency:  depositCurrency,
             paymentUri:       invoice.payment_info.paymentUri,
+            paymentLink,
             isAddressBased,
             isTopup:          !!isTopup,
             recipientEmail,
             expiresInMinutes: invoice.expiration_minutes,
             tip: isAddressBased
-              ? isTopup
-                ? `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true). Airtime credited directly to the phone; receipt to ${recipientEmail}.`
-                : `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"). Code will be emailed to ${recipientEmail} after confirmation.`
+              ? amountKnown
+                ? (isTopup
+                    ? `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true). Airtime credited directly to the phone; receipt to ${recipientEmail}.`
+                    : `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"). Code will be emailed to ${recipientEmail} after confirmation.`)
+                : `Deposit address shown to user, but Bitrefill did not provide an exact amount for this payment method. Tell the user to open ${paymentLink ?? "the payment link"} to see the exact amount to send (Bitrefill's own checkout page), then send that amount to the address already shown. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${isTopup ? ", isTopup=true" : ""}).`
               : isTopup
                 ? `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true) — no text before the call. Keep retrying every ~3 s up to 20 times until complete/failed/expired. Airtime credited directly to phone; receipt to ${recipientEmail}.`
                 : `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}") — no text before the call. Keep retrying every ~3 s up to 20 times until complete/failed/expired. Code emailed to ${recipientEmail} on completion.`,
@@ -307,9 +330,10 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     poll_bitrefill_order: tool({
       description:
-        "Poll a Bitrefill invoice until it is complete. " +
+        "Check a Bitrefill invoice status until it is complete. " +
         "Call this immediately after receiving {paid:true} from buy_bitrefill_product. " +
-        "If the status is still pending/processing, call this tool again in ~3 seconds — keep retrying up to 20 times without asking the user anything. " +
+        "Checks the local DB first (webhook may have already delivered the result). " +
+        "If the status is still pending/processing, call this tool again in ~10 seconds — keep retrying up to 20 times without asking the user anything. " +
         "For gift cards/eSIM: returns the redemption code or install link. " +
         "For mobile top-ups (isTopup=true): confirms airtime was credited — there is no code.",
       inputSchema: z.object({
@@ -328,6 +352,45 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       }),
       execute: async ({ invoiceId, productName, isTopup }) => {
         try {
+          // ── DB-first: webhook may have already delivered the terminal state ──
+          // This avoids an MCP round-trip (and quota consumption) when the webhook
+          // fires before the AI polls.
+          const [dbRow] = await db
+            .select()
+            .from(bitrefillOrders)
+            .where(eq(bitrefillOrders.invoiceId, invoiceId))
+            .limit(1)
+            .catch(() => [undefined]);
+
+          if (dbRow && (dbRow.status === "complete" || dbRow.status === "failed" || dbRow.status === "expired")) {
+            if (dbRow.status === "complete") {
+              const code = dbRow.redemptionCode ?? null;
+              const esimLink = dbRow.esimInstallLink ?? null;
+              if (isTopup || (!code && !esimLink)) {
+                return {
+                  status:      "complete",
+                  code:        null,
+                  invoiceId,
+                  productName: productName ?? "Mobile top-up",
+                  isTopup:     true,
+                  message:     `✅ Airtime has been credited directly to the phone. Check the phone balance to confirm. A receipt was sent to the registered email.`,
+                };
+              }
+              return {
+                status:          "complete",
+                code,
+                invoiceId,
+                productName:     productName ?? "Digital product",
+                esimInstallLink: esimLink,
+                message: esimLink
+                  ? `✅ Your eSIM is ready. Install link: ${esimLink}`
+                  : `✅ Your ${productName ?? "code"} is ready: **${code}**`,
+              };
+            }
+            return { status: dbRow.status, invoiceId, error: `Payment ${dbRow.status} — please try again.` };
+          }
+
+          // ── MCP fallback — webhook hasn't arrived yet ─────────────────────
           const invoice = await mcpGetInvoice(invoiceId);
           const code = extractMCPCode(invoice);
 
