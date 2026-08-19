@@ -1,5 +1,5 @@
 import { convertToModelMessages, streamText, stepCountIs, type UIMessage } from "ai";
-import { getLanguageModel } from "@/lib/ai/model-provider";
+import { getLanguageModelCandidates } from "@/lib/ai/model-provider";
 import { createTools } from "@/lib/ai/tools";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { windowMessages, extractConversationRecap } from "@/lib/ai/window-messages";
@@ -159,32 +159,73 @@ export async function POST(req: Request) {
     return new Response('Message conversion failed', { status: 500 });
   }
 
+  const system = buildSystemPrompt({
+    userName,
+    walletAddress,
+    solanaAddress,
+    evmUsdc,
+    evmUsdt,
+    solUsdc,
+    solUsdt,
+    totalBillsDueUsd,
+    portfolioValueUsd,
+    billCount,
+    conversationRecap: recap || undefined,
+    currentDate: new Date().toISOString().slice(0, 10),
+  });
+
+  // ── Cross-provider fallback ────────────────────────────────────────────
+  // Try the configured provider first (AI_PROVIDER); if it fails before any
+  // tokens reach the client, transparently retry on the next provider with a
+  // key configured (e.g. Qwen down → OpenAI, or vice versa). Once a chunk has
+  // actually been streamed to the user it's too late to switch providers
+  // mid-response — that residual case still surfaces via onError below.
+  let candidates;
   try {
-    const result = streamText({
-      model: getLanguageModel(),
-      system: buildSystemPrompt({
-        userName,
-        walletAddress,
-        solanaAddress,
-        evmUsdc,
-        evmUsdt,
-        solUsdc,
-        solUsdt,
-        totalBillsDueUsd,
-        portfolioValueUsd,
-        billCount,
-        conversationRecap: recap || undefined,
-        currentDate: new Date().toISOString().slice(0, 10),
-      }),
-      messages: modelMessages,
-      tools,
-      stopWhen: stepCountIs(10),
-      onError: (err) => console.error('[chat] streamText error:', err),
-    });
-    // Forward quota headers so the client can display remaining message counts.
-    return result.toUIMessageStreamResponse({ headers: rateLimit.headers });
+    candidates = getLanguageModelCandidates();
   } catch (err) {
-    console.error('[chat] streamText setup error:', err);
+    console.error('[chat] no AI provider configured:', err);
     return new Response('AI service error', { status: 503 });
   }
+
+  let lastErr: unknown;
+  for (const { name, model } of candidates) {
+    try {
+      const result = streamText({
+        model,
+        system,
+        messages: modelMessages,
+        tools,
+        stopWhen: stepCountIs(10),
+        onError: (err) => console.error(`[chat] ${name} streamText error (mid-stream):`, err),
+      });
+      const response = result.toUIMessageStreamResponse({ headers: rateLimit.headers });
+
+      // Peek the first chunk before committing this provider's response to
+      // the client — if it throws or the stream is empty, the failure
+      // happened before any output was produced and it's safe to retry.
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      if (first.done) throw new Error(`${name} returned an empty stream`);
+
+      const replay = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(first.value);
+        },
+        async pull(controller) {
+          const { done, value } = await reader.read();
+          if (done) { controller.close(); return; }
+          controller.enqueue(value);
+        },
+        cancel(reason) { reader.cancel(reason).catch(() => {}); },
+      });
+      return new Response(replay, { headers: response.headers, status: response.status });
+    } catch (err) {
+      console.error(`[chat] ${name} failed before first token, trying next provider:`, err);
+      lastErr = err;
+    }
+  }
+
+  console.error('[chat] all AI providers failed:', lastErr);
+  return new Response('AI service error', { status: 503 });
 }
