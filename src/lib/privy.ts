@@ -1,6 +1,6 @@
 import type { PrivyClientConfig } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
-import { base } from "viem/chains";
+import { base, mainnet, polygon, arbitrum, optimism } from "viem/chains";
 
 export const privyConfig: PrivyClientConfig = {
   loginMethods: ["email", "google", "passkey"],
@@ -25,5 +25,8 @@ export const privyConfig: PrivyClientConfig = {
     },
   },
   defaultChain: base,
-  supportedChains: [base],
+  // All chains used for Bitrefill USDT/USDC payments.
+  // Base is the default; Polygon, Arbitrum, Optimism, and Ethereum are added so
+  // wallet_switchEthereumChain succeeds when the user pays on those networks.
+  supportedChains: [base, polygon, arbitrum, optimism, mainnet],
 };

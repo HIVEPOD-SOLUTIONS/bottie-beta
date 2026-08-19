@@ -50,8 +50,37 @@ export async function POST() {
     const results = await Promise.allSettled(
       toCheck.map(async (p) => {
         try {
-          const invoice = await mcpGetInvoice(p.referenceId!);
           const ageMs = p.createdAt ? now - new Date(p.createdAt).getTime() : 0;
+
+          // ── DB-first: webhook may have already delivered the terminal state ──
+          // Avoids an MCP round-trip (and quota consumption) for invoices that
+          // have already been updated by the webhook receiver.
+          const [orderRow] = await db
+            .select({ status: bitrefillOrders.status, redemptionCode: bitrefillOrders.redemptionCode })
+            .from(bitrefillOrders)
+            .where(eq(bitrefillOrders.invoiceId, p.referenceId!))
+            .limit(1)
+            .catch(() => [] as { status: string; redemptionCode: string | null }[]);
+
+          if (
+            orderRow &&
+            (orderRow.status === "complete" || orderRow.status === "failed" || orderRow.status === "expired")
+          ) {
+            const newStatus = orderRow.status === "complete" ? "completed" : "failed";
+            await db
+              .update(payments)
+              .set({ status: newStatus })
+              .where(
+                and(
+                  eq(payments.userId, userId),
+                  eq(payments.referenceId, p.referenceId!),
+                ),
+              );
+            return { invoiceId: p.referenceId, from: "pending", to: newStatus, source: "db" };
+          }
+
+          // ── MCP fallback — webhook hasn't arrived yet ─────────────────────
+          const invoice = await mcpGetInvoice(p.referenceId!);
 
           // Determine the new status
           const newStatus =
@@ -85,7 +114,7 @@ export async function POST() {
               .where(eq(bitrefillOrders.invoiceId, p.referenceId!))
               .catch(() => {});
 
-            return { invoiceId: p.referenceId, from: "pending", to: newStatus };
+            return { invoiceId: p.referenceId, from: "pending", to: newStatus, source: "mcp" };
           }
           return null;
         } catch {

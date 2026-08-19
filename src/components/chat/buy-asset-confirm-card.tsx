@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { arcKit, AGENT_CHAIN, SOLANA_ARC_CHAIN } from "@/lib/arc-kit";
+import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
+import { arcKit, AGENT_CHAIN } from "@/lib/arc-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { authFetch } from "@/lib/api-auth-fetch";
 
@@ -44,11 +45,12 @@ export function BuyAssetConfirmCard({
 }: Props) {
   const { getAccessToken } = usePrivy();
   const { wallets } = useWallets();
+  const { wallets: solanaWallets } = useSolanaWallets();
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const hasEvmWallet = wallets.some((w) => w.walletClientType === "privy" || (w as any).chainType === "ethereum");
-  const hasSolanaWallet = wallets.some((w) => (w as any).chainType === "solana");
+  const hasSolanaWallet = solanaWallets.length > 0;
 
   const defaultNetwork: Network = forcedNetwork ?? (hasEvmWallet ? "evm" : "solana");
   const [selectedNetwork, setSelectedNetwork] = useState<Network>(defaultNetwork);
@@ -73,31 +75,49 @@ export function BuyAssetConfirmCard({
     return { txHash: null };
   }, [wallets, totalUsdc]);
 
-  // ── Solana path (Arc AppKit) ───────────────────────────────────────────────
+  // ── Solana path (direct SPL transfer) ─────────────────────────────────────
   const paySolana = useCallback(async (): Promise<{ txHash: string | null }> => {
-    const solWallet = wallets.find((w) => (w as any).chainType === "solana");
+    const solWallet = solanaWallets[0];
     if (!solWallet) throw new Error("No Solana wallet connected");
     if (!SOL_RECEIVER) throw new Error("Solana receiver not configured");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const solanaProvider = await (solWallet as any).getSolanaProvider?.();
-    if (!solanaProvider) throw new Error("Solana provider unavailable");
+    const { PublicKey, Transaction, Connection } = await import("@solana/web3.js");
+    const { getAssociatedTokenAddress, createTransferInstruction, getAccount, TOKEN_PROGRAM_ID } =
+      await import("@solana/spl-token");
 
-    const { createSolanaAdapterFromProvider } = await import("@circle-fin/adapter-solana");
-    const adapter = await createSolanaAdapterFromProvider({ provider: solanaProvider });
+    const solRpc = `https://solana-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`;
+    const connection = new Connection(solRpc, "confirmed");
 
-    const result = await arcKit.send({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      from: { adapter: adapter as any, chain: SOLANA_ARC_CHAIN },
-      to: SOL_RECEIVER,
-      amount: totalUsdc.toFixed(6),
-      token: "USDC",
+    const USDC_MINT      = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    const senderPubkey   = new PublicKey(solWallet.address);
+    const receiverPubkey = new PublicKey(SOL_RECEIVER);
+
+    // Pre-flight balance check
+    const senderAta     = await getAssociatedTokenAddress(USDC_MINT, senderPubkey);
+    const senderAccount = await getAccount(connection, senderAta).catch(() => null);
+    const requiredMicro = BigInt(Math.round(totalUsdc * 1_000_000));
+    if (!senderAccount || senderAccount.amount < requiredMicro) {
+      const bal = senderAccount ? (Number(senderAccount.amount) / 1_000_000).toFixed(2) : "0.00";
+      throw new Error(
+        `Insufficient USDC balance on Solana. You have $${bal} but need $${totalUsdc.toFixed(2)}.`
+      );
+    }
+
+    // Build, sign, and send
+    const receiverAta = await getAssociatedTokenAddress(USDC_MINT, receiverPubkey);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: senderPubkey }).add(
+      createTransferInstruction(senderAta, receiverAta, senderPubkey, requiredMicro, [], TOKEN_PROGRAM_ID),
+    );
+    const txBytes = Buffer.from(tx.serialize({ requireAllSignatures: false }));
+    const { signedTransaction } = await solWallet.signTransaction({ transaction: txBytes });
+    const txHash = await connection.sendRawTransaction(Transaction.from(signedTransaction).serialize(), {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((result as any)?.state && (result as any).state !== "success") throw new Error("Transfer did not complete");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return { txHash: (result as any)?.hash ?? (result as any)?.transactionHash ?? null };
-  }, [wallets, totalUsdc]);
+    await connection.confirmTransaction({ signature: txHash, blockhash, lastValidBlockHeight }, "confirmed");
+    return { txHash };
+  }, [solanaWallets, totalUsdc]);
 
   const handleConfirm = useCallback(async () => {
     if (status === "pending" || status === "success") return;
