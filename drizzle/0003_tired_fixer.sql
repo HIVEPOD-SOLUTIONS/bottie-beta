@@ -1,0 +1,1 @@
+ALTER TABLE "bitrefill_orders" ADD COLUMN "xrpl_recovered_at" timestamp;

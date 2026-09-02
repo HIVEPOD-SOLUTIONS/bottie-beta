@@ -1,5 +1,6 @@
 import type { BankingProvider } from "./types";
 import { credibleProvider } from "./providers/credible";
+import { rippleOdlProvider } from "./providers/ripple-odl";
 
 /**
  * All registered banking providers.
@@ -7,7 +8,7 @@ import { credibleProvider } from "./providers/credible";
  */
 const ALL_PROVIDERS: BankingProvider[] = [
   credibleProvider,
-  // nextProvider,
+  rippleOdlProvider,
 ];
 
 /** Returns all providers that have their env vars configured. */

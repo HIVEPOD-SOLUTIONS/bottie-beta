@@ -379,16 +379,6 @@ function LedgerList({ provider }: { provider: ProviderMeta }) {
 
 type CollectionSubTab = "payments" | "ledger";
 
-function CollectionTab({ provider: _provider }: { provider: ProviderMeta }) {
-  return (
-    <ComingSoon
-      icon="📥"
-      title="Collection"
-      description="Accept UPI payments and manage collections. Coming soon."
-    />
-  );
-}
-
 function CollectionTabFull({ provider }: { provider: ProviderMeta }) {
   const [balance, setBalance] = useState<ProviderBalance | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
@@ -2126,7 +2116,7 @@ function ProviderPanel({ provider }: { provider: ProviderMeta }) {
       </div>
 
       {/* Tab content */}
-      {activeTab === "collection"  && <CollectionTab  provider={provider} />}
+      {activeTab === "collection"  && <CollectionTabFull provider={provider} />}
       {activeTab === "payout"      && <PayoutTab      provider={provider} />}
       {activeTab === "onramping"   && <OnrampingTab   provider={provider} />}
       {activeTab === "offramping"  && <OfframpingTab  provider={provider} />}
@@ -2159,7 +2149,7 @@ function ProviderSelector({ providers, selected, onSelect }: {
 
 // ── Banking platform list ─────────────────────────────────────────────────────
 
-type BankingPlatform = "credible" | "spherepay" | "fuze";
+type BankingPlatform = "credible" | "spherepay" | "fuze" | "ripple-odl";
 
 const BANKING_PLATFORMS = [
   {
@@ -2168,17 +2158,10 @@ const BANKING_PLATFORMS = [
     name: "Credible Finance",
     tag: "Stablecoin Banking",
     description: "Onramp, offramp, collections & payouts — INR ↔ crypto rails for India & Southeast Asia",
-    badge: "India",
+    // Matches the payout currencies actually wired in credible.ts / payout/send —
+    // India (INR), Indonesia (IDR), Philippines (PHP), Vietnam (VND).
+    badge: "🇮🇳 🇮🇩 🇵🇭 🇻🇳",
     badgeColor: "text-orange-400 bg-orange-400/10",
-  },
-  {
-    id: "spherepay" as BankingPlatform,
-    icon: "🌐",
-    name: "SpherePay",
-    tag: "B2B Payments",
-    description: "Global stablecoin payment rails — treasury, payroll, trade finance & payment acceptance",
-    badge: "Global",
-    badgeColor: "text-blue-400 bg-blue-400/10",
   },
   {
     id: "fuze" as BankingPlatform,
@@ -2188,6 +2171,24 @@ const BANKING_PLATFORMS = [
     description: "Global crypto & fiat infrastructure — onboard users, issue wallets, trade, remit across AED, USD, EUR, GBP, INR, USDT, USDC",
     badge: "UAE",
     badgeColor: "text-emerald-400 bg-emerald-400/10",
+  },
+  {
+    id: "ripple-odl" as BankingPlatform,
+    icon: "🌐",
+    name: "Ripple Payments ODL",
+    tag: "Cross-Border ODL",
+    description: "On-Demand Liquidity — XRP-bridged cross-border payments, request-for-payment & settlement reporting",
+    badge: "Beta",
+    badgeColor: "text-slate-300 bg-slate-400/10",
+  },
+  {
+    id: "spherepay" as BankingPlatform,
+    icon: "🌐",
+    name: "SpherePay",
+    tag: "B2B Payments",
+    description: "Global stablecoin payment rails — treasury, payroll, trade finance & payment acceptance",
+    badge: "Global",
+    badgeColor: "text-blue-400 bg-blue-400/10",
   },
 ];
 
@@ -2317,6 +2318,182 @@ const SPHERE_SCOPING_CHECKLIST = [
   "Balance model — movement/conversion only vs fiat balance holding",
   "Volume — monthly, average and maximum transaction size",
 ];
+
+function RippleOdlSection({ providers }: { providers: ProviderMeta[] }) {
+  const meta = providers.find((p) => p.id === "ripple-odl");
+  const configured = !!meta?.configured;
+
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [beneficiaryName, setBeneficiaryName] = useState("");
+  const [beneficiaryAccountNumber, setBeneficiaryAccountNumber] = useState("");
+  const [beneficiaryIfsc, setBeneficiaryIfsc] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ id: string; status: string } | null>(null);
+
+  const handleSend = async () => {
+    setError(null);
+    const amt = Number(amount);
+    if (!amt || amt <= 0) { setError("Enter a valid amount"); return; }
+    if (!beneficiaryName.trim() || !beneficiaryAccountNumber.trim() || !beneficiaryIfsc.trim()) {
+      setError("Beneficiary name, account number, and routing code are required");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/banking/ripple-odl/payout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: amt,
+          description: description.trim() || undefined,
+          beneficiaryName: beneficiaryName.trim(),
+          beneficiaryAccountNumber: beneficiaryAccountNumber.trim(),
+          beneficiaryIfsc: beneficiaryIfsc.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? "Payment failed");
+      setResult({ id: data.id, status: data.status });
+    } catch (err: any) {
+      setError(err?.message ?? "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Header card */}
+      <div className="rounded-3xl bg-gradient-to-br from-[#1B2A4A] to-[#0E1830] p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-mono text-[10px] tracking-widest text-white/60 uppercase">Banking Provider</p>
+            <p className="mt-1 font-display text-2xl font-bold text-white">Ripple Payments ODL</p>
+            <p className="mt-0.5 font-mono text-[10px] text-white/60 uppercase tracking-wide">
+              On-Demand Liquidity · XRP-bridged settlement
+            </p>
+          </div>
+          <span className="text-3xl">🌐</span>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="rounded-xl bg-white/10 p-2.5 text-center">
+            <p className="font-mono text-lg font-bold text-white">T+0</p>
+            <p className="font-mono text-[9px] text-white/60">Settlement</p>
+          </div>
+          <div className="rounded-xl bg-white/10 p-2.5 text-center">
+            <p className="font-mono text-lg font-bold text-white">XRP</p>
+            <p className="font-mono text-[9px] text-white/60">Bridge asset</p>
+          </div>
+          <div className="rounded-xl bg-white/10 p-2.5 text-center">
+            <p className="font-mono text-lg font-bold text-white">RFP</p>
+            <p className="font-mono text-[9px] text-white/60">+ Reports + SLS</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Status banner */}
+      {!configured ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+          <span className="text-lg">🚧</span>
+          <div>
+            <p className="font-mono text-xs font-semibold text-amber-400">Integration in progress</p>
+            <p className="font-mono text-[10px] text-ink-light">
+              Set RIPPLE_ODL_CLIENT_ID, RIPPLE_ODL_CLIENT_SECRET, and RIPPLE_ODL_BASE_URL to activate. Field names have not yet been verified against a live RippleNet sandbox.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+          <span className="text-lg">✓</span>
+          <p className="font-mono text-[10px] text-emerald-400">Credentials configured — send flow is live</p>
+        </div>
+      )}
+
+      {/* Send payment (core orchestration-payments flow) */}
+      <div className="rounded-2xl border border-border/60 bg-cream-dark/20 p-4">
+        <p className="mb-3 font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">
+          Send Payment
+        </p>
+        {result ? (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+            <p className="font-mono text-xs font-semibold text-emerald-400">Payment {result.status}</p>
+            <p className="mt-0.5 font-mono text-[10px] text-ink-light break-all">ID: {result.id}</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder="Amount"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="rounded-xl border border-border/60 bg-cream px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-light/60"
+            />
+            <input
+              type="text"
+              placeholder="Description (optional)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="rounded-xl border border-border/60 bg-cream px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-light/60"
+            />
+            <input
+              type="text"
+              placeholder="Beneficiary name"
+              value={beneficiaryName}
+              onChange={(e) => setBeneficiaryName(e.target.value)}
+              className="rounded-xl border border-border/60 bg-cream px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-light/60"
+            />
+            <input
+              type="text"
+              placeholder="Beneficiary account number"
+              value={beneficiaryAccountNumber}
+              onChange={(e) => setBeneficiaryAccountNumber(e.target.value)}
+              className="rounded-xl border border-border/60 bg-cream px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-light/60"
+            />
+            <input
+              type="text"
+              placeholder="Routing / bank code"
+              value={beneficiaryIfsc}
+              onChange={(e) => setBeneficiaryIfsc(e.target.value)}
+              className="rounded-xl border border-border/60 bg-cream px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-light/60"
+            />
+            {error && <p className="font-mono text-[10px] text-red-400">{error}</p>}
+            <button
+              onClick={handleSend}
+              disabled={submitting || !configured}
+              className="rounded-xl bg-ink py-2.5 font-mono text-xs font-semibold text-cream disabled:opacity-40"
+            >
+              {submitting ? "Sending…" : "Send Payment"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Roadmap — remaining subsystems beyond core send */}
+      <div>
+        <p className="mb-2 font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">Also Available (backend)</p>
+        <div className="flex flex-col gap-2">
+          {[
+            { icon: "📥", title: "Receive & Lock", desc: "Lock an incoming payment to initiate settlement" },
+            { icon: "🧾", title: "Request for Payment", desc: "Poll, accept, or decline inbound payment requests" },
+            { icon: "📊", title: "Reports", desc: "PAYMENT_OPS, RECON, FAILURE_CONVERSION_SSA — JSON or CSV" },
+            { icon: "💧", title: "Smart Liquidation (SLS)", desc: "Track large payments split into settlement tranches" },
+          ].map((f) => (
+            <div key={f.title} className="flex items-start gap-3 rounded-xl border border-border/40 bg-cream-dark/10 px-3 py-2.5">
+              <span className="text-base leading-none">{f.icon}</span>
+              <div>
+                <p className="font-mono text-xs font-semibold text-ink">{f.title}</p>
+                <p className="mt-0.5 font-mono text-[10px] text-ink-light">{f.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SpherePaySection() {
   const [activeFlow, setActiveFlow] = useState<SphereFlowType | "all">("all");
@@ -2579,6 +2756,7 @@ export function BankingScreen() {
               )}
               {open === "spherepay" && <SpherePaySection />}
               {open === "fuze" && <FuzeSection />}
+              {open === "ripple-odl" && <RippleOdlSection providers={providers} />}
             </div>
           </div>
         </div>,

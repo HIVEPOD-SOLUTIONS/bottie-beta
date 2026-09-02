@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { payments, bitrefillOrders } from "@/lib/db/schema";
 import { getProvider } from "@/lib/banking/registry";
 import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
+import { getWalletRequest } from "@/lib/xrplBackend";
+import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -195,7 +197,11 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             "Automatic-pay USDT options: 'usdt_erc20', 'usdt_base', 'usdt_polygon', 'usdt_arbitrum', 'usdt_optimism', 'usdt_solana'. " +
             "'usdt_bsc', 'usdc_bsc' (BSC — deposit address shown, no automatic-pay support). " +
             "'bitcoin', 'lightning', 'litecoin', 'dogecoin', 'ton', 'ethereum', 'solana' (native crypto — deposit address shown). " +
-            "Bitrefill's support for these ids varies per product (especially usdt_base/usdt_optimism/usdc_optimism) — " +
+            "'xrp' — Bluvfi-only option, NOT a native Bitrefill method: settles the invoice in USDC behind the scenes, " +
+            `user sends XRP and it's converted automatically. Deposit address + a short time-to-send countdown (~7.5 min) shown to user. Minimum item price ~$${MIN_XRP_BRIDGE_USD.toFixed(2)} — for anything cheaper, tell the user upfront and suggest a different payment method instead of calling this tool. ` +
+            "IMPORTANT: never say 'swap', 'bridge', 'NEAR Intents', or explain the underlying conversion mechanism to the user — describe this only as \"paying with XRP\"; if something fails, say the payment couldn't be completed, not that a swap/bridge failed. " +
+            "Do not check this one against get_product_details's supported_payment_methods — it works for any product. " +
+            "Bitrefill's support for the other ids varies per product (especially usdt_base/usdt_optimism/usdc_optimism) — " +
             "call get_product_details first and only pass a value present in its supported_payment_methods list. " +
             "Only change from the default if the user explicitly asks for a different network or token."
           ),
@@ -215,6 +221,50 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       }),
       execute: async ({ productId, packageValue, recipientEmail, recipientName, paymentMethod, sendTo, isTopup }) => {
         const resolvedMethod = paymentMethod ?? "usdc_base";
+
+        // "xrp" is a Bluvfi-only pseudo-method — not a native Bitrefill payment
+        // method. The underlying invoice always settles in USDC; XRP gets
+        // swapped into it via the bluvfi-xrpl service. Handled entirely
+        // separately from the normal mcpBuyProducts flow below.
+        if (resolvedMethod === "xrp") {
+          try {
+            const { initiateXrpPurchase } = await import("@/lib/xrp-purchase");
+            const xrp = await initiateXrpPurchase({
+              productId,
+              packageId: packageValue,
+              privyDid: userId ?? "",
+              recipientEmail,
+              recipientName,
+              sendTo,
+            });
+            return {
+              pendingBitrefillPayment: true,
+              invoiceId:        xrp.invoiceId,
+              accessToken:      xrp.invoiceAccessToken,
+              productId,
+              packageValue,
+              paymentMethod:    "xrp",
+              paymentAddress:   xrp.paymentAddress,
+              // requiredActivationXrp, NOT swapAmountDrops alone — bluvfi-xrpl
+              // requires the reserve (~1.05 XRP) AND the swap amount both
+              // present before the wallet even activates. swapAmountDrops is
+              // only the swap portion; using it alone (a bug this mirrors —
+              // now fixed in bills-screen.tsx's equivalent flow too) would
+              // tell the user to send less than the network requires, and
+              // the wallet would never activate.
+              paymentAmount:    xrp.requiredActivationXrp,
+              paymentCurrency:  "XRP",
+              isAddressBased:   true,
+              isTopup:          !!isTopup,
+              recipientEmail,
+              expiresInMinutes: xrp.expirationMinutes,
+              tip: `Deposit address shown to user — they must send exactly ${xrp.requiredActivationXrp} XRP (this already includes the ~1.05 XRP network reserve required to activate a new address, not an extra fee) within about 7.5 minutes or the payment window closes. Once sent, call poll_bitrefill_order(invoiceId="${xrp.invoiceId}"${isTopup ? ", isTopup=true" : ""}). Do not mention "swap"/"bridge"/"NEAR Intents" to the user — describe this only as paying with XRP.`,
+            };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "XRP purchase failed";
+            return { error: message };
+          }
+        }
 
         // Address-based methods: Bitrefill returns a deposit address; UI shows it to the user.
         // Automatic-pay methods: UI sends the payment via the Privy smart wallet →
@@ -390,6 +440,44 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             return { status: dbRow.status, invoiceId, error: `Payment ${dbRow.status} — please try again.` };
           }
 
+          // ── XRP swap-failure detection ─────────────────────────────────────
+          // For a "pay with XRP" purchase, Bitrefill's own invoice never receives
+          // anything if the swap fails (underpayment guard, expiry, refund) — its
+          // status just sits at "unpaid" forever, so without this check the MCP
+          // fallback below would have the AI retry blindly for the full 20
+          // attempts with no accurate explanation of what went wrong (the same
+          // gap already fixed on the dashboard via /api/xrpl/wallet-status
+          // polling in bills-screen.tsx — mirrored here for the chat path).
+          if (dbRow?.xrplWalletRequestId) {
+            try {
+              const wallet = await getWalletRequest(dbRow.xrplWalletRequestId);
+              if (
+                wallet.swapStatus === "FAILED" ||
+                wallet.swapStatus === "REFUNDED" ||
+                wallet.swapStatus === "EXPIRED"
+              ) {
+                const failStatus = wallet.swapStatus === "EXPIRED" ? "expired" : "failed";
+                // Shared with the webhook and the dashboard's wallet-status
+                // poll — writes both bitrefill_orders AND payments, so
+                // History and this same check agree on what happened
+                // regardless of which surface detects it first.
+                await markXrpPurchaseFailed(dbRow.xrplWalletRequestId, failStatus);
+                return {
+                  status: failStatus,
+                  invoiceId,
+                  error:
+                    "The payment didn't go through, but the funds never left safekeeping. " +
+                    "Tell the user this purchase failed and their funds are safe, then offer to recover them right now — " +
+                    "call list_recoverable_xrp to get the exact amount, state it to the user, and only call recover_xrp_order once they explicitly agree. " +
+                    "They can also do this later from the Bills page if they'd rather not right now.",
+                };
+              }
+            } catch {
+              // bluvfi-xrpl lookup failed — don't block the normal flow on this,
+              // just fall through to the regular Bitrefill status check below.
+            }
+          }
+
           // ── MCP fallback — webhook hasn't arrived yet ─────────────────────
           const invoice = await mcpGetInvoice(invoiceId);
           const code = extractMCPCode(invoice);
@@ -466,6 +554,77 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Status check failed";
           return { error: message, invoiceId };
+        }
+      },
+    }),
+
+    // ── XRP recovery ──────────────────────────────────────────────────────────
+    // Two tools, deliberately split into a free-to-call read (list) and a
+    // fund-moving write (recover) that requires the AI to confirm with the
+    // user first — same pattern as every other fund-movement tool in this
+    // file (e.g. rebalance_velvet_portfolio: "Always confirm details before
+    // calling"). Both call the exact same shared functions
+    // (src/lib/xrp-purchase.ts) that back bills-screen.tsx's "My Bills"
+    // recovery list and /api/xrpl/transfer's recovery-direction branch, so
+    // an AI-initiated recovery can never disagree with a dashboard-initiated
+    // one about what's recoverable or how much.
+
+    list_recoverable_xrp: tool({
+      description:
+        "List the user's \"pay with XRP\" purchases that failed AFTER the deposit wallet was already funded — " +
+        "meaning real XRP is sitting safe but stuck, un-recovered. Call this when the user asks about a failed " +
+        "XRP payment, mentions missing/stuck XRP, or after poll_bitrefill_order reports a failed XRP purchase " +
+        "and you want the exact recoverable amount before offering to recover it. Read-only, no confirmation needed. " +
+        "Do not mention 'swap'/'bridge'/'NEAR Intents' — describe these only as failed XRP payments.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const { listRecoverableXrpOrders } = await import("@/lib/xrp-purchase");
+          const orders = await listRecoverableXrpOrders(userId);
+          if (orders.length === 0) {
+            return { orders: [], message: "No stuck XRP payments found — nothing to recover right now." };
+          }
+          return {
+            orders: orders.map((o) => ({
+              walletRequestId: o.walletRequestId,
+              productName:     o.productName,
+              recoverableXrp:  o.recoverableXrp,
+              failedAt:        o.failedAt,
+            })),
+            tip: "Tell the user the product name and exact XRP amount for each, and confirm with them before calling recover_xrp_order — never recover without the user explicitly agreeing to it.",
+          };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Failed to list recoverable payments" };
+        }
+      },
+    }),
+
+    recover_xrp_order: tool({
+      description:
+        "Move a failed XRP payment's stuck funds back to the user's own Bluvfi XRP wallet (the sidebar wallet). " +
+        "REQUIRES explicit user confirmation first — always call list_recoverable_xrp, state the exact product and " +
+        "XRP amount to the user, and get a clear yes before calling this. Never call this speculatively or as part " +
+        "of a retry loop. Moves real funds — there is no undo. " +
+        "Do not mention 'swap'/'bridge'/'NEAR Intents' to the user at any point in this flow.",
+      inputSchema: z.object({
+        walletRequestId: z
+          .string()
+          .describe("The walletRequestId from list_recoverable_xrp for the specific payment the user confirmed."),
+      }),
+      execute: async ({ walletRequestId }) => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const { recoverXrpOrder } = await import("@/lib/xrp-purchase");
+          const result = await recoverXrpOrder(userId, walletRequestId);
+          return {
+            recovered:  true,
+            recoveredXrp: result.recoveredXrp,
+            productName: result.productName,
+            message: `✅ ${result.recoveredXrp.toFixed(4)} XRP from the failed "${result.productName}" payment has been moved to the user's Bluvfi XRP wallet.`,
+          };
+        } catch (err: unknown) {
+          return { recovered: false, error: err instanceof Error ? err.message : "Recovery failed" };
         }
       },
     }),
@@ -1070,7 +1229,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
         "'bridge' (Arc AppKit cross-chain bridges), " +
         "'onramp' (INR→crypto via UPI — starts pending, completed by webhook), " +
         "'offramp' (crypto→INR via bank — starts pending, completed by webhook). " +
-        "Each record includes chain ('evm'|'solana'), amountUsdc, status, txHash, and createdAt.",
+        "A 'bill' record with chain='xrpl' is a \"pay with XRP\" purchase — describe it to the user only as paid with XRP, never mention swaps/bridges/NEAR Intents. " +
+        "Each record includes chain ('evm'|'solana'|'xrpl'), amountUsdc, status, txHash, and createdAt.",
       inputSchema: z.object({
         limit: z
           .number()

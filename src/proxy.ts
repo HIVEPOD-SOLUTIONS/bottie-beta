@@ -91,6 +91,12 @@ function buildCSP(): string {
     "default-src":   ["'self'"],
     "script-src":    ["'self'", "'unsafe-inline'", "'unsafe-eval'", // required for Next.js hydration
                       "https://auth.privy.io", "https://privy.io",
+                      // Privy's custom auth domain for this app (configured on
+                      // Privy's dashboard) — OAuth (Google/etc. login) routes
+                      // through this instead of auth.privy.io. Confirmed
+                      // necessary live: without it, OAuth init is blocked by
+                      // this CSP with "Refused to connect... privy.bluvfi.xyz".
+                      "https://privy.bluvfi.xyz",
                       "https://challenges.cloudflare.com"],
     "style-src":     ["'self'", "'unsafe-inline'"],
     "img-src":       ["'self'", "data:", "blob:", "https:"],
@@ -100,6 +106,7 @@ function buildCSP(): string {
       APP_URL,
       "https://*.privy.io",
       "https://*.privy.systems",
+      "https://privy.bluvfi.xyz", // custom auth domain — see script-src comment above
       "https://*.alchemy.com",
       "https://eth-mainnet.g.alchemy.com",
       "https://polygon-mainnet.g.alchemy.com",
@@ -146,6 +153,7 @@ function buildCSP(): string {
       "wss://*.walletconnect.org",
     ],
     "frame-src":     ["https://auth.privy.io", "https://privy.io",
+                      "https://privy.bluvfi.xyz", // custom auth domain — see script-src comment above
                       "https://challenges.cloudflare.com"],
     "frame-ancestors": ["'none'"],
     "object-src":    ["'none'"],

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { usePrivy, useLogout, useWallets } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -65,6 +65,53 @@ export function SettingsSidebar({
   const displayEvmAddress = smartWalletAddress ?? evmAddress;
   const { evmUsdc, evmUsdt, solUsdc, solUsdt, isLoading: sbLoading } = useStablecoinBalances();
 
+  // Persistent XRPL wallet — created lazily (idempotent) on first load, then cached.
+  const [xrplAddress, setXrplAddress] = useState<string | null>(null);
+  const [xrplWalletRequestId, setXrplWalletRequestId] = useState<string | null>(null);
+  const [xrplLoading, setXrplLoading] = useState(false);
+  const [xrplError, setXrplError] = useState<string | null>(null);
+  const [xrplRetryTick, setXrplRetryTick] = useState(0);
+  useEffect(() => {
+    if (!open || xrplAddress) return;
+    setXrplLoading(true);
+    setXrplError(null);
+    fetch("/api/xrpl/sidebar-wallet")
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(data?.error ?? `Request failed (${r.status})`);
+        return data;
+      })
+      .then((data) => {
+        if (data?.address) {
+          setXrplAddress(data.address);
+          setXrplWalletRequestId(data.id ?? null);
+        } else throw new Error("No address returned");
+      })
+      .catch((err: unknown) => {
+        // 501 means the XRPL service simply isn't configured in this
+        // environment — that's expected/silent, not a real error to surface.
+        const msg = (err as Error)?.message ?? "";
+        if (!msg.includes("not configured")) setXrplError(msg || "Failed to load XRPL wallet");
+      })
+      .finally(() => setXrplLoading(false));
+  }, [open, xrplAddress, xrplRetryTick]);
+
+  // Live XRP balance — derived strictly through bluvfi-xrpl (its own
+  // GET /wallet-requests/:id activity history), never a direct call to the
+  // XRP Ledger or any other external service. Refetched whenever the
+  // sidebar (re)opens with a known wallet, not on a timer.
+  const [xrplBalance, setXrplBalance] = useState<number | null>(null);
+  const [xrplBalanceLoading, setXrplBalanceLoading] = useState(false);
+  useEffect(() => {
+    if (!open || !xrplWalletRequestId) return;
+    setXrplBalanceLoading(true);
+    fetch(`/api/xrpl/balance?walletRequestId=${encodeURIComponent(xrplWalletRequestId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (typeof data?.balanceXrp === "number") setXrplBalance(data.balanceXrp); })
+      .catch(() => {})
+      .finally(() => setXrplBalanceLoading(false));
+  }, [open, xrplWalletRequestId]);
+
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
   const initial = firstName.charAt(0).toUpperCase();
@@ -117,6 +164,32 @@ export function SettingsSidebar({
                 </div>
               </div>
             )}
+            {xrplAddress ? (
+              <div>
+                <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">XRPL Wallet</span>
+                <div className="mt-1.5">
+                  <CopyableWallet address={xrplAddress} />
+                </div>
+              </div>
+            ) : xrplLoading ? (
+              <div>
+                <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">XRPL Wallet</span>
+                <div className="mt-1.5 h-5 w-40 animate-pulse rounded bg-ink/10" />
+              </div>
+            ) : xrplError ? (
+              <div>
+                <span className="font-mono text-[10px] font-medium tracking-widest text-ink-light uppercase">XRPL Wallet</span>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span className="font-mono text-xs text-red-500/80">Couldn&apos;t load</span>
+                  <button
+                    onClick={() => setXrplRetryTick((n) => n + 1)}
+                    className="font-mono text-xs text-ink underline underline-offset-2 hover:text-ink/60"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -161,6 +234,17 @@ export function SettingsSidebar({
                   </span>
                 </div>
               </>
+            )}
+
+            {xrplAddress && (
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs text-ink-light">XRP</span>
+                <span className="font-display text-sm font-semibold text-ink">
+                  {xrplBalanceLoading || xrplBalance === null
+                    ? "…"
+                    : `${xrplBalance.toFixed(4)} XRP`}
+                </span>
+              </div>
             )}
           </div>
         )}

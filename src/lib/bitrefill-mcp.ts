@@ -1182,6 +1182,10 @@ export const ADDRESS_BASED_PAYMENT_METHODS = new Set([
   "brusd_base", "brusd_erc20", "brusd_polygon", "brusd_arbitrum", "brusd_bsc",
   "ethereum", "eth_base", "eth_arbitrum", "solana", "sui",
   "bnb_bsc", "bitcoin", "lightning", "ton", "litecoin", "dogecoin", "dash", "ark", "brc_solana",
+  // "xrp" is a Bluvfi-only pseudo-method (not native to Bitrefill) — see
+  // src/lib/xrp-purchase.ts. Address-based in spirit: the user sends XRP to
+  // a deposit address rather than an auto-pay wallet cascade handling it.
+  "xrp",
 ]);
 
 /**

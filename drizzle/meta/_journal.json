@@ -15,6 +15,20 @@
       "when": 1786696353367,
       "tag": "0001_magical_robin_chapel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788127431164,
+      "tag": "0002_chief_purple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788335378022,
+      "tag": "0003_tired_fixer",
+      "breakpoints": true
     }
   ]
 }

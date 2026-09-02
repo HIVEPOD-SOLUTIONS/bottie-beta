@@ -121,11 +121,45 @@ export const bitrefillOrders = pgTable("bitrefill_orders", {
   status: text("status").notNull().default("pending"), // "pending" | "complete" | "failed" | "expired"
   redemptionCode: text("redemption_code"),
   esimInstallLink: text("esim_install_link"),
+  // "Pay with XRP" — set only when paymentMethod === "xrp". Underlying
+  // settlement is still a normal usdc_base/usdc_solana Bitrefill invoice;
+  // these two columns link that invoice to the bluvfi-xrpl swap wallet that
+  // collects XRP and swaps it into the invoice's own payment address.
+  xrplWalletRequestId: text("xrpl_wallet_request_id"),
+  xrplWalletAddress: text("xrpl_wallet_address"),
+  // Set once the user has moved this order's stuck XRP (status failed/expired,
+  // funds already reached xrplWalletRequestId but the swap never completed)
+  // back to their sidebar wallet via /api/xrpl/transfer. Lets the
+  // recoverable-orders list stop offering an order that's already been
+  // recovered, without re-deriving that from bluvfi-xrpl's activity history
+  // on every fetch.
+  xrplRecoveredAt: timestamp("xrpl_recovered_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("bitrefill_orders_invoice_idx").on(table.invoiceId),
   index("bitrefill_orders_user_idx").on(table.userId),
+  index("bitrefill_orders_xrpl_wallet_request_idx").on(table.xrplWalletRequestId),
+]);
+
+/**
+ * xrpl_sidebar_wallets — one persistent XRPL wallet per user, shown in the
+ * sidebar. Created lazily (idempotent on the bluvfi-xrpl service side via
+ * idempotencyKey="primary-xrp-wallet") the first time a user's sidebar
+ * renders; this table just remembers the mapping so the app doesn't have to
+ * re-create/re-fetch on every load. `walletRequestId` (not just `address`)
+ * is required for the sidebar-to-purchase transfer flow — transferBetweenWallets
+ * needs the source wallet's id, not its address.
+ */
+export const xrplSidebarWallets = pgTable("xrpl_sidebar_wallets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  walletRequestId: text("wallet_request_id").notNull(),
+  address: text("address").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("xrpl_sidebar_wallets_user_idx").on(table.userId),
 ]);
 
 /**
