@@ -42,6 +42,12 @@ function formatDate(iso: string | Date) {
 function networkLabel(type: string, chain?: string | null) {
   if (chain === "solana") return "◎ Solana";
   if (chain === "evm")    return "🔷 Base";
+  // "Pay with XRP" purchases — settle in USDC behind the scenes, but the
+  // user actually sent XRP, so label it as such rather than falling through
+  // to no network label at all (previously the case — "xrpl" wasn't
+  // recognized here even though xrp-purchase.ts has stamped it on these
+  // rows since the feature shipped).
+  if (chain === "xrpl")   return "🌐 XRP";
   return TYPE_META[type]?.network ?? "";
 }
 

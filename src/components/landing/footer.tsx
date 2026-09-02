@@ -98,7 +98,7 @@ export function Footer() {
           </a>
         </div>
         <span className="font-mono text-[11px] tracking-[0.1em] text-ink-light/30">
-          built with Bluvfi
+          built by Hivepod Digitals
         </span>
       </motion.div>
     </footer>

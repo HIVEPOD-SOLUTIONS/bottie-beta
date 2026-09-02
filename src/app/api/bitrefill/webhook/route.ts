@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bitrefillOrders, payments } from "@/lib/db/schema";
+import { reportServiceConfirmation, isXrplBackendConfigured } from "@/lib/xrplBackend";
 
 /**
  * POST /api/bitrefill/webhook
@@ -143,6 +144,35 @@ async function handleWebhook(payload: unknown): Promise<NextResponse> {
     .set({ status: paymentStatus })
     .where(eq(payments.referenceId, invoiceId))
     .catch((e: unknown) => console.error("[bitrefill/webhook] payments update error", e));
+
+  // ── Close the loop with bluvfi-xrpl for "pay with XRP" orders ─────────────
+  // This — not the XRPL webhook's SWAP_COMPLETED alone — is what should flip
+  // the purchase to "payment successful": Bitrefill confirming it actually
+  // received and processed the USDC the swap forwarded.
+  // bluvfi-xrpl's service-confirmation endpoint only accepts status
+  // "CONFIRMED"/"FAILED" (confirmed against its Zod schema,
+  // src/schemas/xrpl.schemas.ts:serviceConfirmationSchema) — NOT Bitrefill's
+  // own vocabulary ("complete"/"denied"/"payment_error"), so dbStatus (already
+  // normalised above) is mapped, not passed through raw. errorMessage is
+  // required by that same schema whenever status is "FAILED".
+  if (isXrplBackendConfigured()) {
+    const [order] = await db
+      .select({ xrplWalletRequestId: bitrefillOrders.xrplWalletRequestId })
+      .from(bitrefillOrders)
+      .where(eq(bitrefillOrders.invoiceId, invoiceId))
+      .limit(1)
+      .catch(() => [] as { xrplWalletRequestId: string | null }[]);
+
+    if (order?.xrplWalletRequestId) {
+      const confirmationStatus = dbStatus === "complete" ? "CONFIRMED" : "FAILED";
+      reportServiceConfirmation(
+        order.xrplWalletRequestId,
+        confirmationStatus,
+        { invoiceId },
+        confirmationStatus === "FAILED" ? `Bitrefill invoice ${rawStatus}` : undefined,
+      ).catch((e: unknown) => console.error("[bitrefill/webhook] reportServiceConfirmation error", e));
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

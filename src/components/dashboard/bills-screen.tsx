@@ -743,6 +743,11 @@ const PAYMENT_METHOD_GROUPS: { label: string; methods: PaymentMethodDef[] }[] = 
       { id: "bitcoin",      label: "Bitcoin",    token: "BTC",  icon: "₿",  badge: "BTC",       badgeColor: "text-orange-400", chain: "address" },
       { id: "lightning",    label: "Lightning",  token: "BTC",  icon: "⚡", badge: "Lightning", badgeColor: "text-yellow-400", chain: "address" },
       { id: "ton",          label: "TON",        token: "TON",  icon: "💎", badge: "TON",       badgeColor: "text-blue-300",   chain: "address" },
+      // "xrp" is a Bluvfi-only pseudo-method — not a native Bitrefill payment
+      // method. Handled specially in handleConfirm() *before* the normal
+      // invoice-creation call: the underlying invoice always settles in USDC,
+      // XRP is swapped into it via the bluvfi-xrpl service (src/lib/xrp-purchase.ts).
+      { id: "xrp",          label: "XRP",        token: "XRP",  icon: "🌐", badge: "XRPL",      badgeColor: "text-slate-300",  chain: "address" },
       { id: "litecoin",     label: "Litecoin",   token: "LTC",  icon: "Ł",  badge: "LTC",       badgeColor: "text-gray-300",   chain: "address" },
       { id: "dogecoin",     label: "Dogecoin",   token: "DOGE", icon: "🐕", badge: "DOGE",      badgeColor: "text-yellow-300", chain: "address" },
       { id: "dash",         label: "Dash",       token: "DASH", icon: "🔹", badge: "DASH",      badgeColor: "text-blue-300",   chain: "address" },
@@ -965,6 +970,45 @@ function CheckoutSheet({
   const [depositAmount, setDepositAmount]         = useState<string | null>(null);
   const [depositPaymentUri, setDepositPaymentUri] = useState<string | null>(null);
   const [depositCopied, setDepositCopied]         = useState(false);
+  // "Pay with XRP" — swap wallet deadline is shorter (450s) than the
+  // underlying Bitrefill invoice window, and requiredActivationXrp is
+  // XRP-specific (new/unfunded XRPL accounts need a minimum reserve).
+  const [xrpSwapExpiresAt, setXrpSwapExpiresAt]           = useState<string | null>(null);
+  const [xrpRequiredActivation, setXrpRequiredActivation] = useState<number | null>(null);
+  const [xrpWalletRequestId, setXrpWalletRequestId]       = useState<string | null>(null);
+  const [xrpSidebarTransferring, setXrpSidebarTransferring] = useState(false);
+  const [xrpSidebarWallet, setXrpSidebarWallet]           = useState<{ id: string; address: string } | null>(null);
+  const [xrpSwapSecsLeft, setXrpSwapSecsLeft]             = useState<number | null>(null);
+  // Set when the swap itself fails/expires/gets refunded — detected by
+  // polling the wallet's own status directly (see the effect below), not
+  // inferred from Bitrefill's invoice status, which never learns anything
+  // went wrong (it just never receives payment and eventually times out on
+  // its own 15-min clock, silently, with no explanation shown to the user).
+  const [xrpSwapFailedMsg, setXrpSwapFailedMsg]           = useState<string | null>(null);
+  const [xrpRecoverableXrp, setXrpRecoverableXrp]         = useState<number | null>(null);
+  const [xrpRecovering, setXrpRecovering]                 = useState(false);
+  const [xrpRecovered, setXrpRecovered]                   = useState(false);
+
+  // XRP swap countdown — separate from the underlying Bitrefill invoice's own
+  // expiry (expirySecsLeft below); the 450s swap deadline is shorter and is
+  // what actually matters for "how long do I have to send XRP".
+  useEffect(() => {
+    if (!xrpSwapExpiresAt) { setXrpSwapSecsLeft(null); return; }
+    const update = () => setXrpSwapSecsLeft(Math.floor((new Date(xrpSwapExpiresAt).getTime() - Date.now()) / 1000));
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [xrpSwapExpiresAt]);
+
+  // Fetch the user's sidebar XRP wallet once, so the "send from Bluvfi wallet"
+  // transfer button can appear on the XRP deposit step (guide step 6).
+  useEffect(() => {
+    if (paymentMethodId !== "xrp" || xrpSidebarWallet) return;
+    fetch("/api/xrpl/sidebar-wallet")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.id && data?.address) setXrpSidebarWallet({ id: data.id, address: data.address }); })
+      .catch(() => {});
+  }, [paymentMethodId, xrpSidebarWallet]);
 
   // Gift flow
   const [isGift, setIsGift]               = useState(false);
@@ -1006,8 +1050,10 @@ function CheckoutSheet({
             ...(pm.link_only ?? []),
             ...(pm.balance ?? []),
           ]);
+          // "xrp" is a Bluvfi-only pseudo-method never listed in Bitrefill's
+          // own supported set — don't auto-switch away from it if selected.
           setPaymentMethodId((cur) =>
-            supported.has(cur) ? cur : (supported.values().next().value ?? cur)
+            cur === "xrp" || supported.has(cur) ? cur : (supported.values().next().value ?? cur)
           );
         }
         // Update prepayment form fields if the detailed response has them
@@ -1147,6 +1193,53 @@ function CheckoutSheet({
     }, 10000);
   }, [onPurchased]);
 
+  // XRP-specific: poll the swap wallet's OWN status directly, independent of
+  // the Bitrefill invoice poll above. That poll has zero visibility into the
+  // XRPL side — if the swap fails (e.g. bluvfi-xrpl's underpayment guard
+  // refusing a too-tight quote, a real, confirmed occurrence, not
+  // hypothetical), Bitrefill's invoice simply never receives anything and
+  // silently sits "unpaid" until its own 15-min window times out — the user
+  // would stare at a stale countdown the whole time with zero indication
+  // their payment already hit a dead end. This catches that immediately.
+  useEffect(() => {
+    if (step !== "address" || paymentMethodId !== "xrp" || !xrpWalletRequestId) return;
+
+    const FAILURE_STATUSES = new Set(["FAILED", "REFUNDED", "EXPIRED"]);
+
+    const check = async () => {
+      try {
+        const res = await fetch(`/api/xrpl/wallet-status?walletRequestId=${encodeURIComponent(xrpWalletRequestId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!FAILURE_STATUSES.has(data.swapStatus)) return;
+
+        // Stop the Bitrefill invoice poll — it will never complete, since
+        // the swap never delivered anything to Bitrefill's address.
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+
+        const recoverable = data.swapAmountDrops ? Number(data.swapAmountDrops) / 1_000_000 : null;
+        setXrpRecoverableXrp(recoverable);
+        setXrpSwapFailedMsg(data.swapErrorMessage ?? null);
+
+        // Human-friendly translation — never surface raw internal wording
+        // ("NEAR Intents", "guaranteed floor", etc.) to the user.
+        const raw: string = data.swapErrorMessage ?? "";
+        const friendly =
+          data.swapStatus === "EXPIRED"
+            ? "The payment window closed before your payment could be processed."
+            : raw.includes("underpaying") || raw.includes("guaranteed floor")
+              ? "The exchange rate moved right as your payment was processing, so it couldn't be completed safely."
+              : "Something went wrong completing your payment.";
+        setErrMsg(friendly);
+        setStep("error");
+      } catch { /* keep polling on transient errors */ }
+    };
+
+    check();
+    const id = setInterval(check, 7000);
+    return () => clearInterval(id);
+  }, [step, paymentMethodId, xrpWalletRequestId]);
+
   const handlePrepaySubmit = useCallback(async () => {
     setPrepayLoading(true);
     setPrepayError(null);
@@ -1256,8 +1349,63 @@ function CheckoutSheet({
     }
     setStep("paying");
     setErrMsg(null);
+    // Clear any leftover recovery state from a previous failed XRP attempt —
+    // a retry can be triggered directly from the error screen, not just via
+    // the back button, so this can't only live in the back-button handler.
+    setXrpRecoverableXrp(null); setXrpSwapFailedMsg(null); setXrpRecovered(false);
     try {
       const paymentMethod = paymentMethodId;
+
+      // "Pay with XRP" — multi-step flow (invoice → quote → XRPL swap wallet),
+      // orchestrated server-side in one call. Reuses the normal address-based
+      // deposit UI + Bitrefill invoice polling below; only the XRP-specific
+      // swap deadline/activation-reserve fields are handled separately.
+      if (paymentMethod === "xrp") {
+        const xrpRes = await authFetch("/api/bitrefill/xrp-purchase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productId:      product.id,
+            // Fixed-package products: packageId from the selected package.
+            // Range products (e.g. MTN Nigeria "NGN 5–50000"): selectedPkg is
+            // null, so this must fall back to the custom amount the user
+            // typed — same distinction the regular (non-XRP) flow already
+            // makes at the invoice-creation call below.
+            packageId:      isFixed ? (selectedPkg ? pkgDisplayValue(selectedPkg) : undefined) : undefined,
+            customValue:    !isFixed ? customValue : undefined,
+            recipientEmail: recipientEmail.trim(),
+            sendTo:         isTopup ? e164Phone
+                          : (isAccountType || isUsernameType || isEmailRecipient) ? refillInput.trim()
+                          : undefined,
+          }),
+        }, getAccessToken);
+        if (!xrpRes.ok) {
+          const err = await xrpRes.json().catch(() => ({ error: "XRP purchase failed" }));
+          throw new Error(err.error ?? "XRP purchase failed");
+        }
+        const xrp = await xrpRes.json();
+        setInvoiceAccessToken(xrp.invoiceAccessToken ?? null);
+        setDepositAddress(xrp.paymentAddress);
+        // The amount to actually send must be requiredActivationXrp — the
+        // reserve (1.05 XRP) PLUS the swap amount, both required before
+        // bluvfi-xrpl's wallet even reaches READY (see its docs: "the
+        // reserve + swap amount both need to be present"). swapAmountDrops
+        // alone is only the swap portion — sending just that would leave
+        // the wallet permanently unactivated and the swap would never fire.
+        setDepositAmount(
+          xrp.requiredActivationXrp != null ? String(xrp.requiredActivationXrp) : null,
+        );
+        setDepositPaymentUri(null);
+        setXrpSwapExpiresAt(xrp.swapExpiresAt ?? null);
+        setXrpRequiredActivation(xrp.requiredActivationXrp ?? null);
+        setXrpWalletRequestId(xrp.xrplWalletRequestId ?? null);
+        setStep("address");
+        // Bitrefill's own webhook (not the XRPL swap alone) is what flips this
+        // to "done" — see api/bitrefill/webhook's reportServiceConfirmation call.
+        pollInvoice(xrp.invoiceId, xrp.invoiceAccessToken ?? null, null, xrp.expirationMinutes ?? null);
+        return;
+      }
+
       const invRes = await authFetch("/api/bitrefill/invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1778,8 +1926,15 @@ function CheckoutSheet({
                 if (step === "prepay") onClose();
                 else if (step === "email") onClose();
                 else if (step === "pick") setStep("email");
-                else if (step === "error") setStep("pick");
-                else if (step === "address") { setStep("pick"); setDepositAddress(null); setDepositAmount(null); setDepositPaymentUri(null); if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } }
+                else if (step === "error") {
+                  setStep("pick");
+                  setXrpRecoverableXrp(null); setXrpSwapFailedMsg(null); setXrpRecovered(false);
+                }
+                else if (step === "address") {
+                  setStep("pick"); setDepositAddress(null); setDepositAmount(null); setDepositPaymentUri(null);
+                  setXrpRecoverableXrp(null); setXrpSwapFailedMsg(null); setXrpRecovered(false);
+                  if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+                }
               }}
               className="rounded-full p-1.5 text-[#A7A79A] hover:bg-white/[0.06]"
               aria-label="Back"
@@ -2076,11 +2231,16 @@ function CheckoutSheet({
                     ...(pm.balance ?? []),
                   ])
                 : null; // null = no info = show all
+              // "xrp" is a Bluvfi-only pseudo-method (see xrp-purchase.ts) —
+              // Bitrefill has no concept of it, so it can never appear in a
+              // product's own payment_methods list and would otherwise be
+              // filtered out unconditionally. It works for any product (it
+              // wraps a plain usdc_solana invoice), so always include it.
               const visibleGroups = PAYMENT_METHOD_GROUPS
                 .map((g) => ({
                   ...g,
                   methods: supported
-                    ? g.methods.filter((m) => supported.has(m.id))
+                    ? g.methods.filter((m) => m.id === "xrp" || supported.has(m.id))
                     : g.methods,
                 }))
                 .filter((g) => g.methods.length > 0);
@@ -2162,6 +2322,56 @@ function CheckoutSheet({
 
             {step === "error" && errMsg && (
               <p className="mb-3 rounded-xl bg-red-900/20 px-4 py-2.5 text-sm text-red-400">{errMsg}</p>
+            )}
+
+            {/* XRP payment that already reached the network but couldn't complete —
+                the funds are sitting in a wallet this app controls, not lost. Offer
+                to move them straight to the user's own persistent XRP wallet rather
+                than leaving them stuck with no path forward. */}
+            {step === "error" && paymentMethodId === "xrp" && xrpRecoverableXrp && xrpWalletRequestId && (
+              <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+                {xrpRecovered ? (
+                  <p className="text-xs font-medium text-[#8FAE82]">
+                    ✓ {xrpRecoverableXrp.toFixed(4)} XRP moved back to your Bluvfi XRP wallet.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-2 text-xs text-[#A7A79A]">
+                      Your {xrpRecoverableXrp.toFixed(4)} XRP already reached the network — it&apos;s safe, just stuck in this one payment attempt.
+                    </p>
+                    <button
+                      disabled={xrpRecovering || !xrpSidebarWallet}
+                      onClick={async () => {
+                        if (!xrpSidebarWallet) return;
+                        setXrpRecovering(true);
+                        try {
+                          const res = await authFetch("/api/xrpl/transfer", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              sourceWalletRequestId: xrpWalletRequestId,
+                              destinationWalletRequestId: xrpSidebarWallet.id,
+                              amountXrp: String(xrpRecoverableXrp),
+                            }),
+                          }, getAccessToken);
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => ({ error: "Recovery failed" }));
+                            throw new Error(err.error ?? "Recovery failed");
+                          }
+                          setXrpRecovered(true);
+                        } catch (err: unknown) {
+                          setErrMsg((err as Error)?.message ?? "Couldn't recover funds — try again in a moment.");
+                        } finally {
+                          setXrpRecovering(false);
+                        }
+                      }}
+                      className="w-full rounded-xl bg-amber-500/90 py-2 text-xs font-semibold text-[#141513] disabled:opacity-50"
+                    >
+                      {xrpRecovering ? "Recovering…" : "Recover your XRP"}
+                    </button>
+                  </>
+                )}
+              </div>
             )}
 
             <button
@@ -2395,19 +2605,84 @@ function CheckoutSheet({
                   </button>
                 </div>
 
-                {/* Status / expiry */}
-                {pollStatus && pollStatus !== "unpaid" ? (
-                  <p className="text-center text-xs font-medium text-[#8FAE82]">
-                    ✓ {invoiceStatusLabel(pollStatus)}
-                  </p>
-                ) : expirySecsLeft !== null ? (
-                  <p className={`text-center text-xs ${expirySecsLeft < 120 ? "text-amber-400 font-medium" : "text-[#A7A79A]"}`}>
-                    {expirySecsLeft > 0
-                      ? `⏳ Expires in ${Math.floor(expirySecsLeft / 60)}:${String(expirySecsLeft % 60).padStart(2, "0")}`
-                      : "⚠️ Invoice expired · Please start a new purchase"}
-                  </p>
-                ) : (
-                  <p className="text-center text-xs text-[#A7A79A]">⏳ Waiting for payment · Expires in ~15 min</p>
+                {/* XRP-specific: activation reserve note, one status/countdown, sidebar transfer.
+                    Deliberately the *only* status/deadline shown for XRP — the generic
+                    "Status / expiry" block below is skipped for this method entirely, so
+                    the user never sees two competing deadlines. Wording avoids any mention
+                    of "swap" — the XRP→USDC conversion is an internal implementation
+                    detail, not something the user needs to know is happening. */}
+                {paymentMethodId === "xrp" && (
+                  <>
+                    {xrpRequiredActivation && (
+                      <p className="text-center text-[11px] text-[#A7A79A]">
+                        This is a brand-new address — part of the amount above (~1.05 XRP) is the network&apos;s mandatory reserve to activate it, not an extra fee.
+                      </p>
+                    )}
+                    {pollStatus && pollStatus !== "unpaid" ? (
+                      <div className="flex flex-col items-center gap-1.5">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                          <div className="h-full w-2/3 animate-pulse rounded-full bg-[#8FAE82]" />
+                        </div>
+                        <p className="text-center text-xs font-medium text-[#8FAE82]">Processing your payment…</p>
+                      </div>
+                    ) : xrpSwapSecsLeft !== null && (
+                      <p className={`text-center text-xs ${xrpSwapSecsLeft < 120 ? "text-amber-400 font-medium" : "text-[#A7A79A]"}`}>
+                        {xrpSwapSecsLeft > 0
+                          ? `⏳ Time left to send: ${Math.floor(xrpSwapSecsLeft / 60)}:${String(xrpSwapSecsLeft % 60).padStart(2, "0")}`
+                          : "⚠️ Payment window expired · Please start a new purchase"}
+                      </p>
+                    )}
+                    {xrpSidebarWallet && xrpWalletRequestId && depositAmount && (
+                      <button
+                        disabled={xrpSidebarTransferring}
+                        onClick={async () => {
+                          setXrpSidebarTransferring(true);
+                          setErrMsg(null);
+                          try {
+                            const res = await authFetch("/api/xrpl/transfer", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                sourceWalletRequestId: xrpSidebarWallet.id,
+                                destinationWalletRequestId: xrpWalletRequestId,
+                                amountXrp: depositAmount,
+                              }),
+                            }, getAccessToken);
+                            if (!res.ok) {
+                              const err = await res.json().catch(() => ({ error: "Transfer failed" }));
+                              throw new Error(err.error ?? "Transfer failed");
+                            }
+                            setStep("polling");
+                          } catch (err: unknown) {
+                            setErrMsg((err as Error)?.message ?? "Transfer failed");
+                          } finally {
+                            setXrpSidebarTransferring(false);
+                          }
+                        }}
+                        className="w-full rounded-2xl bg-[#8FAE82] py-2.5 text-center text-xs font-semibold text-[#141513] disabled:opacity-50"
+                      >
+                        {xrpSidebarTransferring ? "Sending…" : "Send from your Bluvfi XRP wallet"}
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {/* Status / expiry — skipped for XRP, which has its own single
+                    status/countdown above (no second, competing deadline). */}
+                {paymentMethodId !== "xrp" && (
+                  pollStatus && pollStatus !== "unpaid" ? (
+                    <p className="text-center text-xs font-medium text-[#8FAE82]">
+                      ✓ {invoiceStatusLabel(pollStatus)}
+                    </p>
+                  ) : expirySecsLeft !== null ? (
+                    <p className={`text-center text-xs ${expirySecsLeft < 120 ? "text-amber-400 font-medium" : "text-[#A7A79A]"}`}>
+                      {expirySecsLeft > 0
+                        ? `⏳ Expires in ${Math.floor(expirySecsLeft / 60)}:${String(expirySecsLeft % 60).padStart(2, "0")}`
+                        : "⚠️ Invoice expired · Please start a new purchase"}
+                    </p>
+                  ) : (
+                    <p className="text-center text-xs text-[#A7A79A]">⏳ Waiting for payment · Expires in ~15 min</p>
+                  )
                 )}
               </>
             )}
@@ -2515,10 +2790,15 @@ function ProductDetailSheet({
   const allSupported = pm
     ? [...(pm.address_based ?? []), ...(pm.link_only ?? []), ...(pm.balance ?? [])]
     : [];
-  // Show only methods we have defined in our groups
+  // Show only methods we have defined in our groups. "xrp" is a Bluvfi-only
+  // pseudo-method (see xrp-purchase.ts) — Bitrefill has no concept of it, so
+  // it can never appear in a product's own payment_methods list and would
+  // otherwise be filtered out of every product's picker unconditionally.
+  // It works for any product (wraps a plain usdc_solana invoice), so always
+  // include it regardless of what Bitrefill reports as supported.
   const supportedUi = PAYMENT_METHOD_GROUPS
     .flatMap((g) => g.methods)
-    .filter((m) => allSupported.includes(m.id));
+    .filter((m) => m.id === "xrp" || allSupported.includes(m.id));
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 backdrop-blur-sm">
@@ -3009,6 +3289,7 @@ function BitrefillDetail() {
 export function BillsScreen() {
   const { paidBillIds } = useDemoState();
   const { open: openChat, sendMessage } = useChatSheet();
+  const { getAccessToken } = usePrivy();
   const [viewTab, setViewTab] = useState<"bills" | "browse">("bills");
   const [bitrefillOpen, setBitrefillOpen] = useState(false);
 
@@ -3016,6 +3297,75 @@ export function BillsScreen() {
   const { billPayments, loading: billsLoading } = usePaymentsContext();
   const dbCompletedCount = billPayments.filter((p) => p.status === "completed").length;
   const totalPurchased = Math.max(paidBillIds.length, dbCompletedCount);
+
+  // ── XRP recovery (past purchases, not the live in-progress flow) ─────────
+  // CheckoutSheet's own "Recover your XRP" button only exists inside that
+  // modal's live, in-session React state — populated in exactly one place,
+  // right after a purchase started in that same browser session. It's
+  // unreachable for a purchase made via the AI, or a dashboard purchase
+  // where the user navigated away before the failure was caught live — the
+  // funds stay genuinely safe, but there was no UI path to actually move
+  // them. This reads /api/xrpl/recoverable-orders (DB + a live bluvfi-xrpl
+  // check) instead, so it works regardless of how or when the purchase was
+  // made.
+  type RecoverableOrder = {
+    invoiceId: string;
+    walletRequestId: string;
+    productName: string;
+    recoverableXrp: number;
+    failedAt: string;
+  };
+  const [xrpRecoverableOrders, setXrpRecoverableOrders] = useState<RecoverableOrder[]>([]);
+  const [xrpRecoverableLoaded, setXrpRecoverableLoaded]  = useState(false);
+  const [xrpListSidebarWallet, setXrpListSidebarWallet]  = useState<{ id: string; address: string } | null>(null);
+  const [xrpRecoveringId, setXrpRecoveringId]            = useState<string | null>(null);
+  const [xrpListRecoverError, setXrpListRecoverError]    = useState<string | null>(null);
+
+  useEffect(() => {
+    if (viewTab !== "bills" || xrpRecoverableLoaded) return;
+    let cancelled = false;
+    authFetch("/api/xrpl/recoverable-orders", undefined, getAccessToken)
+      .then((r) => (r.ok ? r.json() : { orders: [] }))
+      .then((data) => { if (!cancelled) setXrpRecoverableOrders(data.orders ?? []); })
+      .catch(() => { if (!cancelled) setXrpRecoverableOrders([]); })
+      .finally(() => { if (!cancelled) setXrpRecoverableLoaded(true); });
+    return () => { cancelled = true; };
+  }, [viewTab, xrpRecoverableLoaded, getAccessToken]);
+
+  // Destination wallet — only fetched once there's actually something to recover.
+  useEffect(() => {
+    if (xrpRecoverableOrders.length === 0 || xrpListSidebarWallet) return;
+    authFetch("/api/xrpl/sidebar-wallet", undefined, getAccessToken)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.id && data?.address) setXrpListSidebarWallet({ id: data.id, address: data.address }); })
+      .catch(() => {});
+  }, [xrpRecoverableOrders.length, xrpListSidebarWallet, getAccessToken]);
+
+  const recoverListedOrder = useCallback(async (order: RecoverableOrder) => {
+    if (!xrpListSidebarWallet) return;
+    setXrpRecoveringId(order.walletRequestId);
+    setXrpListRecoverError(null);
+    try {
+      const res = await authFetch("/api/xrpl/transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceWalletRequestId: order.walletRequestId,
+          destinationWalletRequestId: xrpListSidebarWallet.id,
+          amountXrp: String(order.recoverableXrp),
+        }),
+      }, getAccessToken);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Recovery failed" }));
+        throw new Error(err.error ?? "Recovery failed");
+      }
+      setXrpRecoverableOrders((prev) => prev.filter((o) => o.walletRequestId !== order.walletRequestId));
+    } catch (err: unknown) {
+      setXrpListRecoverError((err as Error)?.message ?? "Couldn't recover funds — try again in a moment.");
+    } finally {
+      setXrpRecoveringId(null);
+    }
+  }, [xrpListSidebarWallet, getAccessToken]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -3060,32 +3410,65 @@ export function BillsScreen() {
 
       {/* My Bills view */}
       {viewTab === "bills" && (
-        billsLoading ? (
-          // Don't flash "No purchases yet" while DB is loading
-          <div className="py-12 text-center">
-            <div className="mx-auto h-8 w-32 animate-pulse rounded-xl bg-white/[0.06]" />
-          </div>
-        ) : totalPurchased === 0 ? (
-          <div className="py-12 text-center">
-            <p className="text-4xl">🧾</p>
-            <p className="mt-2 font-semibold text-[#F2F0E8]">No purchases yet</p>
-            <p className="mt-1 text-sm text-[#A7A79A]">
-              Browse digital products to get started
-            </p>
-            <button
-              onClick={() => setViewTab("browse")}
-              className="mt-4 rounded-2xl bg-[#8FAE82] px-6 py-2.5 text-sm font-semibold text-[#141513]"
-            >
-              Browse Products
-            </button>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-center">
-            <p className="text-sm text-[#A7A79A]">
-              {totalPurchased} product{totalPurchased !== 1 ? "s" : ""} purchased
-            </p>
-          </div>
-        )
+        <>
+          {/* XRP recovery — shown regardless of the purchased-count state
+              below, since a failed-after-funding purchase doesn't count as
+              "purchased" but still needs surfacing. */}
+          {xrpRecoverableOrders.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {xrpRecoverableOrders.map((order) => (
+                <div
+                  key={order.walletRequestId}
+                  className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4"
+                >
+                  <p className="text-sm font-semibold text-[#F2F0E8]">{order.productName}</p>
+                  <p className="mt-1 text-xs text-[#A7A79A]">
+                    This payment didn&apos;t go through, but {order.recoverableXrp.toFixed(4)} XRP you already sent is safe — it&apos;s just stuck in this one payment attempt.
+                  </p>
+                  <button
+                    disabled={xrpRecoveringId === order.walletRequestId || !xrpListSidebarWallet}
+                    onClick={() => recoverListedOrder(order)}
+                    className="mt-2 w-full rounded-xl bg-amber-500/90 py-2 text-xs font-semibold text-[#141513] disabled:opacity-50"
+                  >
+                    {xrpRecoveringId === order.walletRequestId ? "Recovering…" : "Recover your XRP"}
+                  </button>
+                </div>
+              ))}
+              {xrpListRecoverError && (
+                <p className="text-xs text-red-400 px-1">{xrpListRecoverError}</p>
+              )}
+            </div>
+          )}
+
+          {billsLoading ? (
+            // Don't flash "No purchases yet" while DB is loading
+            <div className="py-12 text-center">
+              <div className="mx-auto h-8 w-32 animate-pulse rounded-xl bg-white/[0.06]" />
+            </div>
+          ) : totalPurchased === 0 ? (
+            xrpRecoverableOrders.length === 0 && (
+              <div className="py-12 text-center">
+                <p className="text-4xl">🧾</p>
+                <p className="mt-2 font-semibold text-[#F2F0E8]">No purchases yet</p>
+                <p className="mt-1 text-sm text-[#A7A79A]">
+                  Browse digital products to get started
+                </p>
+                <button
+                  onClick={() => setViewTab("browse")}
+                  className="mt-4 rounded-2xl bg-[#8FAE82] px-6 py-2.5 text-sm font-semibold text-[#141513]"
+                >
+                  Browse Products
+                </button>
+              </div>
+            )
+          ) : (
+            <div className="rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-center">
+              <p className="text-sm text-[#A7A79A]">
+                {totalPurchased} product{totalPurchased !== 1 ? "s" : ""} purchased
+              </p>
+            </div>
+          )}
+        </>
       )}
 
       {/* Browse view */}
