@@ -23,7 +23,7 @@ export function AppUrlListener() {
 
     let cleanup: (() => void) | null = null;
 
-    import("@capacitor/app").then(({ App }) => {
+    import(/* webpackIgnore: true */ "@capacitor/app").then(({ App }) => {
       const listenerPromise = App.addListener("appUrlOpen", (event) => {
         try {
           const deepLinkUrl = new URL(event.url);
