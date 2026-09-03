@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Instrument_Serif, Source_Serif_4, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/providers";
+import { CapacitorFetchPatch } from "@/components/capacitor-fetch-patch";
+import { AppUrlListener } from "@/components/app-url-listener";
 import "./globals.css";
 
 const instrumentSerif = Instrument_Serif({
@@ -65,6 +67,8 @@ export default function RootLayout({
       className={`${instrumentSerif.variable} ${sourceSerif4.variable} ${jetbrainsMono.variable}`}
     >
       <body>
+        <CapacitorFetchPatch />
+        <AppUrlListener />
         <Providers>{children}</Providers>
         {/* Desktop blocker — mobile only app */}
         <div className="pointer-events-none fixed inset-0 z-[9999] hidden flex-col items-center justify-center gap-4 bg-cream md:flex">

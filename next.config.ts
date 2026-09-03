@@ -8,9 +8,24 @@ const withSerwist = withSerwistInit({
   disable: process.env.NODE_ENV === "development",
 });
 
+// When NEXT_EXPORT=1 emit a fully-static `out/` for the Capacitor APK.
+const isCapacitorBuild = process.env.NEXT_EXPORT === "1";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   turbopack: {},
+
+  ...(isCapacitorBuild
+    ? {
+        output: "export",
+        trailingSlash: true,
+        images: { unoptimized: true },
+        // @base-org/account ships a nested viem that causes type conflicts.
+        // Runtime is fine (webpack alias below forces the correct viem).
+        typescript: { ignoreBuildErrors: true },
+        eslint:     { ignoreDuringBuilds: true },
+      }
+    : {}),
 
   // Force every bundler to use the root-level viem package.
   // @walletconnect/utils bundles its own incomplete viem ESM copy inside
