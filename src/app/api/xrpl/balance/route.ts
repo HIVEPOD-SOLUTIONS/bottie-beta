@@ -47,7 +47,11 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to fetch XRPL balance";
-    console.error("[xrpl/balance]", message);
-    return NextResponse.json({ error: message }, { status: 502 });
+    const upstreamStatus = (err as { status?: number }).status;
+    // Propagate 404 from the XRPL service as 404 so the client knows the
+    // wallet request is orphaned and can stop retrying.
+    const status = upstreamStatus === 404 ? 404 : 502;
+    if (status !== 404) console.error("[xrpl/balance]", message);
+    return NextResponse.json({ error: message }, { status });
   }
 }
