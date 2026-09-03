@@ -198,17 +198,55 @@ function addSecurityHeaders(response: NextResponse, isProd: boolean): NextRespon
   return response;
 }
 
-// ── Main middleware ───────────────────────────────────────────────────────────
+// ── CORS (Capacitor WebView + production) ────────────────────────────────────
+
+const ALLOWED_ORIGINS = new Set([
+  "https://bluvfi.xyz",
+  "https://localhost",      // Capacitor Android WebView
+  "http://localhost:3000",  // local Next.js dev server
+  "http://10.0.2.2:3000",  // Android emulator → host
+]);
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Methods":     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers":     "Content-Type, Authorization, privy-id-token, privy-app-id",
+  "Access-Control-Allow-Credentials": "true",
+  "Access-Control-Max-Age":           "86400",
+};
+
+// ── Main proxy ────────────────────────────────────────────────────────────────
 
 export function proxy(request: NextRequest): NextResponse {
   const isProd = process.env.NODE_ENV === "production";
+  const origin  = request.headers.get("origin") ?? "";
+  const allowed = ALLOWED_ORIGINS.has(origin);
+  const isApi   = request.nextUrl.pathname.startsWith("/api/");
 
-  // 1. Rate limiting
-  const blocked = applyRateLimit(request);
-  if (blocked) return blocked;
+  // Preflight — respond immediately for API routes
+  if (request.method === "OPTIONS" && isApi) {
+    return new NextResponse(null, {
+      status: 204,
+      headers: {
+        ...CORS_HEADERS,
+        "Access-Control-Allow-Origin": allowed ? origin : "https://bluvfi.xyz",
+      },
+    });
+  }
 
-  // 2. Pass through, then add security headers to the response
+  // Rate limiting (API only)
+  if (isApi) {
+    const blocked = applyRateLimit(request);
+    if (blocked) return blocked;
+  }
+
   const response = NextResponse.next();
+
+  // CORS headers for API routes
+  if (isApi && allowed) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => response.headers.set(k, v));
+  }
+
   return addSecurityHeaders(response, isProd);
 }
 

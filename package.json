@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --webpack",
-    "start": "next start"
+    "start": "next start",
+    "build:android": "node scripts/build-android.mjs",
+    "cap:sync": "yarn build:android && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "cap:dev": "cross-env CAPACITOR_DEV=1 npx cap sync android && npx cap open android"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.110",

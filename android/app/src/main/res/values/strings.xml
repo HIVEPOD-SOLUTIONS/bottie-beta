@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Bluvfi</string>
+    <string name="title_activity_main">Bluvfi</string>
+    <string name="package_name">com.bluvfi.xyz</string>
+    <string name="custom_url_scheme">com.bluvfi.xyz</string>
+</resources>

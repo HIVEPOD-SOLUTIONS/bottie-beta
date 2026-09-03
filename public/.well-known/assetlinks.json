@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.bluvfi.xyz",
+    "sha256_cert_fingerprints": [
+      "A4:D6:67:07:13:44:E5:F0:2B:9D:F6:7D:59:D2:50:8A:33:12:BA:B6:0D:AC:A3:5C:A5:D0:4E:8D:15:7D:AC:AF"
+    ]
+  }
+}]
