@@ -11,7 +11,10 @@ export function useHandleLogin() {
   const { login } = useLogin({
     onComplete: () => {
       localStorage.removeItem(PENDING_KEY);
-      router.push("/app");
+      // Use replace so the OAuth-params URL is removed from browser history.
+      // Without this, logging out can navigate back to the URL with
+      // privy_oauth_code in it, which breaks the next login attempt.
+      router.replace("/app");
     },
     onError: (error) => {
       localStorage.removeItem(PENDING_KEY);

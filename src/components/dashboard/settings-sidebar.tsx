@@ -57,7 +57,10 @@ export function SettingsSidebar({
   const { logout } = useLogout({
     onSuccess: () => {
       queryClient.clear();
-      router.push("/");
+      // Use replace + window.location to fully clear any OAuth params
+      // (privy_oauth_code, privy_oauth_state) that may be in the URL,
+      // so the next login attempt doesn't hit a stale redirect URL.
+      window.location.replace("/");
     },
   });
 
