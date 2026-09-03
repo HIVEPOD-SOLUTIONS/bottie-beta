@@ -41,7 +41,11 @@ async function request<T>(method: string, path: string, body?: Record<string, un
     cache: "no-store",
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`bluvfi-xrpl ${method} ${path} → ${res.status}: ${text}`);
+  if (!res.ok) {
+    const err = new Error(`bluvfi-xrpl ${method} ${path} → ${res.status}: ${text}`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
   if (!text) return undefined as T;
   try {
     return JSON.parse(text) as T;
