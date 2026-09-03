@@ -105,11 +105,19 @@ export function SettingsSidebar({
   // sidebar (re)opens with a known wallet, not on a timer.
   const [xrplBalance, setXrplBalance] = useState<number | null>(null);
   const [xrplBalanceLoading, setXrplBalanceLoading] = useState(false);
+  // True when the XRPL service returns 404 — wallet request is orphaned
+  // (app DB has the ID but the XRPL service no longer knows it). Hide the
+  // XRP wallet section in that case rather than spinning "…" forever.
+  const [xrplOrphaned, setXrplOrphaned] = useState(false);
   useEffect(() => {
     if (!open || !xrplWalletRequestId) return;
     setXrplBalanceLoading(true);
+    setXrplOrphaned(false);
     fetch(`/api/xrpl/balance?walletRequestId=${encodeURIComponent(xrplWalletRequestId)}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (r.status === 404) { setXrplOrphaned(true); return null; }
+        return r.ok ? r.json() : null;
+      })
       .then((data) => { if (typeof data?.balanceXrp === "number") setXrplBalance(data.balanceXrp); })
       .catch(() => {})
       .finally(() => setXrplBalanceLoading(false));
@@ -239,7 +247,7 @@ export function SettingsSidebar({
               </>
             )}
 
-            {xrplAddress && (
+            {xrplAddress && !xrplOrphaned && (
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-ink-light">XRP</span>
                 <span className="font-display text-sm font-semibold text-ink">
