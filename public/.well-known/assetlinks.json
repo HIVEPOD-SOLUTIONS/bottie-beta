@@ -4,7 +4,8 @@
     "namespace": "android_app",
     "package_name": "com.bluvfi.xyz",
     "sha256_cert_fingerprints": [
-      "A4:D6:67:07:13:44:E5:F0:2B:9D:F6:7D:59:D2:50:8A:33:12:BA:B6:0D:AC:A3:5C:A5:D0:4E:8D:15:7D:AC:AF"
+      "A4:D6:67:07:13:44:E5:F0:2B:9D:F6:7D:59:D2:50:8A:33:12:BA:B6:0D:AC:A3:5C:A5:D0:4E:8D:15:7D:AC:AF",
+      "2F:77:AC:75:A8:EB:B3:14:35:F4:E9:96:4D:92:75:9F:A2:71:37:9A:DD:41:44:59:8C:D3:0D:09:19:49:B7:33"
     ]
   }
 }]
