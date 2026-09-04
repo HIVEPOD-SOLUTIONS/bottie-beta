@@ -8,16 +8,23 @@ import { useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
 import { privyConfig } from "@/lib/privy";
 
-// After Google OAuth, Privy redirects here. Android App Links intercepts the
-// HTTPS URL and opens the Capacitor app. AppUrlListener then appends the
-// OAuth params to the WebView URL for PrivyProvider to exchange automatically.
+// After Google OAuth, Privy redirects here.
+// - Capacitor: Android App Links intercepts this HTTPS URL and opens the app.
+//   AppUrlListener then appends the OAuth params to the WebView URL for
+//   PrivyProvider to exchange automatically.
+// - Web: we explicitly pass window.location.origin (just the scheme+host, no
+//   path or query params) so Privy never uses the full current URL — which may
+//   still contain stale privy_oauth_code params from a previous login attempt,
+//   causing a 401 "Redirect URL is not allowed" on the next OAuth init.
 const CAPACITOR_OAUTH_REDIRECT_URL = "https://bluvfi.xyz";
 
 function getOAuthRedirectUrl(): string | undefined {
   if (typeof window === "undefined") return undefined;
-  return (window as unknown as { Capacitor?: unknown }).Capacitor
-    ? CAPACITOR_OAUTH_REDIRECT_URL
-    : undefined;
+  const isCapacitor = !!(window as unknown as { Capacitor?: unknown }).Capacitor;
+  if (isCapacitor) return CAPACITOR_OAUTH_REDIRECT_URL;
+  // Web: use origin only (e.g. "https://www.bluvfi.xyz") — clean, no stale params.
+  // Both bluvfi.xyz and www.bluvfi.xyz are in Privy's allowed OAuth redirect URLs.
+  return window.location.origin;
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
