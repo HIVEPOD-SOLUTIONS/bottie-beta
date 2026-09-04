@@ -49,7 +49,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Voice input (microphone for Bottie voice queries) -->
+    <!-- Voice input (microphone for Bluvfi voice queries) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Haptic feedback -->
     <uses-permission android:name="android.permission.VIBRATE" />
