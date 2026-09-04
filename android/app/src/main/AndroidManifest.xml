@@ -21,17 +21,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Universal App Links — Android verifies ownership via /.well-known/assetlinks.json -->
-            <!-- Privy OAuth redirects to https://bluvfi.xyz after Google auth.        -->
-            <!-- Two filters needed because Amplify may redirect bluvfi.xyz → www.     -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="https"
-                    android:host="bluvfi.xyz" />
-            </intent-filter>
+            <!-- Universal App Link — Amplify serves the app on www.bluvfi.xyz.         -->
+            <!-- The bare domain (bluvfi.xyz) always redirects to www; Android does    -->
+            <!-- not follow redirects during verification so only www is verified.     -->
+            <!-- Privy OAuth redirects to https://www.bluvfi.xyz; Android intercepts  -->
+            <!-- it here and opens the Capacitor app instead of Chrome.               -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

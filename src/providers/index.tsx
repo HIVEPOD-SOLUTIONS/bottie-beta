@@ -16,7 +16,10 @@ import { privyConfig } from "@/lib/privy";
 //   path or query params) so Privy never uses the full current URL — which may
 //   still contain stale privy_oauth_code params from a previous login attempt,
 //   causing a 401 "Redirect URL is not allowed" on the next OAuth init.
-const CAPACITOR_OAUTH_REDIRECT_URL = "https://bluvfi.xyz";
+// Must be www.bluvfi.xyz — Amplify redirects the bare domain to www, and
+// Android does not follow redirects during App Link verification, so only
+// www.bluvfi.xyz is verified. Using www directly avoids the redirect chain.
+const CAPACITOR_OAUTH_REDIRECT_URL = "https://www.bluvfi.xyz";
 
 function getOAuthRedirectUrl(): string | undefined {
   if (typeof window === "undefined") return undefined;
