@@ -25,7 +25,7 @@ const SLIDES = [
       </svg>
     ),
     heading: "Your AI Finance\nAssistant",
-    body: "Meet Bottie — your personal AI that handles bills, investments, and your finances through simple conversation.",
+    body: "Meet Bluvfi — your personal AI that handles bills, investments, and your finances through simple conversation.",
   },
   {
     id: 1,

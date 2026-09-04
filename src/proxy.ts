@@ -80,7 +80,7 @@ function applyRateLimit(request: NextRequest): NextResponse | null {
 
 // ── Security headers ──────────────────────────────────────────────────────────
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://bottie.finance";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://bluvfi.xyz";
 
 /**
  * Content Security Policy.
