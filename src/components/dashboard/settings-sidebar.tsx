@@ -50,7 +50,7 @@ export function SettingsSidebar({
   open,
   onClose,
 }: SettingsSidebarProps) {
-  const { user } = usePrivy();
+  const { user, getAccessToken } = usePrivy();
   const { wallets } = useWallets();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -78,7 +78,11 @@ export function SettingsSidebar({
     if (!open || xrplAddress) return;
     setXrplLoading(true);
     setXrplError(null);
-    fetch("/api/xrpl/sidebar-wallet")
+    getAccessToken()
+      .then((token) => {
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        return fetch("/api/xrpl/sidebar-wallet", { headers });
+      })
       .then(async (r) => {
         const data = await r.json().catch(() => null);
         if (!r.ok) throw new Error(data?.error ?? `Request failed (${r.status})`);
@@ -97,7 +101,7 @@ export function SettingsSidebar({
         if (!msg.includes("not configured")) setXrplError(msg || "Failed to load XRPL wallet");
       })
       .finally(() => setXrplLoading(false));
-  }, [open, xrplAddress, xrplRetryTick]);
+  }, [open, xrplAddress, xrplRetryTick, getAccessToken]);
 
   // Live XRP balance — derived strictly through bluvfi-xrpl (its own
   // GET /wallet-requests/:id activity history), never a direct call to the
@@ -113,7 +117,11 @@ export function SettingsSidebar({
     if (!open || !xrplWalletRequestId) return;
     setXrplBalanceLoading(true);
     setXrplOrphaned(false);
-    fetch(`/api/xrpl/balance?walletRequestId=${encodeURIComponent(xrplWalletRequestId)}`)
+    getAccessToken()
+      .then((token) => {
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        return fetch(`/api/xrpl/balance?walletRequestId=${encodeURIComponent(xrplWalletRequestId)}`, { headers });
+      })
       .then((r) => {
         if (r.status === 404) { setXrplOrphaned(true); return null; }
         return r.ok ? r.json() : null;
@@ -121,7 +129,7 @@ export function SettingsSidebar({
       .then((data) => { if (typeof data?.balanceXrp === "number") setXrplBalance(data.balanceXrp); })
       .catch(() => {})
       .finally(() => setXrplBalanceLoading(false));
-  }, [open, xrplWalletRequestId]);
+  }, [open, xrplWalletRequestId, getAccessToken]);
 
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
