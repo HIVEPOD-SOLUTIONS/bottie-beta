@@ -224,8 +224,19 @@ export function OnboardingScreen() {
         {isLast && (
           <p className="text-xs text-center" style={{ color: "var(--color-ink-light)" }}>
             By continuing you agree to our{" "}
-            <span className="underline underline-offset-2">Terms</span> and{" "}
-            <span className="underline underline-offset-2">Privacy Policy</span>
+            <a
+              href="https://waitlist.bluvfi.xyz/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2"
+            >Terms</a>
+            {" "}and{" "}
+            <a
+              href="https://waitlist.bluvfi.xyz/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2"
+            >Privacy Policy</a>
           </p>
         )}
       </div>
