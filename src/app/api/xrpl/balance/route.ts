@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWalletRequest } from "@/lib/xrplBackend";
 import { calculateXrpBalance } from "@/lib/xrplBalance";
+import { verifyAuth } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/auth-response";
+import { db } from "@/lib/db";
+import { xrplSidebarWallets } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { walletRequestBelongsToUser } from "@/lib/xrp-purchase";
 
 /**
  * GET /api/xrpl/balance?walletRequestId=...
@@ -21,8 +27,28 @@ import { calculateXrpBalance } from "@/lib/xrplBalance";
  */
 
 export async function GET(req: NextRequest) {
-  const walletRequestId = req.nextUrl.searchParams.get("walletRequestId");
-  if (!walletRequestId) return NextResponse.json({ error: "walletRequestId is required" }, { status: 422 });
+  let userId: string;
+  try {
+    const auth = await verifyAuth();
+    userId = auth.userId;
+  } catch (err) {
+    return authErrorResponse(err);
+  }
+
+  let walletRequestId = req.nextUrl.searchParams.get("walletRequestId");
+  if (walletRequestId) {
+    if (!(await walletRequestBelongsToUser(walletRequestId, userId))) {
+      return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
+    }
+  } else {
+    const [sidebarWallet] = await db
+      .select({ walletRequestId: xrplSidebarWallets.walletRequestId })
+      .from(xrplSidebarWallets)
+      .where(eq(xrplSidebarWallets.userId, userId))
+      .limit(1);
+    if (!sidebarWallet) return NextResponse.json({ error: "XRP wallet not found" }, { status: 404 });
+    walletRequestId = sidebarWallet.walletRequestId;
+  }
 
   try {
     const wallet = await getWalletRequest(walletRequestId);
