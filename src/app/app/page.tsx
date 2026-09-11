@@ -43,7 +43,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 
 function DashboardInner() {
   const { openSidebar, open: openChat, registerDashboardData } = useChatSheet();
-  const { user } = usePrivy();
+  const { user, getAccessToken } = usePrivy();
   const { wallets } = useWallets();
   const [activeTab, setActiveTab] = useState<Tab>("bills");
   const [showFundSheet, setShowFundSheet] = useState(false);
@@ -67,7 +67,30 @@ function DashboardInner() {
   // important case to warn about. The isLoading gate (sbLoading=true on first render)
   // already prevents a false-positive flash before the first fetch completes.
   const totalBalance = evmUsdc + evmUsdt + solUsdc + solUsdt;
-  const balanceIsLow = !sbLoading && totalBalance < LOW_BALANCE_THRESHOLD_USD;
+  const [xrpBalance, setXrpBalance] = useState<number | null>(null);
+  const [xrpBalanceLoading, setXrpBalanceLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setXrpBalanceLoading(true);
+    getAccessToken()
+      .then((token) => fetch("/api/xrpl/balance", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }))
+      .then(async (res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!cancelled && typeof data?.balanceXrp === "number") setXrpBalance(data.balanceXrp);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setXrpBalanceLoading(false); });
+    return () => { cancelled = true; };
+  }, [getAccessToken]);
+
+  // Either $10+ in supported stablecoins or 5+ XRP is sufficient to hide
+  // the warning. Wait for both balance sources to settle to avoid a flash.
+  const balanceIsLow = !sbLoading && !xrpBalanceLoading
+    && totalBalance < LOW_BALANCE_THRESHOLD_USD
+    && (xrpBalance ?? 0) < 5;
   const balanceFormatted = `$${totalBalance.toFixed(2)}`;
   const firstName = getUserFirstName(user);
   const greeting = getTimeBasedGreeting();
