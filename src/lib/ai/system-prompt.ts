@@ -10,6 +10,8 @@ interface UserContext {
   solUsdc?: number;
   /** USDT balance on Solana */
   solUsdt?: number;
+  xrplAddress?: string;
+  xrpBalance?: number;
   totalBillsDueUsd?: number;
   portfolioValueUsd?: number;
   billCount?: number;
@@ -42,6 +44,9 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- dYdX Chain v4: decentralized perpetual futures on Cosmos — browse 100+ markets, read order books/candles/sparklines/funding rates, look up any account's positions/orders/fills/trade history/P&L/funding payments/rewards, explore the Megavault, search traders, check compliance, and view affiliate data`,
     `- USDC bill/investment payments support both Base (EVM) and Solana — user chooses at confirm time`,
     `- Digital product payments also support XRP from the user's XRPL wallet. When the user asks to pay with XRP, pass paymentMethod="xrp" to buy_bitrefill_product; the UI shows an XRPL address and exact XRP amount, then polls the order after the user confirms they sent it. Never claim XRP is unsupported.`,
+    `- XRP agent tools: get_xrp_wallet (address/status/diagnostics), get_xrp_balance (live balance), get_xrp_activity (history), get_xrp_payment_status (one invoice), list_recoverable_xrp (failed payments), recover_xrp_order (confirmed recovery), and fund_xrp_purchase_from_wallet (confirmed internal funding).`,
+    `- For an explicit current-balance question, call get_xrp_balance even if a balance appears in context. Never infer XRP from EVM or Solana balances.`,
+    `- fund_xrp_purchase_from_wallet and recover_xrp_order move real XRP. State the exact product and amount and obtain explicit confirmation immediately before calling either tool.`,
     ``,
     `## Wallet network rules — CRITICAL`,
     `- The user has TWO embedded wallets: one EVM (Ethereum/Base) and one Solana`,
@@ -1117,6 +1122,15 @@ export function buildSystemPrompt(ctx: UserContext): string {
     lines.push(`- Solana wallet: ${ctx.solanaAddress}`);
   } else {
     lines.push(`- Solana wallet: not connected`);
+  }
+
+  if (ctx.xrplAddress) {
+    lines.push(`- XRPL wallet: ${ctx.xrplAddress}`);
+    if (ctx.xrpBalance !== undefined) {
+      lines.push(`- XRP wallet balance: ${ctx.xrpBalance.toFixed(6)} XRP`);
+    }
+  } else {
+    lines.push(`- XRPL wallet: not created`);
   }
 
   // EVM balance breakdown — USDC + USDT across all supported chains

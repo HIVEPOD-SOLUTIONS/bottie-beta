@@ -5,6 +5,11 @@ import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { windowMessages, extractConversationRecap } from "@/lib/ai/window-messages";
 import { verifyAuth } from "@/lib/auth";
 import { checkChatLimit } from "@/lib/user-rate-limiter";
+import { db } from "@/lib/db";
+import { xrplSidebarWallets } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { getWalletRequest } from "@/lib/xrplBackend";
+import { calculateXrpBalance } from "@/lib/xrplBalance";
 
 // Allow streaming responses up to 60s on Vercel Pro/Enterprise.
 // Hobby plan is capped at 10s — upgrade if you hit timeouts on long AI steps.
@@ -148,6 +153,26 @@ export async function POST(req: Request) {
   const recap = extractConversationRecap(messages);
   const windowed = windowMessages(messages);
 
+  // Resolve XRP server-side from the authenticated user's persistent wallet.
+  // Client balance fields are display hints; they must not be trusted for XRPL.
+  let xrplAddress: string | undefined;
+  let xrpBalance: number | undefined;
+  try {
+    const [sidebarWallet] = await db
+      .select()
+      .from(xrplSidebarWallets)
+      .where(eq(xrplSidebarWallets.userId, userId))
+      .limit(1);
+    if (sidebarWallet) {
+      xrplAddress = sidebarWallet.address;
+      const wallet = await getWalletRequest(sidebarWallet.walletRequestId);
+      xrpBalance = calculateXrpBalance(wallet);
+    }
+  } catch (err) {
+    // Chat should remain available if the XRPL service is temporarily down.
+    console.warn("[chat] failed to resolve XRP balance:", err);
+  }
+
   let modelMessages;
   try {
     modelMessages = repairToolMessages(
@@ -167,6 +192,8 @@ export async function POST(req: Request) {
     evmUsdt,
     solUsdc,
     solUsdt,
+    xrplAddress,
+    xrpBalance,
     totalBillsDueUsd,
     portfolioValueUsd,
     billCount,

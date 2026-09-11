@@ -7,6 +7,8 @@ const ACTION_TOOLS = new Set([
   // Bills & investments
   "buy_bitrefill_product",
   "poll_bitrefill_order",
+  "fund_xrp_purchase_from_wallet",
+  "recover_xrp_order",
   "buy_investment",
   // x402 / nanopay / solpay
   "nanopay_pay",

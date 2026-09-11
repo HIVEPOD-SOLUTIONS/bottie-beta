@@ -3,11 +3,12 @@ import { z } from "zod";
 import { eq, desc, and } from "drizzle-orm";
 import { DEMO_ASSETS } from "@/lib/demo-data";
 import { db } from "@/lib/db";
-import { payments, bitrefillOrders } from "@/lib/db/schema";
+import { payments, bitrefillOrders, xrplSidebarWallets } from "@/lib/db/schema";
 import { getProvider } from "@/lib/banking/registry";
 import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
-import { getWalletRequest } from "@/lib/xrplBackend";
+import { getWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
 import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
+import { calculateXrpBalance } from "@/lib/xrplBalance";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -558,7 +559,156 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       },
     }),
 
-    // ── XRP recovery ──────────────────────────────────────────────────────────
+    // ── XRP wallet / payments / recovery ─────────────────────────────────────
+
+    get_xrp_wallet: tool({
+      description:
+        "Get the authenticated user's persistent Bluvfi XRPL wallet, including its address, live XRP balance, " +
+        "activation status, and any backend error. Use this for questions about the user's XRP wallet, address, " +
+        "balance, readiness, or wallet diagnostics. Read-only; never infer XRP from EVM/Solana balances.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [record] = await db.select().from(xrplSidebarWallets)
+            .where(eq(xrplSidebarWallets.userId, userId)).limit(1);
+          if (!record) return { exists: false, message: "The user has not created a Bluvfi XRP wallet yet." };
+          const wallet = await getWalletRequest(record.walletRequestId);
+          return {
+            exists: true,
+            walletRequestId: wallet.id,
+            address: wallet.address,
+            balanceXrp: calculateXrpBalance(wallet),
+            status: wallet.status,
+            activated: wallet.status !== "AWAITING_ACTIVATION",
+            network: wallet.network,
+            error: wallet.errorMessage,
+          };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Failed to fetch XRP wallet" };
+        }
+      },
+    }),
+
+    get_xrp_balance: tool({
+      description:
+        "Fetch the authenticated user's live Bluvfi XRP balance from bluvfi-xrpl activity data. " +
+        "Always call this when the user explicitly asks for their current XRP balance.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [record] = await db.select().from(xrplSidebarWallets)
+            .where(eq(xrplSidebarWallets.userId, userId)).limit(1);
+          if (!record) return { balanceXrp: 0, walletExists: false };
+          const wallet = await getWalletRequest(record.walletRequestId);
+          return { balanceXrp: calculateXrpBalance(wallet), address: wallet.address, status: wallet.status };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Failed to fetch XRP balance" };
+        }
+      },
+    }),
+
+    get_xrp_activity: tool({
+      description:
+        "Get recent XRP activity for the authenticated user's Bluvfi XRP wallet and XRP product-payment wallets. " +
+        "Use for XRP history, deposits, transfers, payment progress, failures, or transaction hashes.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(50).optional().describe("Maximum activities to return; defaults to 20."),
+      }),
+      execute: async ({ limit }) => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [sidebar, orders] = await Promise.all([
+            db.select().from(xrplSidebarWallets).where(eq(xrplSidebarWallets.userId, userId)).limit(1),
+            db.select({ walletRequestId: bitrefillOrders.xrplWalletRequestId, productName: bitrefillOrders.productName })
+              .from(bitrefillOrders).where(and(eq(bitrefillOrders.userId, userId), eq(bitrefillOrders.paymentMethod, "xrp")))
+              .orderBy(desc(bitrefillOrders.createdAt)).limit(20),
+          ]);
+          const wallets = [
+            ...(sidebar[0] ? [{ id: sidebar[0].walletRequestId, label: "Bluvfi XRP wallet" }] : []),
+            ...orders.filter((o) => o.walletRequestId).map((o) => ({ id: o.walletRequestId!, label: o.productName ?? "XRP product payment" })),
+          ];
+          const unique = [...new Map(wallets.map((w) => [w.id, w])).values()];
+          const fetched = await Promise.all(unique.map(async (entry) => {
+            try { return { entry, wallet: await getWalletRequest(entry.id) }; } catch { return null; }
+          }));
+          const activities = fetched.flatMap((item) => item ? item.wallet.activities.map((raw) => {
+            const a = raw as Record<string, unknown>;
+            return {
+              wallet: item.entry.label,
+              walletRequestId: item.entry.id,
+              type: a.type,
+              status: a.status,
+              amountXrp: a.amountDrops ? Number(a.amountDrops) / 1_000_000 : null,
+              txHash: a.txHash ?? null,
+              error: a.errorMessage ?? null,
+              createdAt: a.createdAt,
+            };
+          }) : []).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, limit ?? 20);
+          return { activities, count: activities.length };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Failed to fetch XRP activity" };
+        }
+      },
+    }),
+
+    get_xrp_payment_status: tool({
+      description:
+        "Check a specific XRP product payment by its Bitrefill invoice ID. Returns the product, payment state, " +
+        "XRPL wallet status, live XRP received, processing status, transaction hash, expiry, and errors.",
+      inputSchema: z.object({ invoiceId: z.string().min(1) }),
+      execute: async ({ invoiceId }) => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [order] = await db.select().from(bitrefillOrders)
+            .where(and(eq(bitrefillOrders.invoiceId, invoiceId), eq(bitrefillOrders.userId, userId))).limit(1);
+          if (!order || order.paymentMethod !== "xrp" || !order.xrplWalletRequestId) return { error: "XRP payment not found" };
+          const wallet = await getWalletRequest(order.xrplWalletRequestId);
+          return {
+            invoiceId, productName: order.productName, orderStatus: order.status,
+            paymentAddress: wallet.address, receivedXrp: calculateXrpBalance(wallet),
+            walletStatus: wallet.status, paymentStatus: wallet.swapStatus,
+            txHash: wallet.swapTxHash, expiresAt: wallet.swapExpiresAt,
+            error: wallet.swapErrorMessage ?? wallet.errorMessage,
+            recovered: !!order.xrplRecoveredAt,
+          };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Failed to fetch XRP payment status" };
+        }
+      },
+    }),
+
+    fund_xrp_purchase_from_wallet: tool({
+      description:
+        "Fund a pending XRP product payment from the user's own persistent Bluvfi XRP wallet. MOVES REAL XRP and " +
+        "requires explicit user confirmation after stating the invoice/product and exact XRP amount. Never call " +
+        "speculatively. The destination and amount are loaded from the user's owned order; callers cannot override them.",
+      inputSchema: z.object({ invoiceId: z.string().min(1).describe("Invoice ID returned by buy_bitrefill_product") }),
+      execute: async ({ invoiceId }) => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [[source], [order]] = await Promise.all([
+            db.select().from(xrplSidebarWallets).where(eq(xrplSidebarWallets.userId, userId)).limit(1),
+            db.select().from(bitrefillOrders).where(and(eq(bitrefillOrders.invoiceId, invoiceId), eq(bitrefillOrders.userId, userId))).limit(1),
+          ]);
+          if (!source) return { error: "The user does not have a Bluvfi XRP wallet." };
+          if (!order || order.paymentMethod !== "xrp" || !order.xrplWalletRequestId) return { error: "Pending XRP payment not found" };
+          if (order.status !== "pending") return { error: `This payment is already ${order.status}.` };
+          const destination = await getWalletRequest(order.xrplWalletRequestId);
+          const amountXrp = Number(order.paymentAmount ?? destination.requiredActivationXrp);
+          if (!Number.isFinite(amountXrp) || amountXrp <= 0) return { error: "The required XRP amount is unavailable." };
+          const sourceWallet = await getWalletRequest(source.walletRequestId);
+          const availableXrp = calculateXrpBalance(sourceWallet);
+          if (availableXrp < amountXrp) return { error: `Insufficient XRP balance: ${availableXrp.toFixed(6)} available, ${amountXrp.toFixed(6)} required.` };
+          const result = await transferBetweenWallets(source.walletRequestId, order.xrplWalletRequestId, String(amountXrp));
+          return { funded: true, invoiceId, productName: order.productName, amountXrp, txHash: result.txHash, message: "XRP payment funded; poll the order until processing completes." };
+        } catch (err: unknown) {
+          return { funded: false, error: err instanceof Error ? err.message : "Failed to fund XRP payment" };
+        }
+      },
+    }),
+
     // Two tools, deliberately split into a free-to-call read (list) and a
     // fund-moving write (recover) that requires the AI to confirm with the
     // user first — same pattern as every other fund-movement tool in this
