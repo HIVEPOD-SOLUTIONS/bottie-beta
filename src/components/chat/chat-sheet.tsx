@@ -315,6 +315,16 @@ function BitrefillPaymentCard({
     setState("paying");
     setErrMsg(null);
     try {
+      // XRP payments are fulfilled by the XRPL swap wallet created by the
+      // server. Nothing is signed in this browser: show the destination and
+      // let the user send XRP from their XRPL wallet, then continue polling
+      // the invoice once they confirm the send.
+      if (pm === "xrp") {
+        if (!output.paymentAddress) throw new Error("No XRP payment address returned");
+        setManualAddress(output.paymentAddress);
+        setState("manual");
+        return;
+      }
       const isSolana = pm.includes("solana");
 
       if (isSolana) {
@@ -716,6 +726,23 @@ function BitrefillPaymentCard({
   };
 
   if (state === "manual" && manualAddress) {
+    if (pm === "xrp") {
+      return (
+        <div className="my-2 rounded-xl border border-[#8FAE82]/30 bg-[#8FAE82]/[0.08] px-4 py-3 space-y-3">
+          <p className="text-xs font-semibold text-[#AFC69F]">◎ Send XRP to pay</p>
+          <p className="text-xs text-[#A7A79A]">
+            Send exactly <span className="font-mono font-semibold text-[#F2F0E8]">{output.paymentAmount} XRP</span> to this XRPL address.
+            The amount includes the address activation reserve.
+          </p>
+          <div className="rounded-lg bg-[#141513] px-3 py-2 flex items-center justify-between gap-2">
+            <span className="font-mono text-[11px] text-[#F2F0E8] break-all">{manualAddress}</span>
+            <button onClick={() => { navigator.clipboard.writeText(manualAddress).then(() => { setManualCopied(true); setTimeout(() => setManualCopied(false), 2000); }); }} className="shrink-0 rounded-lg border border-[#2A2B27] px-2 py-1 text-[10px] text-[#A7A79A] hover:bg-white/[0.06] transition-colors">{manualCopied ? "Copied ✓" : "Copy"}</button>
+          </div>
+          <p className="text-[10px] text-[#A7A79A]">Only send XRP on the XRP Ledger. Once sent, tap below so Bluvfi can confirm delivery.</p>
+          <button onClick={() => { setState("done"); addToolResult({ tool: "buy_bitrefill_product", toolCallId, output: { paid: true, invoiceId: output.invoiceId, tip: `XRP sent — call poll_bitrefill_order(invoiceId="${output.invoiceId}") now and keep polling until complete.` } }); }} className="w-full rounded-xl bg-[#8FAE82] py-2.5 text-xs font-semibold text-[#141513]">I’ve sent the XRP</button>
+        </div>
+      );
+    }
     const network = evmNetworkLabel(pm);
     const tokenLabel = pm.includes("usdt") ? "USDT" : "USDC";
     return (
