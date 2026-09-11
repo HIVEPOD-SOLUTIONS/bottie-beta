@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWalletRequest } from "@/lib/xrplBackend";
+import { calculateXrpBalance } from "@/lib/xrplBalance";
 
 /**
  * GET /api/xrpl/balance?walletRequestId=...
@@ -19,9 +20,6 @@ import { getWalletRequest } from "@/lib/xrplBackend";
  * route doesn't currently handle (not needed for its one caller today).
  */
 
-const INCOMING_TYPES = new Set(["ACTIVATION_DEPOSIT_DETECTED", "DEPOSIT_RECEIVED"]);
-const OUTGOING_TYPES = new Set(["INTERNAL_TRANSFER_SENT", "RESERVE_RECOVERED"]);
-
 export async function GET(req: NextRequest) {
   const walletRequestId = req.nextUrl.searchParams.get("walletRequestId");
   if (!walletRequestId) return NextResponse.json({ error: "walletRequestId is required" }, { status: 422 });
@@ -29,20 +27,11 @@ export async function GET(req: NextRequest) {
   try {
     const wallet = await getWalletRequest(walletRequestId);
 
-    let drops = 0;
-    for (const activity of wallet.activities ?? []) {
-      const a = activity as { type?: string; amountDrops?: string | null };
-      if (!a.amountDrops) continue;
-      const amt = Number(a.amountDrops);
-      if (INCOMING_TYPES.has(a.type ?? "")) drops += amt;
-      else if (OUTGOING_TYPES.has(a.type ?? "")) drops -= amt;
-    }
-
     return NextResponse.json({
       walletRequestId,
       address: wallet.address,
       status: wallet.status,
-      balanceXrp: drops / 1_000_000,
+      balanceXrp: calculateXrpBalance(wallet),
       activated: wallet.status !== "AWAITING_ACTIVATION",
     });
   } catch (err: unknown) {
