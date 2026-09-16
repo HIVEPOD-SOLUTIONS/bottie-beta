@@ -71,6 +71,19 @@ export function Footer() {
         transition={{ delay: 0.6, duration: 0.6 }}
         className="absolute inset-x-0 bottom-8 flex flex-col items-center gap-3"
       >
+        {/* Google Play badge */}
+        <a
+          href="https://play.google.com/store/apps/details?id=com.bluvfi.xyz"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 rounded-lg border border-ink/10 bg-ink/5 px-3 py-1.5 transition-colors hover:bg-ink/10"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="text-ink/60">
+            <path d="M3.18 23.76c.37.21.8.22 1.2.03l12.5-7.03-2.67-2.67L3.18 23.76zM.5 1.5C.19 1.87 0 2.4 0 3.07v17.86c0 .67.19 1.2.5 1.57l.08.08 10-10v-.24L.58 1.42.5 1.5zm19.4 9.53-2.7-1.52-2.96 2.96 2.96 2.97 2.71-1.53c.77-.44.77-1.44-.01-1.88zM4.38.21l12.5 7.03-2.67 2.67L3.18.24C3.58.05 4.01.06 4.38.21z" />
+          </svg>
+          <span className="font-mono text-[11px] tracking-[0.06em] text-ink/60">Get it on Google Play</span>
+        </a>
+
         {/* Social links */}
         <div className="flex items-center gap-4">
           <a
@@ -97,6 +110,37 @@ export function Footer() {
             Telegram
           </a>
         </div>
+
+        {/* Legal links */}
+        <div className="flex items-center gap-3">
+          <a
+            href="https://waitlist.bluvfi.xyz/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[10px] tracking-[0.08em] text-ink-light/30 transition-colors hover:text-ink-light/60"
+          >
+            Terms
+          </a>
+          <span className="text-ink-light/20">·</span>
+          <a
+            href="https://waitlist.bluvfi.xyz/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[10px] tracking-[0.08em] text-ink-light/30 transition-colors hover:text-ink-light/60"
+          >
+            Privacy Policy
+          </a>
+          <span className="text-ink-light/20">·</span>
+          <a
+            href="https://waitlist.bluvfi.xyz"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[10px] tracking-[0.08em] text-ink-light/30 transition-colors hover:text-ink-light/60"
+          >
+            bluvfi.xyz
+          </a>
+        </div>
+
         <span className="font-mono text-[11px] tracking-[0.1em] text-ink-light/30">
           built by Hivepod Digitals
         </span>

@@ -299,6 +299,49 @@ export function SettingsSidebar({
         </a>
       </div>
 
+      {/* Google Play */}
+      <a
+        href="https://play.google.com/store/apps/details?id=com.bluvfi.xyz"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mb-3 flex items-center justify-center gap-2 rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-2.5 font-mono text-xs text-ink/60 transition-colors hover:bg-ink/[0.08] hover:text-ink/90"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M3.18 23.76c.37.21.8.22 1.2.03l12.5-7.03-2.67-2.67L3.18 23.76zM.5 1.5C.19 1.87 0 2.4 0 3.07v17.86c0 .67.19 1.2.5 1.57l.08.08 10-10v-.24L.58 1.42.5 1.5zm19.4 9.53-2.7-1.52-2.96 2.96 2.96 2.97 2.71-1.53c.77-.44.77-1.44-.01-1.88zM4.38.21l12.5 7.03-2.67 2.67L3.18.24C3.58.05 4.01.06 4.38.21z" />
+        </svg>
+        <span>Get it on Google Play</span>
+      </a>
+
+      {/* Legal links */}
+      <div className="mb-3 flex items-center justify-center gap-3">
+        <a
+          href="https://waitlist.bluvfi.xyz/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-[10px] tracking-wide text-ink/30 transition-colors hover:text-ink/60"
+        >
+          Terms
+        </a>
+        <span className="text-ink/20">·</span>
+        <a
+          href="https://waitlist.bluvfi.xyz/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-[10px] tracking-wide text-ink/30 transition-colors hover:text-ink/60"
+        >
+          Privacy Policy
+        </a>
+        <span className="text-ink/20">·</span>
+        <a
+          href="https://waitlist.bluvfi.xyz"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-[10px] tracking-wide text-ink/30 transition-colors hover:text-ink/60"
+        >
+          bluvfi.xyz
+        </a>
+      </div>
+
       {/* Logout */}
       <button
         onClick={() => logout()}
