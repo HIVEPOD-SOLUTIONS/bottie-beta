@@ -13,6 +13,7 @@ import { useChatSheet } from "@/contexts/chat-context";
 import type { Chain } from "viem";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
+import { showInterstitial } from "@/hooks/use-admob";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -1182,6 +1183,7 @@ function CheckoutSheet({
           setCode(redemptionCode);
           setStep("done");
           onPurchased(id, redemptionCode, paymentMethodId);
+          showInterstitial();
         } else if (TERMINAL_ERROR.has(inv.status)) {
           clearTimeout(timeoutId);
           clearInterval(pollRef.current!);

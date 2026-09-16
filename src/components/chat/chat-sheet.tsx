@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { showRewardedAd, isCapacitorApp } from "@/hooks/use-admob";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { Connection, Keypair, Transaction, VersionedTransaction } from "@solana/web3.js";
@@ -1270,6 +1271,9 @@ export function ChatSheet({ visible }: ChatSheetProps) {
   const getAccessTokenRef = useRef(getAccessToken);
   getAccessTokenRef.current = getAccessToken;
 
+  const [dailyLimitHit, setDailyLimitHit] = useState(false);
+  const [rewardedAdBusy, setRewardedAdBusy] = useState(false);
+
   const transport = useMemo(() => {
     const liveBody: Record<string, unknown> = {};
     for (const key of [
@@ -1288,6 +1292,17 @@ export function ChatSheet({ visible }: ChatSheetProps) {
       headers: async (): Promise<Record<string, string>> => {
         const token = await getAccessTokenRef.current();
         return token ? { Authorization: `Bearer ${token}` } : {};
+      },
+      fetch: async (url, init) => {
+        const res = await globalThis.fetch(url, init);
+        if (res.status === 429) {
+          const cloned = res.clone();
+          cloned.json().then((data) => {
+            const msg: string = data?.error ?? "";
+            if (msg.includes("daily")) setDailyLimitHit(true);
+          }).catch(() => {});
+        }
+        return res;
       },
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1584,8 +1599,53 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                 <ThinkingIndicator />
               </div>
             )}
+            {/* Daily limit — offer rewarded ad for +50 bonus messages (Capacitor/Android only) */}
+            {dailyLimitHit && isCapacitorApp() && (
+              <div
+                data-role="assistant"
+                className="rounded-2xl border border-border bg-card p-4 space-y-3"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">📺</span>
+                  <div>
+                    <p className="font-medium text-ink text-sm">Daily limit reached</p>
+                    <p className="text-xs text-ink/50">Watch a short ad to unlock 5 more messages</p>
+                  </div>
+                </div>
+                <button
+                  disabled={rewardedAdBusy}
+                  onClick={async () => {
+                    setRewardedAdBusy(true);
+                    await showRewardedAd(async (amount) => {
+                      try {
+                        const token = await getAccessToken();
+                        const headers: Record<string, string> = { "Content-Type": "application/json" };
+                        if (token) headers["Authorization"] = `Bearer ${token}`;
+                        await fetch("/api/chat/bonus", {
+                          method: "POST",
+                          headers,
+                          body: JSON.stringify({ amount }),
+                        });
+                        setDailyLimitHit(false);
+                      } catch { /* ignore — user can retry */ }
+                    });
+                    setRewardedAdBusy(false);
+                  }}
+                  className="w-full rounded-xl py-2.5 text-sm font-semibold text-cream transition-opacity disabled:opacity-50"
+                  style={{ background: "var(--color-sage)" }}
+                >
+                  {rewardedAdBusy ? "Loading ad…" : "Watch Ad — Get 5 Messages"}
+                </button>
+              </div>
+            )}
+            {/* Web: daily limit hit — show plain message (no ad offer on web) */}
+            {dailyLimitHit && !isCapacitorApp() && (
+              <div data-role="assistant">
+                <MessageBubble role="assistant" text="You've reached your daily message limit (200). Your quota resets at midnight UTC." />
+              </div>
+            )}
             {/* Error fallback when request fails without creating assistant message */}
-            {status !== "submitted" && status !== "streaming" && messages.length > 0 && messages[messages.length - 1].role === "user" && (
+            {!dailyLimitHit && status !== "submitted" && status !== "streaming" && messages.length > 0 && messages[messages.length - 1].role === "user" && (
               <div data-role="assistant">
                 <MessageBubble role="assistant" text="Something went wrong — please try again." />
               </div>
