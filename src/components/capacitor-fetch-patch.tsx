@@ -15,11 +15,16 @@
  *
  * The patch is a no-op in the browser (NEXT_PUBLIC_API_URL is empty / window
  * origin is already the server) so it's safe to include unconditionally.
+ *
+ * Also initializes Google AdMob when running as a Capacitor app.
  */
 
 import { useEffect } from "react";
+import { useAdMobInit } from "@/hooks/use-admob";
 
 export function CapacitorFetchPatch() {
+  useAdMobInit();
+
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
     if (!apiUrl) return; // Not a Capacitor build — nothing to patch.

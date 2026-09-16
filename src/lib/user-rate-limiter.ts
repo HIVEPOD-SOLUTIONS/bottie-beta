@@ -139,6 +139,18 @@ function enforce(
 // ── Per-endpoint checks ───────────────────────────────────────────────────────
 
 /**
+ * Grant bonus chat messages by reducing the user's daily count.
+ * Called after a rewarded ad is watched — grants +50 messages.
+ */
+export function grantChatBonus(userId: string, bonus: number): void {
+  const key = `chat:daily:${userId}`;
+  const bucket = store.get(key);
+  if (bucket) {
+    bucket.count = Math.max(0, bucket.count - bonus);
+  }
+}
+
+/**
  * /api/chat — AI chat agent (LLM tokens, tool calls).
  * Burst: 20 messages/min — prevents rapid-fire scripting.
  * Daily: 200 messages/day — caps total LLM cost per user.
