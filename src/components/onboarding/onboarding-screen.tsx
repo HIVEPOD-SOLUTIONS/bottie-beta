@@ -3,6 +3,16 @@
 import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useHandleLogin } from "@/hooks/use-handle-login";
+import { isCapacitorApp } from "@/hooks/use-admob";
+
+async function openUrl(url: string) {
+  if (isCapacitorApp()) {
+    const { Browser } = await import("@capacitor/browser");
+    await Browser.open({ url });
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 
 /* ── Slide data ───────────────────────────────────────────── */
 const SLIDES = [
@@ -224,19 +234,15 @@ export function OnboardingScreen() {
         {isLast && (
           <p className="text-xs text-center" style={{ color: "var(--color-ink-light)" }}>
             By continuing you agree to our{" "}
-            <a
-              href="https://waitlist.bluvfi.xyz/terms"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => openUrl("https://waitlist.bluvfi.xyz/terms")}
               className="underline underline-offset-2"
-            >Terms</a>
+            >Terms</button>
             {" "}and{" "}
-            <a
-              href="https://waitlist.bluvfi.xyz/privacy"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => openUrl("https://waitlist.bluvfi.xyz/privacy")}
               className="underline underline-offset-2"
-            >Privacy Policy</a>
+            >Privacy Policy</button>
           </p>
         )}
       </div>
