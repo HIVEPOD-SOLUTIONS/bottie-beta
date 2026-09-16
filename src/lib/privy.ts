@@ -3,7 +3,7 @@ import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { base, mainnet, polygon, arbitrum, optimism } from "viem/chains";
 
 export const privyConfig: PrivyClientConfig = {
-  loginMethods: ["email", "google", "passkey"],
+  loginMethods: ["email", "passkey"],
   appearance: {
     theme: "light",
     accentColor: "#8FAE82",
