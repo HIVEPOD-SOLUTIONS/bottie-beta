@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy, useWallets, useFundWallet } from "@privy-io/react-auth";
+import { useFundWallet as useFundSolanaWallet } from "@privy-io/react-auth/solana";
+import { base, mainnet, arbitrum, optimism, polygon, avalanche } from "viem/chains";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS, SOLANA_ARC_MAINNET_ENABLED } from "@/lib/arc-kit";
 import type { BridgeSourceChain } from "@/lib/arc-kit";
@@ -106,7 +108,7 @@ function useFundingWallets() {
 type TxState =
   | { status: "idle" }
   | { status: "pending"; label: string }
-  | { status: "success"; explorerUrl?: string }
+  | { status: "success"; explorerUrl?: string; message?: string }
   | { status: "error"; message: string };
 
 // ─── Copy-to-clipboard helper ─────────────────────────────────────────────────
@@ -214,7 +216,7 @@ function TxResult({ state, onReset }: { state: TxState; onReset: () => void }) {
   if (state.status === "success") {
     return (
       <div className="rounded-xl bg-green-900/20 border border-green-900/40 px-4 py-3 text-sm text-green-400">
-        ✓ Transfer complete!{" "}
+        ✓ {state.message ?? "Transfer complete!"}{" "}
         {state.explorerUrl && (
           <span className="text-[#A7A79A] text-xs">(confirmed on-chain)</span>
         )}
@@ -230,6 +232,153 @@ function TxResult({ state, onReset }: { state: TxState; onReset: () => void }) {
       <button onClick={onReset} className="ml-3 text-xs underline">
         Try again
       </button>
+    </div>
+  );
+}
+
+// ─── Buy (fiat on-ramp) tab ───────────────────────────────────────────────────
+// Lets the user buy crypto directly into their own Bluvfi wallet with a card,
+// Apple Pay, or Google Pay — via Privy's built-in funding modal (Moonpay /
+// Coinbase Onramp under the hood, selected automatically by Privy). No
+// external wallet needed, unlike Send/Bridge above.
+//
+// Privy splits this into two separate hooks with the same name from two
+// different modules — useFundWallet (EVM, main package) and useFundWallet
+// (Solana, the /solana submodule) — imported under distinct aliases here.
+// Their return shapes differ too: the EVM hook resolves with a full
+// FundingResult (status/amount/txHash), but the Solana hook's fundWallet
+// resolves to void — Privy gives no confirmation data for Solana funding,
+// so that path can only report "the flow finished," never a confirmed
+// amount, and must not claim otherwise.
+//
+// Covers every EVM chain useStablecoinBalances() actually sums into the
+// dashboard's tracked USDC/USDT balance (src/hooks/use-unified-balance.ts's
+// EVM_BALANCE_CHAINS) plus Solana — so funding into any option here
+// resolves the low-balance banner, not just Base.
+
+const BUY_EVM_NETWORKS = [
+  { chain: base,      label: "Base",      icon: "🔷" },
+  { chain: mainnet,   label: "Ethereum",  icon: "⟠"  },
+  { chain: arbitrum,  label: "Arbitrum",  icon: "🔵" },
+  { chain: optimism,  label: "Optimism",  icon: "🔴" },
+  { chain: polygon,   label: "Polygon",   icon: "🟣" },
+  { chain: avalanche, label: "Avalanche", icon: "🔺" },
+] as const;
+
+type BuyNetwork = (typeof BUY_EVM_NETWORKS)[number]["chain"]["id"] | "solana";
+
+function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaAddress?: string }) {
+  const { getAccessToken } = usePrivy();
+  const { fundWallet: fundEvmWallet } = useFundWallet();
+  const { fundWallet: fundSolanaWallet } = useFundSolanaWallet();
+  const [network, setNetwork] = useState<BuyNetwork>(base.id);
+  const [txState, setTxState] = useState<TxState>({ status: "idle" });
+
+  const networkOptions: { value: BuyNetwork; label: string; icon: string }[] = [
+    ...BUY_EVM_NETWORKS.map((n) => ({ value: n.chain.id as BuyNetwork, label: n.label, icon: n.icon })),
+    ...(solanaAddress ? [{ value: "solana" as BuyNetwork, label: "Solana", icon: "◎" }] : []),
+  ];
+  const selectedLabel = networkOptions.find((o) => o.value === network)?.label ?? "";
+
+  const handleBuy = async () => {
+    if (txState.status === "pending") return;
+    setTxState({ status: "pending", label: "Opening funding flow…" });
+    try {
+      if (network === "solana") {
+        if (!solanaAddress) return;
+        // No FundingResult here — Solana's fundWallet resolves to void.
+        // Only honest claim available: the flow ran to completion (success
+        // or user-cancelled are indistinguishable from this return value).
+        await fundSolanaWallet({ address: solanaAddress, options: { asset: "USDC" } });
+        setTxState({
+          status: "success",
+          message: "Funding flow finished — check your Solana balance in a moment.",
+        });
+        return;
+      }
+
+      const selected = BUY_EVM_NETWORKS.find((n) => n.chain.id === network)!;
+      const result = await fundEvmWallet({
+        address: agentAddress,
+        options: { chain: selected.chain, asset: "USDC" },
+      });
+
+      if (result.status !== "completed") {
+        // User closed the modal before finishing — not an error, just reset.
+        setTxState({ status: "idle" });
+        return;
+      }
+
+      // No explorerUrl set — Privy's own docs note funds can take a few
+      // minutes to actually arrive even after this resolves "completed", so
+      // showing TxResult's "(confirmed on-chain)" badge here would overstate
+      // what's actually known at this point.
+      setTxState({
+        status: "success",
+        message: `Funded ${selected.label}${result.amount ? ` — ${result.amount} ${result.assetType ?? "USDC"}` : ""}. Funds may take a few minutes to arrive.`,
+      });
+
+      authFetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "deposit",
+          referenceId: result.transactionHash ?? null,
+          description: `Card funding: ${result.amount ?? "?"} ${result.assetType ?? "USDC"} → ${selected.label} wallet`,
+          amountUsdc: result.amount ?? "0",
+          status: "completed",
+          txHash: result.transactionHash ?? null,
+          chain: "evm",
+        }),
+      }, getAccessToken).catch(() => {});
+    } catch (err: any) {
+      const msg = err?.message ?? "";
+      setTxState({
+        status: "error",
+        message: msg.includes("rejected") || msg.includes("cancel")
+          ? "Funding cancelled."
+          : "Couldn't start the funding flow. Please try again.",
+      });
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3 text-xs text-[#A7A79A] leading-relaxed">
+        Buy USDC directly into your Bluvfi wallet with a card, Apple Pay, or Google Pay — no external wallet needed.
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-[#A7A79A]">Network</label>
+        <div className="flex flex-wrap gap-2">
+          {networkOptions.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setNetwork(opt.value)}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                network === opt.value
+                  ? "bg-[#F2F0E8] text-[#141513]"
+                  : "bg-white/[0.06] text-[#A7A79A] hover:bg-white/[0.10]"
+              }`}
+            >
+              <span>{opt.icon}</span>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <TxResult state={txState} onReset={() => setTxState({ status: "idle" })} />
+
+      {txState.status !== "success" && (
+        <button
+          onClick={handleBuy}
+          disabled={txState.status === "pending"}
+          className="w-full rounded-2xl bg-[#8FAE82] py-3.5 text-sm font-semibold text-[#141513] disabled:opacity-50"
+        >
+          {txState.status === "pending" ? txState.label : `💳 Buy USDC on ${selectedLabel}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -608,10 +757,15 @@ interface FundWalletSheetProps {
 }
 
 export function FundWalletSheet({ agentAddress, solanaAddress, onClose }: FundWalletSheetProps) {
-  type Tab = "balances" | "send" | "bridge" | "solana";
-  const [tab, setTab] = useState<Tab>("balances");
+  type Tab = "buy" | "balances" | "send" | "bridge" | "solana";
+  // Defaults to "buy" — this sheet's only caller (the low-balance "Add
+  // Funds" banner in app/page.tsx) opens it specifically to get the user
+  // funded, and buying with a card needs no external wallet, unlike
+  // Send/Bridge below.
+  const [tab, setTab] = useState<Tab>("buy");
 
   const TABS: { key: Tab; label: string }[] = [
+    { key: "buy",      label: "💳 Buy"      },
     { key: "balances", label: "⊞ Balances" },
     { key: "send",     label: "↗ Send"     },
     { key: "bridge",   label: "⇌ Bridge"   },
@@ -653,6 +807,9 @@ export function FundWalletSheet({ agentAddress, solanaAddress, onClose }: FundWa
 
         {/* Scrollable content */}
         <div className="overflow-y-auto px-6 pb-10 flex-1">
+          {tab === "buy"      && (
+            <BuyTab agentAddress={agentAddress} solanaAddress={solanaAddress} />
+          )}
           {tab === "balances" && (
             <UnifiedBalanceCard onBridge={() => setTab("bridge")} />
           )}
