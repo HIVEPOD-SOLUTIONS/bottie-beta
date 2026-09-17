@@ -151,9 +151,22 @@ function buildCSP(): string {
       "wss://*.walletconnect.com",
       "https://*.walletconnect.org",
       "wss://*.walletconnect.org",
+      // Fiat on-ramp providers behind Privy's useFundWallet/useFundWallet
+      // (solana) — Moonpay/Coinbase Onramp, selected automatically by
+      // Privy's funding modal. Added proactively (same class of gap as the
+      // privy.bluvfi.xyz block above) — not yet confirmed live against a
+      // real funding flow, so re-check the exact blocked domain in the
+      // console the first time this is tested end-to-end.
+      "https://*.moonpay.com",
+      "https://*.moonpay.io",
+      "https://pay.coinbase.com",
+      "https://api.developer.coinbase.com",
     ],
     "frame-src":     ["https://auth.privy.io", "https://privy.io",
                       "https://privy.bluvfi.xyz", // custom auth domain — see script-src comment above
+                      // Fiat on-ramp iframes — see connect-src comment above
+                      "https://*.moonpay.com", "https://*.moonpay.io",
+                      "https://pay.coinbase.com",
                       "https://challenges.cloudflare.com"],
     "frame-ancestors": ["'none'"],
     "object-src":    ["'none'"],
