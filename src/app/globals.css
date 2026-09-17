@@ -22,6 +22,8 @@
   --font-display: var(--font-instrument-serif), Georgia, serif;
   --font-body: var(--font-source-serif-4), Georgia, serif;
   --font-mono: var(--font-jetbrains-mono), "Fira Code", monospace;
+  --font-sora: var(--font-sora), sans-serif;
+  --font-manrope: var(--font-manrope), sans-serif;
 }
 
 /* ─── Base ─── */
