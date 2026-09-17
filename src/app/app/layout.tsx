@@ -21,9 +21,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (ready && !authenticated) {
-      router.push("/");
-    }
+    if (!ready || authenticated) return;
+    // Debounce to tolerate brief auth-state blips during mic/camera permission
+    // dialogs on Android/iOS — the system pauses the WebView activity for a
+    // moment, which can temporarily flip authenticated to false.
+    const t = setTimeout(() => {
+      if (!authenticated) router.push("/");
+    }, 800);
+    return () => clearTimeout(t);
   }, [ready, authenticated, router]);
 
   if (!ready) {

@@ -1460,10 +1460,10 @@ export function ChatSheet({ visible }: ChatSheetProps) {
             {/* Welcome message — shown when chat is empty */}
             {messages.length === 0 && (
               <div className="py-6">
-                <p className="font-display text-[1.4rem] leading-snug text-ink">
+                <p className="text-[1.4rem] font-bold leading-snug text-ink" style={{ fontFamily: "var(--font-sora)" }}>
                   {greeting}{name ? `, ${name}` : ""}. 👋
                 </p>
-                <p className="mt-3 font-body text-[1rem] leading-relaxed text-ink/60">
+                <p className="mt-3 text-[1rem] leading-relaxed text-ink/60" style={{ fontFamily: "var(--font-manrope)" }}>
                   I&rsquo;m Bluvfi, your financial assistant. Ask me to pay your bills, invest in stocks, or check your portfolio.
                 </p>
               </div>

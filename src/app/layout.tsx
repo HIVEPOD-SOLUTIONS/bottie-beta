@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Serif, Source_Serif_4, JetBrains_Mono } from "next/font/google";
+import { Instrument_Serif, Source_Serif_4, JetBrains_Mono, Sora, Manrope } from "next/font/google";
 import { Providers } from "@/providers";
 import { CapacitorFetchPatch } from "@/components/capacitor-fetch-patch";
 import { AppUrlListener } from "@/components/app-url-listener";
@@ -24,6 +24,20 @@ const jetbrainsMono = JetBrains_Mono({
   weight: ["400", "500", "600"],
   subsets: ["latin"],
   variable: "--font-jetbrains-mono",
+  display: "swap",
+});
+
+const sora = Sora({
+  weight: ["700"],
+  subsets: ["latin"],
+  variable: "--font-sora",
+  display: "swap",
+});
+
+const manrope = Manrope({
+  weight: ["400", "500"],
+  subsets: ["latin"],
+  variable: "--font-manrope",
   display: "swap",
 });
 
@@ -64,7 +78,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${instrumentSerif.variable} ${sourceSerif4.variable} ${jetbrainsMono.variable}`}
+      className={`${instrumentSerif.variable} ${sourceSerif4.variable} ${jetbrainsMono.variable} ${sora.variable} ${manrope.variable}`}
     >
       <body>
         <CapacitorFetchPatch />
