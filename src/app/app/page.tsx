@@ -117,6 +117,15 @@ function DashboardInner() {
   const dbBillCount = billPayments.filter((p) => p.status === "completed").length;
   const purchasedCount = Math.max(paidBillIds.length, dbBillCount);
 
+  // Open fund wallet modal when the AI agent calls open_fund_wallet.
+  useEffect(() => {
+    const handler = () => {
+      setShowFundSheet(true);
+    };
+    window.addEventListener("bluvfi:open-fund-wallet", handler);
+    return () => window.removeEventListener("bluvfi:open-fund-wallet", handler);
+  }, []);
+
   // Keep the AI agent's financial context in sync with the live dashboard values.
   // registerDashboardData writes to a ref so this never triggers re-renders in ChatSheet.
   // Balance fields (evmUsdc etc.) are included so chat-sheet reads from here instead of

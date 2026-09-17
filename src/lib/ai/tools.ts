@@ -39,6 +39,17 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     return walletAddress ?? "";
   }
   return {
+    // ── UI actions ────────────────────────────────────────────────────────────
+
+    open_fund_wallet: tool({
+      description:
+        "Open the Fund Wallet modal so the user can add USDC/USDT/crypto funds to their Bluvfi wallet. " +
+        "Call this whenever the user says they want to add funds, top up, deposit money, fund their wallet, " +
+        "or asks how to get started with payments.",
+      inputSchema: z.object({}),
+      execute: async () => ({ action: "open_fund_wallet" }),
+    }),
+
     // ── Bills / Bitrefill ─────────────────────────────────────────────────────
 
     get_bills: tool({
