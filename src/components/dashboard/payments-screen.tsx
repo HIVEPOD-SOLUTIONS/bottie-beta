@@ -2,6 +2,7 @@
 
 import { usePaymentsContext } from "@/contexts/payments-context";
 import { useWeeklyInsight } from "@/hooks/use-weekly-insight";
+import { ErrorBanner } from "@/components/ui/error-banner";
 
 // ── Icons for every payment type ─────────────────────────────────────────────
 
@@ -161,12 +162,7 @@ export function PaymentsScreen() {
         </div>
       )}
 
-      {error && (
-        <div className="rounded-2xl border border-red-900/30 bg-red-900/10 px-4 py-3 text-sm text-red-400">
-          {error}
-          <button onClick={refetch} className="ml-3 underline text-xs">Retry</button>
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onRetry={refetch} retryLabel="Retry" />}
 
       {!loading && !error && payments.length === 0 && (
         <div className="py-12 text-center">

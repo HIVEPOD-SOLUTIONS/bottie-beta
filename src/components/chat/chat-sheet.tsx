@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback, type PointerEvent as ReactPointerEvent } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { showRewardedAd, isCapacitorApp } from "@/hooks/use-admob";
@@ -1236,6 +1236,40 @@ export function ChatSheet({ visible }: ChatSheetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
 
+  // Drag-to-dismiss on the handle bar. The bar was previously decorative
+  // only (a static div styled to look like a native bottom-sheet grabber,
+  // with no gesture behind it) — real drag behavior wired up here.
+  // dragY tracks the live pointer offset in px while actively dragging (0
+  // otherwise); it's applied as an inline transform that overrides the
+  // panel's normal Tailwind transition classes so the sheet tracks the
+  // finger 1:1, with that inline override removed on release so the
+  // existing transition takes over for the snap-back/close animation.
+  const [dragY, setDragY] = useState(0);
+  const draggingRef = useRef(false);
+  const dragStartYRef = useRef(0);
+  const DISMISS_THRESHOLD_PX = 100;
+
+  const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    draggingRef.current = true;
+    dragStartYRef.current = e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    // Only allow dragging downward — clamp negative (upward) deltas to 0
+    // rather than letting the sheet drag past its fully-open position.
+    const delta = Math.max(0, e.clientY - dragStartYRef.current);
+    setDragY(delta);
+  };
+  const handlePointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const shouldDismiss = dragY > DISMISS_THRESHOLD_PX;
+    setDragY(0);
+    if (shouldDismiss) close();
+  };
+
   const name = getUserFirstName(user);
   const greeting = getTimeBasedGreeting();
 
@@ -1386,13 +1420,27 @@ export function ChatSheet({ visible }: ChatSheetProps) {
 
       {/* Panel */}
       <div
-        className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[85dvh] max-w-lg flex-col rounded-t-2xl border-t border-border bg-cream transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] lg:max-w-xl ${
-          visible ? "translate-y-0" : "translate-y-full"
-        }`}
+        className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[85dvh] max-w-lg flex-col rounded-t-2xl border-t border-border bg-cream lg:max-w-xl ${
+          draggingRef.current ? "" : "transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        } ${visible ? "translate-y-0" : "translate-y-full"}`}
+        style={dragY > 0 ? { transform: `translateY(${dragY}px)` } : undefined}
       >
         {/* Bluvfi logo, tappable to close */}
         <div className="flex-none px-5 pt-3 pb-2">
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
+          {/* Drag-to-dismiss handle — the visible bar is small, but the
+              touch target extends into the padding around it so it's
+              actually grabbable on a phone screen. touch-none stops the
+              browser's own scroll/pull-to-refresh gesture from competing
+              with the drag. */}
+          <div
+            className="-mx-5 -mt-3 flex touch-none justify-center px-5 pt-3 pb-2"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          >
+            <div className="h-1 w-10 rounded-full bg-border" />
+          </div>
           <div className="flex justify-center">
             <button
               onClick={close}

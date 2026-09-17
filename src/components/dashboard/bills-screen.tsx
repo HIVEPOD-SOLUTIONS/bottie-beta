@@ -13,6 +13,7 @@ import { useChatSheet } from "@/contexts/chat-context";
 import type { Chain } from "viem";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { showInterstitial } from "@/hooks/use-admob";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
@@ -2323,7 +2324,7 @@ function CheckoutSheet({
             </div>
 
             {step === "error" && errMsg && (
-              <p className="mb-3 rounded-xl bg-red-900/20 px-4 py-2.5 text-sm text-red-400">{errMsg}</p>
+              <ErrorBanner message={errMsg} className="mb-3" />
             )}
 
             {/* XRP payment that already reached the network but couldn't complete —

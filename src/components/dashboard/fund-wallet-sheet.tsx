@@ -6,6 +6,7 @@ import { usePrivy, useWallets, useFundWallet } from "@privy-io/react-auth";
 import { useFundWallet as useFundSolanaWallet } from "@privy-io/react-auth/solana";
 import { base, mainnet, arbitrum, optimism, polygon, avalanche } from "viem/chains";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS, SOLANA_ARC_MAINNET_ENABLED } from "@/lib/arc-kit";
 import type { BridgeSourceChain } from "@/lib/arc-kit";
 import { UnifiedBalanceCard } from "./unified-balance-card";
@@ -226,14 +227,7 @@ function TxResult({ state, onReset }: { state: TxState; onReset: () => void }) {
       </div>
     );
   }
-  return (
-    <div className="rounded-xl bg-red-900/20 border border-red-900/40 px-4 py-3 text-sm text-red-400">
-      {state.message}
-      <button onClick={onReset} className="ml-3 text-xs underline">
-        Try again
-      </button>
-    </div>
-  );
+  return <ErrorBanner message={state.message} onRetry={onReset} />;
 }
 
 // ─── Buy (fiat on-ramp) tab ───────────────────────────────────────────────────
