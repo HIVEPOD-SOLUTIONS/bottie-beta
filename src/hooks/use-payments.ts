@@ -66,7 +66,16 @@ export function usePayments(type?: "bill" | "investment") {
         setError(null);
         return;
       }
-      setError(err?.message ?? "Unknown error");
+      // A genuine network drop throws the browser's own raw TypeError
+      // ("Failed to fetch" in Chrome, "NetworkError when attempting to
+      // fetch resource" in Firefox) — translate it rather than show that
+      // straight to the user.
+      const msg = err?.message ?? "";
+      setError(
+        msg.includes("Failed to fetch") || msg.includes("NetworkError")
+          ? "Couldn't reach the server. Check your connection and try again."
+          : msg || "Something went wrong loading your history.",
+      );
     } finally {
       setLoading(false);
     }
