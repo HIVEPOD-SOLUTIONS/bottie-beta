@@ -16,6 +16,14 @@ import { ThinkingIndicator } from "./thinking-indicator";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { ToolResultCard } from "./tool-result-card";
 
+function OpenFundWalletTrigger({ toolCallId }: { toolCallId: string }) {
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("bluvfi:open-fund-wallet"));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toolCallId]);
+  return null;
+}
+
 const ER_RPC = "https://flash.magicblock.xyz";
 
 // Perpetuals instructions target the MagicBlock ER validator directly.
@@ -1476,6 +1484,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                 if (!p.type.startsWith("tool-") || !("toolCallId" in p)) return false;
                 const tp = p as { type: string; state: string; output?: unknown };
                 const tn = tp.type.slice(5);
+                if (tn === "open_fund_wallet") return false;
                 if (["deposit", "withdraw", "swap_and_deposit", "swap"].includes(tn)) return true;
                 if (tn.startsWith("flash_")) return tp.state === "output-available";
                 return tp.state === "output-available" && !!tp.output;
@@ -1499,6 +1508,10 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                         output?: unknown;
                       };
                       const toolName = tp.type.slice(5);
+
+                      if (toolName === "open_fund_wallet" && tp.state === "output-available") {
+                        return <OpenFundWalletTrigger key={tp.toolCallId} toolCallId={tp.toolCallId} />;
+                      }
 
                       if (["deposit", "withdraw", "swap_and_deposit", "swap"].includes(toolName)) {
                         return (

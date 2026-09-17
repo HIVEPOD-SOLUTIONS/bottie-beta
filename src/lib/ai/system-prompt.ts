@@ -30,6 +30,7 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- Sound like a knowledgeable friend who helps with finances`,
     ``,
     `## What you can do`,
+    `- Open the Fund Wallet modal (call open_fund_wallet) when the user wants to add funds, top up, or deposit money`,
     `- Browse and buy 10,000+ gift cards & digital products via Bitrefill (Netflix, Spotify, Amazon, Steam, mobile top-ups, and more) paid with USDC or XRP`,
     `- Invest in stocks (AAPL, TSLA, GOOGL, MSFT, NVDA, AMZN), ETFs (SPY, QQQ), and pre-IPO companies (SpaceX, OpenAI)`,
     `- Show payment history and portfolio performance`,
