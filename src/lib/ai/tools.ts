@@ -8,7 +8,7 @@ import { getProvider } from "@/lib/banking/registry";
 import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
 import { getWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
 import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
-import { calculateXrpBalance } from "@/lib/xrplBalance";
+import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -584,12 +584,12 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           const [record] = await db.select().from(xrplSidebarWallets)
             .where(eq(xrplSidebarWallets.userId, userId)).limit(1);
           if (!record) return { exists: false, message: "The user has not created a Bluvfi XRP wallet yet." };
-          const wallet = await getWalletRequest(record.walletRequestId);
+          const wallet = await getWalletRequest(record.walletRequestId, { includeLedgerBalance: true });
           return {
             exists: true,
             walletRequestId: wallet.id,
             address: wallet.address,
-            balanceXrp: calculateXrpBalance(wallet),
+            balanceXrp: resolveXrpBalance(wallet),
             status: wallet.status,
             activated: wallet.status !== "AWAITING_ACTIVATION",
             network: wallet.network,
@@ -603,7 +603,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     get_xrp_balance: tool({
       description:
-        "Fetch the authenticated user's live Bluvfi XRP balance from bluvfi-xrpl activity data. " +
+        "Fetch the authenticated user's live Bluvfi XRP balance, read from the XRP Ledger via bluvfi-xrpl " +
+        "(the full balance, including the ~1 XRP network reserve that can't be spent). " +
         "Always call this when the user explicitly asks for their current XRP balance.",
       inputSchema: z.object({}),
       execute: async () => {
@@ -612,8 +613,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           const [record] = await db.select().from(xrplSidebarWallets)
             .where(eq(xrplSidebarWallets.userId, userId)).limit(1);
           if (!record) return { balanceXrp: 0, walletExists: false };
-          const wallet = await getWalletRequest(record.walletRequestId);
-          return { balanceXrp: calculateXrpBalance(wallet), address: wallet.address, status: wallet.status };
+          const wallet = await getWalletRequest(record.walletRequestId, { includeLedgerBalance: true });
+          return { balanceXrp: resolveXrpBalance(wallet), address: wallet.address, status: wallet.status };
         } catch (err: unknown) {
           return { error: err instanceof Error ? err.message : "Failed to fetch XRP balance" };
         }
@@ -709,8 +710,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           const destination = await getWalletRequest(order.xrplWalletRequestId);
           const amountXrp = Number(order.paymentAmount ?? destination.requiredActivationXrp);
           if (!Number.isFinite(amountXrp) || amountXrp <= 0) return { error: "The required XRP amount is unavailable." };
-          const sourceWallet = await getWalletRequest(source.walletRequestId);
-          const availableXrp = calculateXrpBalance(sourceWallet);
+          const sourceWallet = await getWalletRequest(source.walletRequestId, { includeLedgerBalance: true });
+          const availableXrp = resolveXrpBalance(sourceWallet);
           if (availableXrp < amountXrp) return { error: `Insufficient XRP balance: ${availableXrp.toFixed(6)} available, ${amountXrp.toFixed(6)} required.` };
           const result = await transferBetweenWallets(source.walletRequestId, order.xrplWalletRequestId, String(amountXrp));
           return { funded: true, invoiceId, productName: order.productName, amountXrp, txHash: result.txHash, message: "XRP payment funded; poll the order until processing completes." };

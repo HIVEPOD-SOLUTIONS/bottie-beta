@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 import { xrplSidebarWallets } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getWalletRequest } from "@/lib/xrplBackend";
-import { calculateXrpBalance } from "@/lib/xrplBalance";
+import { resolveXrpBalance } from "@/lib/xrplBalance";
 
 // Allow streaming responses up to 60s on Vercel Pro/Enterprise.
 // Hobby plan is capped at 10s — upgrade if you hit timeouts on long AI steps.
@@ -165,8 +165,8 @@ export async function POST(req: Request) {
       .limit(1);
     if (sidebarWallet) {
       xrplAddress = sidebarWallet.address;
-      const wallet = await getWalletRequest(sidebarWallet.walletRequestId);
-      xrpBalance = calculateXrpBalance(wallet);
+      const wallet = await getWalletRequest(sidebarWallet.walletRequestId, { includeLedgerBalance: true });
+      xrpBalance = resolveXrpBalance(wallet);
     }
   } catch (err) {
     // Chat should remain available if the XRPL service is temporarily down.
