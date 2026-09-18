@@ -14,6 +14,7 @@ import type { Chain } from "viem";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { refreshXrpBalance } from "@/hooks/use-xrp-balance";
 import { showInterstitial } from "@/hooks/use-admob";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
@@ -2362,6 +2363,7 @@ function CheckoutSheet({
                             throw new Error(err.error ?? "Recovery failed");
                           }
                           setXrpRecovered(true);
+                          refreshXrpBalance(); // funds just landed back in the sidebar wallet
                         } catch (err: unknown) {
                           setErrMsg((err as Error)?.message ?? "Couldn't recover funds — try again in a moment.");
                         } finally {
@@ -2656,6 +2658,7 @@ function CheckoutSheet({
                               throw new Error(err.error ?? "Transfer failed");
                             }
                             setStep("polling");
+                            refreshXrpBalance(); // sidebar wallet just paid out
                           } catch (err: unknown) {
                             setErrMsg((err as Error)?.message ?? "Transfer failed");
                           } finally {
@@ -3363,6 +3366,7 @@ export function BillsScreen() {
         throw new Error(err.error ?? "Recovery failed");
       }
       setXrpRecoverableOrders((prev) => prev.filter((o) => o.walletRequestId !== order.walletRequestId));
+      refreshXrpBalance(); // funds just landed back in the sidebar wallet
     } catch (err: unknown) {
       setXrpListRecoverError((err as Error)?.message ?? "Couldn't recover funds — try again in a moment.");
     } finally {

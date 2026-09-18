@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWalletRequest } from "@/lib/xrplBackend";
+import { getWalletRequest, recheckWalletRequest } from "@/lib/xrplBackend";
 import { calculateXrpBalance } from "@/lib/xrplBalance";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   let walletRequestId = req.nextUrl.searchParams.get("walletRequestId");
   if (walletRequestId) {
     if (!(await walletRequestBelongsToUser(walletRequestId, userId))) {
-      return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
+      return NextResponse.json({ error: "Wallet not found", code: "NO_WALLET" }, { status: 404 });
     }
   } else {
     const [sidebarWallet] = await db
@@ -46,11 +46,21 @@ export async function GET(req: NextRequest) {
       .from(xrplSidebarWallets)
       .where(eq(xrplSidebarWallets.userId, userId))
       .limit(1);
-    if (!sidebarWallet) return NextResponse.json({ error: "XRP wallet not found" }, { status: 404 });
+    if (!sidebarWallet) return NextResponse.json({ error: "XRP wallet not found", code: "NO_WALLET" }, { status: 404 });
     walletRequestId = sidebarWallet.walletRequestId;
   }
 
   try {
+    // ?refresh=1 — asked for right after something that just moved XRP
+    // (a transfer/recovery) or when the user opens their wallet. Makes
+    // bluvfi-xrpl re-check the ledger now instead of waiting for its next
+    // ~30s reconciliation sweep, so a fresh deposit shows up in seconds.
+    // Best-effort: a failed recheck must never block returning the balance
+    // we already have. Not used by the periodic poll, to avoid hammering
+    // the ledger on a timer.
+    if (req.nextUrl.searchParams.get("refresh") === "1") {
+      await recheckWalletRequest(walletRequestId).catch(() => {});
+    }
     const wallet = await getWalletRequest(walletRequestId);
 
     return NextResponse.json({
@@ -67,6 +77,6 @@ export async function GET(req: NextRequest) {
     // wallet request is orphaned and can stop retrying.
     const status = upstreamStatus === 404 ? 404 : 502;
     if (status !== 404) console.error("[xrpl/balance]", message);
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message, ...(status === 404 ? { code: "ORPHANED" } : {}) }, { status });
   }
 }

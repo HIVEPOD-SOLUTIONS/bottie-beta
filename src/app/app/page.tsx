@@ -27,6 +27,7 @@ function ComingSoon({ icon, title, description }: { icon: string; title: string;
 import { FundWalletSheet } from "@/components/dashboard/fund-wallet-sheet";
 import { LOW_BALANCE_THRESHOLD_USD } from "@/hooks/use-usdc-balance";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
+import { useXrpBalance } from "@/hooks/use-xrp-balance";
 import { ASSET_PRICES } from "@/lib/demo-data";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
@@ -43,7 +44,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 
 function DashboardInner() {
   const { openSidebar, open: openChat, registerDashboardData } = useChatSheet();
-  const { user, getAccessToken } = usePrivy();
+  const { user } = usePrivy();
   const { wallets } = useWallets();
   const [activeTab, setActiveTab] = useState<Tab>("bills");
   const [showFundSheet, setShowFundSheet] = useState(false);
@@ -67,24 +68,9 @@ function DashboardInner() {
   // important case to warn about. The isLoading gate (sbLoading=true on first render)
   // already prevents a false-positive flash before the first fetch completes.
   const totalBalance = evmUsdc + evmUsdt + solUsdc + solUsdt;
-  const [xrpBalance, setXrpBalance] = useState<number | null>(null);
-  const [xrpBalanceLoading, setXrpBalanceLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setXrpBalanceLoading(true);
-    getAccessToken()
-      .then((token) => fetch("/api/xrpl/balance", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      }))
-      .then(async (res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (!cancelled && typeof data?.balanceXrp === "number") setXrpBalance(data.balanceXrp);
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setXrpBalanceLoading(false); });
-    return () => { cancelled = true; };
-  }, [getAccessToken]);
+  // Polled every 30s (like the stablecoin balances) and force-refreshed by
+  // anything that moves XRP — see hooks/use-xrp-balance.ts.
+  const { balance: xrpBalance, loading: xrpBalanceLoading } = useXrpBalance();
 
   // Either $10+ in supported stablecoins or 5+ XRP is sufficient to hide
   // the warning. Wait for both balance sources to settle to avoid a flash.
