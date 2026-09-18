@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWalletRequest, recheckWalletRequest } from "@/lib/xrplBackend";
-import { calculateXrpBalance } from "@/lib/xrplBalance";
+import { resolveXrpBalance } from "@/lib/xrplBalance";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { db } from "@/lib/db";
@@ -61,13 +61,17 @@ export async function GET(req: NextRequest) {
     if (req.nextUrl.searchParams.get("refresh") === "1") {
       await recheckWalletRequest(walletRequestId).catch(() => {});
     }
-    const wallet = await getWalletRequest(walletRequestId);
+    // Live ledger balance (full, reserve included) rather than summing the
+    // activity log — the log only sees incoming payments and transfers this
+    // backend made itself, so XRP moved out any other way (e.g. signing
+    // directly with the wallet's seed) would leave the shown balance too high.
+    const wallet = await getWalletRequest(walletRequestId, { includeLedgerBalance: true });
 
     return NextResponse.json({
       walletRequestId,
       address: wallet.address,
       status: wallet.status,
-      balanceXrp: calculateXrpBalance(wallet),
+      balanceXrp: resolveXrpBalance(wallet),
       activated: wallet.status !== "AWAITING_ACTIVATION",
     });
   } catch (err: unknown) {

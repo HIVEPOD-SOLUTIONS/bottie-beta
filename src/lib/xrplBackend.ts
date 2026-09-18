@@ -110,6 +110,16 @@ export interface XrplWallet {
    * of whether it was a fresh wallet or a replay. Fixed here.
    */
   idempotentReplay?: boolean;
+  /**
+   * Live balance read straight from the validated XRP Ledger, in drops / XRP —
+   * the account's FULL balance, reserve included. Only present when the
+   * wallet was fetched with `includeLedgerBalance` (see getWalletRequest),
+   * and only from a bluvfi-xrpl new enough to support it. `null` means the
+   * ledger couldn't be queried (unknown — not zero). Unlike the activity
+   * log, this also reflects payments made outside bluvfi-xrpl.
+   */
+  ledgerBalanceDrops?: string | null;
+  ledgerBalanceXrp?: number | null;
 }
 
 export interface XrplUser {
@@ -164,10 +174,20 @@ export async function createWalletRequest(
   return res.wallet;
 }
 
-export async function getWalletRequest(id: string): Promise<XrplWallet & { activities: unknown[] }> {
+/**
+ * `includeLedgerBalance` additionally asks bluvfi-xrpl to read the wallet's
+ * live balance from the ledger (ledgerBalanceDrops / ledgerBalanceXrp). It
+ * costs a ledger round trip on their side, so it's opt-in — status pollers
+ * that only care about swapStatus shouldn't pay for it.
+ */
+export async function getWalletRequest(
+  id: string,
+  options: { includeLedgerBalance?: boolean } = {},
+): Promise<XrplWallet & { activities: unknown[] }> {
+  const query = options.includeLedgerBalance ? "?includeLedgerBalance=true" : "";
   const res = await request<{ wallet: XrplWallet & { activities: unknown[] } }>(
     "GET",
-    `/api/xrpl/wallet-requests/${encodeURIComponent(id)}`,
+    `/api/xrpl/wallet-requests/${encodeURIComponent(id)}${query}`,
   );
   return res.wallet;
 }
