@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { formatUsd } from "@/lib/format";
 import { getUserFirstName } from "@/lib/user-display-name";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
+import { useXrpBalance } from "@/hooks/use-xrp-balance";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 
 interface SettingsSidebarProps {
@@ -105,31 +106,21 @@ export function SettingsSidebar({
 
   // Live XRP balance — derived strictly through bluvfi-xrpl (its own
   // GET /wallet-requests/:id activity history), never a direct call to the
-  // XRP Ledger or any other external service. Refetched whenever the
-  // sidebar (re)opens with a known wallet, not on a timer.
-  const [xrplBalance, setXrplBalance] = useState<number | null>(null);
-  const [xrplBalanceLoading, setXrplBalanceLoading] = useState(false);
-  // True when the XRPL service returns 404 — wallet request is orphaned
-  // (app DB has the ID but the XRPL service no longer knows it). Hide the
-  // XRP wallet section in that case rather than spinning "…" forever.
-  const [xrplOrphaned, setXrplOrphaned] = useState(false);
+  // XRP Ledger or any other external service. Same shared value the
+  // dashboard's low-balance banner uses (polled every 30s there); opening
+  // the sidebar additionally forces a ledger re-check so a just-sent
+  // deposit shows without waiting for the next poll.
+  // `orphaned` = the app has a wallet on record that the XRPL service no
+  // longer knows — hide the XRP section rather than spin "…" forever.
+  const { balance: xrplBalance, loading: xrplBalanceLoading, orphaned: xrplOrphaned, refresh: refreshXrp } =
+    useXrpBalance({ poll: false });
   useEffect(() => {
     if (!open || !xrplWalletRequestId) return;
-    setXrplBalanceLoading(true);
-    setXrplOrphaned(false);
-    getAccessToken()
-      .then((token) => {
-        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-        return fetch(`/api/xrpl/balance?walletRequestId=${encodeURIComponent(xrplWalletRequestId)}`, { headers });
-      })
-      .then((r) => {
-        if (r.status === 404) { setXrplOrphaned(true); return null; }
-        return r.ok ? r.json() : null;
-      })
-      .then((data) => { if (typeof data?.balanceXrp === "number") setXrplBalance(data.balanceXrp); })
-      .catch(() => {})
-      .finally(() => setXrplBalanceLoading(false));
-  }, [open, xrplWalletRequestId, getAccessToken]);
+    void refreshXrp();
+    // refreshXrp is a fresh closure every render — depending on it would
+    // refire this on every render; only open/wallet changes should trigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, xrplWalletRequestId]);
 
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
