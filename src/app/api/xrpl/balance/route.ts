@@ -51,16 +51,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // ?refresh=1 — asked for right after something that just moved XRP
-    // (a transfer/recovery) or when the user opens their wallet. Makes
-    // bluvfi-xrpl re-check the ledger now instead of waiting for its next
-    // ~30s reconciliation sweep, so a fresh deposit shows up in seconds.
-    // Best-effort: a failed recheck must never block returning the balance
-    // we already have. Not used by the periodic poll, to avoid hammering
-    // the ledger on a timer.
-    if (req.nextUrl.searchParams.get("refresh") === "1") {
-      await recheckWalletRequest(walletRequestId).catch(() => {});
-    }
+    // Always force bluvfi-xrpl to re-check the ledger before returning the
+    // balance. This ensures every poll (not just force-refresh calls) gets a
+    // fresh on-chain value rather than relying on bluvfi-xrpl's own ~30s
+    // reconciliation sweep, which can lag behind or miss events entirely.
+    // Best-effort: a failed recheck falls back to the last known ledger value.
+    await recheckWalletRequest(walletRequestId).catch(() => {});
     // Live ledger balance (full, reserve included) rather than summing the
     // activity log — the log only sees incoming payments and transfers this
     // backend made itself, so XRP moved out any other way (e.g. signing
