@@ -15,6 +15,7 @@ import {
   SettingsSidebar,
   ScreenStackWrapper,
 } from "@/components/dashboard/settings-sidebar";
+import { isCapacitorApp } from "@/hooks/use-admob";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { ready, authenticated } = usePrivy();
@@ -53,8 +54,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  const { isOpen, sidebarOpen, openSidebar, closeSidebar } = useChatSheet();
+  const { isOpen, close, sidebarOpen, openSidebar, closeSidebar } = useChatSheet();
   const walletBootstrap = useWalletBootstrap();
+
+  // Android hardware back button — close open panels before exiting the app.
+  useEffect(() => {
+    if (!isCapacitorApp()) return;
+    let handle: { remove: () => void } | null = null;
+    import("@capacitor/app").then(({ App }) => {
+      App.addListener("backButton", ({ canGoBack }) => {
+        if (isOpen) {
+          close();
+        } else if (sidebarOpen) {
+          closeSidebar();
+        } else if (canGoBack) {
+          window.history.back();
+        } else {
+          App.exitApp();
+        }
+      }).then((h) => { handle = h; });
+    });
+    return () => { handle?.remove(); };
+  // Re-register when open state changes so the closure captures fresh values.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, sidebarOpen]);
 
   // Lock body scroll when chat sheet or sidebar is open
   useEffect(() => {
