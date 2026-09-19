@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { payments, bitrefillOrders, xrplSidebarWallets } from "@/lib/db/schema";
 import { getProvider } from "@/lib/banking/registry";
 import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
-import { getWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
+import { getWalletRequest, recheckWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
 import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 
@@ -584,6 +584,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           const [record] = await db.select().from(xrplSidebarWallets)
             .where(eq(xrplSidebarWallets.userId, userId)).limit(1);
           if (!record) return { exists: false, message: "The user has not created a Bluvfi XRP wallet yet." };
+          // Force a ledger re-check so the activation status reflects the
+          // actual on-chain state, not bluvfi-xrpl's last-sweep snapshot.
+          await recheckWalletRequest(record.walletRequestId).catch(() => {});
           const wallet = await getWalletRequest(record.walletRequestId, { includeLedgerBalance: true });
           return {
             exists: true,
@@ -613,6 +616,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           const [record] = await db.select().from(xrplSidebarWallets)
             .where(eq(xrplSidebarWallets.userId, userId)).limit(1);
           if (!record) return { balanceXrp: 0, walletExists: false };
+          await recheckWalletRequest(record.walletRequestId).catch(() => {});
           const wallet = await getWalletRequest(record.walletRequestId, { includeLedgerBalance: true });
           return { balanceXrp: resolveXrpBalance(wallet), address: wallet.address, status: wallet.status };
         } catch (err: unknown) {
