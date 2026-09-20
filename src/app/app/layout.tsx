@@ -231,12 +231,12 @@ function ChatInputBar() {
   }, [voiceError, clearError]);
 
   const openMicSettings = () => {
-    // On Android/Capacitor open the app's system permission page.
+    // On Android/Capacitor open the app's system permission page via an Intent.
+    // Capacitor intercepts window.open with '_system' and forwards it as an
+    // Android Intent — this is the supported way to open system settings in v5+.
     // On the web just clear the error — the browser controls permissions.
     if (typeof window !== "undefined" && (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()) {
-      import("@capacitor/app").then(({ App }) => {
-        App.openUrl({ url: "app-settings:" }).catch(() => {});
-      });
+      window.open("app-settings:", "_system");
     } else {
       clearError();
     }
