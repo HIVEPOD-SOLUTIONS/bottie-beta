@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 
-const INTERSTITIAL_AD_ID = "ca-app-pub-4986320440788963/6729693281";
-const REWARDED_AD_ID = "ca-app-pub-4986320440788963/6496567028";
+// TODO: remove TEST_MODE and restore real IDs once AdMob ad units are approved
+const TEST_MODE = true;
+const INTERSTITIAL_AD_ID = TEST_MODE
+  ? "ca-app-pub-3940256099942544/1033173712"
+  : "ca-app-pub-4986320440788963/6729693281";
+const REWARDED_AD_ID = TEST_MODE
+  ? "ca-app-pub-3940256099942544/5224354917"
+  : "ca-app-pub-4986320440788963/6496567028";
 
 export function isCapacitorApp(): boolean {
   if (typeof window === "undefined") return false;
@@ -13,7 +19,7 @@ export function useAdMobInit() {
   useEffect(() => {
     if (!isCapacitorApp()) return;
     import("@capacitor-community/admob").then(({ AdMob }) => {
-      AdMob.initialize({ initializeForTesting: false }).catch(
+      AdMob.initialize({ initializeForTesting: TEST_MODE }).catch(
         (e: unknown) => console.warn("[AdMob] init error:", e),
       );
     });
