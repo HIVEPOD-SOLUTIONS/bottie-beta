@@ -221,12 +221,26 @@ function ChatInputBar() {
     }
   }, [isOpen, activeSheet, isRecording]);
 
+  // Auto-dismiss voice errors after 6 s (permission errors stay longer so the
+  // user has time to read the settings guidance).
   useEffect(() => {
-    if (voiceError) {
-      const t = setTimeout(clearError, 3000);
-      return () => clearTimeout(t);
-    }
+    if (!voiceError) return;
+    const ms = voiceError === "permission_denied" ? 8000 : 5000;
+    const t = setTimeout(clearError, ms);
+    return () => clearTimeout(t);
   }, [voiceError, clearError]);
+
+  const openMicSettings = () => {
+    // On Android/Capacitor open the app's system permission page.
+    // On the web just clear the error — the browser controls permissions.
+    if (typeof window !== "undefined" && (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()) {
+      import("@capacitor/app").then(({ App }) => {
+        App.openUrl({ url: "app-settings:" }).catch(() => {});
+      });
+    } else {
+      clearError();
+    }
+  };
 
   const handleChatSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,6 +275,7 @@ function ChatInputBar() {
   const mode = activeSheet ? "action"
     : isRecording ? "recording"
     : isTranscribing ? "transcribing"
+    : voiceError ? "mic_error"
     : isOpen ? "chat"
     : "idle";
 
@@ -311,6 +326,26 @@ function ChatInputBar() {
               </motion.div>
             )}
 
+            {mode === "mic_error" && (
+              <motion.div key="mic_error" {...morphProps} className={`${PILL_INNER} justify-between gap-3`}>
+                <span className="font-body text-sm text-red-400/90">
+                  {voiceError === "permission_denied"
+                    ? "Mic blocked — enable in Settings"
+                    : voiceError === "no_microphone"
+                    ? "No microphone found"
+                    : voiceError === "browser_unsupported"
+                    ? "Voice not supported here"
+                    : "Couldn't access mic"}
+                </span>
+                <button
+                  onClick={voiceError === "permission_denied" ? openMicSettings : clearError}
+                  className="shrink-0 rounded-lg bg-ink/10 px-3 py-1 font-body text-xs text-ink/70"
+                >
+                  {voiceError === "permission_denied" ? "Settings" : "Dismiss"}
+                </button>
+              </motion.div>
+            )}
+
             {mode === "chat" && (
               <motion.form key="chat" {...morphProps} onSubmit={handleChatSubmit} className={`${PILL_INNER} gap-3`}>
                 <input
@@ -318,7 +353,7 @@ function ChatInputBar() {
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={voiceError ? "Mic unavailable — type instead" : "Ask Bluvfi anything…"}
+                  placeholder="Ask Bluvfi anything…"
                   className="flex-1 bg-transparent font-body text-sm text-ink outline-none placeholder:text-ink-light/40"
                 />
                 <AnimatePresence mode="wait" initial={false}>

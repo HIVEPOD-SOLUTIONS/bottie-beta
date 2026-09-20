@@ -93,6 +93,23 @@ export function useVoiceRecorder() {
       setError("browser_unsupported");
       return;
     }
+
+    // Pre-check permission state so we surface a clear "denied" error instead
+    // of letting getUserMedia throw a generic NotAllowedError on Android when
+    // the user previously tapped "Deny" with "Don't ask again".
+    if (navigator.permissions) {
+      try {
+        const perm = await navigator.permissions.query({ name: "microphone" as PermissionName });
+        if (perm.state === "denied") {
+          setError("permission_denied");
+          return;
+        }
+      } catch {
+        // navigator.permissions.query may throw on some WebViews — ignore and
+        // let getUserMedia surface the real error below.
+      }
+    }
+
     cleanup();
     setError(null);
 

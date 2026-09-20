@@ -74,7 +74,14 @@ export async function POST(
 
     return Response.json(data);
   } catch (err: any) {
-    const status = err?.message?.startsWith("Unknown banking provider") ? 404 : 502;
-    return Response.json({ error: err?.message ?? "Failed" }, { status });
+    const msg: string = err?.message ?? "Failed";
+    if (msg.includes("purchase_limit_reached") || msg.includes("max number of daily purchases")) {
+      return Response.json(
+        { error: "Daily purchase limit reached (2 orders per day). Try again tomorrow." },
+        { status: 429 },
+      );
+    }
+    const status = msg.startsWith("Unknown banking provider") ? 404 : 502;
+    return Response.json({ error: msg }, { status });
   }
 }
