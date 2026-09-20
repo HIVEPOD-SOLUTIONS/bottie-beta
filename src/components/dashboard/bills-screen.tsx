@@ -1004,14 +1004,16 @@ function CheckoutSheet({
   }, [xrpSwapExpiresAt]);
 
   // Fetch the user's sidebar XRP wallet once, so the "send from Bluvfi wallet"
-  // transfer button can appear on the XRP deposit step (guide step 6).
+  // transfer button can appear on the XRP deposit step.
+  // Must use authFetch — the route calls verifyAuth() and returns 401 without
+  // the Bearer token, which caused xrpSidebarWallet to silently stay null.
   useEffect(() => {
     if (paymentMethodId !== "xrp" || xrpSidebarWallet) return;
-    fetch("/api/xrpl/sidebar-wallet")
+    authFetch("/api/xrpl/sidebar-wallet", {}, getAccessToken)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (data?.id && data?.address) setXrpSidebarWallet({ id: data.id, address: data.address }); })
       .catch(() => {});
-  }, [paymentMethodId, xrpSidebarWallet]);
+  }, [paymentMethodId, xrpSidebarWallet, getAccessToken]);
 
   // Gift flow
   const [isGift, setIsGift]               = useState(false);

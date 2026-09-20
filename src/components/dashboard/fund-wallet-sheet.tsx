@@ -261,11 +261,15 @@ const BUY_EVM_NETWORKS = [
 
 type BuyNetwork = (typeof BUY_EVM_NETWORKS)[number]["chain"]["id"] | "solana";
 
+const MIN_FUND_AMOUNT = 11;
+
 function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaAddress?: string }) {
   const { getAccessToken } = usePrivy();
   const { fundWallet: fundEvmWallet } = useFundWallet();
   const { fundWallet: fundSolanaWallet } = useFundSolanaWallet();
   const [network, setNetwork] = useState<BuyNetwork>(base.id);
+  const [amount, setAmount] = useState(String(MIN_FUND_AMOUNT));
+  const [amountError, setAmountError] = useState<string | null>(null);
   const [txState, setTxState] = useState<TxState>({ status: "idle" });
 
   const networkOptions: { value: BuyNetwork; label: string; icon: string }[] = [
@@ -276,6 +280,12 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
 
   const handleBuy = async () => {
     if (txState.status === "pending") return;
+    const amtNum = Number(amount);
+    if (!amount || isNaN(amtNum) || amtNum < MIN_FUND_AMOUNT) {
+      setAmountError(`Minimum amount is $${MIN_FUND_AMOUNT}`);
+      return;
+    }
+    setAmountError(null);
     setTxState({ status: "pending", label: "Opening funding flow…" });
     try {
       if (network === "solana") {
@@ -283,7 +293,7 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
         // No FundingResult here — Solana's fundWallet resolves to void.
         // Only honest claim available: the flow ran to completion (success
         // or user-cancelled are indistinguishable from this return value).
-        await fundSolanaWallet({ address: solanaAddress, options: { asset: "USDC" } });
+        await fundSolanaWallet({ address: solanaAddress, options: { asset: "USDC", amount: String(amtNum) } });
         setTxState({
           status: "success",
           message: "Funding flow finished — check your Solana balance in a moment.",
@@ -294,7 +304,7 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
       const selected = BUY_EVM_NETWORKS.find((n) => n.chain.id === network)!;
       const result = await fundEvmWallet({
         address: agentAddress,
-        options: { chain: selected.chain, asset: "USDC" },
+        options: { chain: selected.chain, asset: "USDC", amount: String(amtNum) },
       });
 
       if (result.status !== "completed") {
@@ -340,6 +350,27 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
     <div className="flex flex-col gap-4">
       <div className="rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3 text-xs text-[#A7A79A] leading-relaxed">
         Buy USDC directly into your Bluvfi wallet with a card, Apple Pay, or Google Pay — no external wallet needed.
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-[#A7A79A]">Amount (USD)</label>
+        <div className="flex items-center rounded-xl border border-[#2A2B27] bg-[#141513] px-4 py-3">
+          <span className="mr-1 text-sm text-[#A7A79A]">$</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={MIN_FUND_AMOUNT}
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setAmountError(null); }}
+            className="flex-1 bg-transparent text-sm text-[#F2F0E8] outline-none placeholder:text-[#A7A79A]/50"
+            placeholder={String(MIN_FUND_AMOUNT)}
+          />
+        </div>
+        {amountError ? (
+          <p className="mt-1 text-xs text-red-400">{amountError}</p>
+        ) : (
+          <p className="mt-1 text-xs text-[#A7A79A]">Minimum $11</p>
+        )}
       </div>
 
       <div>
