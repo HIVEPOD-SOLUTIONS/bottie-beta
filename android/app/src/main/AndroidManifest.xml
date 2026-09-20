@@ -30,15 +30,14 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="https"
-                    android:host="www.bluvfi.xyz" />
+                <data android:scheme="https" android:host="www.bluvfi.xyz" />
             </intent-filter>
         </activity>
 
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-4986320440788963~9278420291"/>
+            android:value="ca-app-pub-4986320440788963~9278420291"
+        />
 
         <provider
             android:name="androidx.core.content.FileProvider"
