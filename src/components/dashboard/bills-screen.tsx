@@ -1806,6 +1806,9 @@ function CheckoutSheet({
           m.includes("<!doctype html") ||
           (m.includes("error posting to endpoint") && (m.includes("502") || m.includes("503") || m.includes("504") || m.includes("500")))
         ) return "Bitrefill is temporarily unavailable. Please try again in a few minutes.";
+        // Bitrefill daily purchase limit (2 orders per day per customer).
+        if (m.includes("purchase_limit_reached") || m.includes("max number of daily purchases") || m.includes("daily purchases"))
+          return "You've reached the daily purchase limit (2 orders per day). Try again tomorrow.";
         // Bitrefill API rate limit — MCP transport wraps it as
         // "Streamable HTTP error: Error POSTing to endpoint: {status: rate_limit_reached}"
         if (m.includes("rate_limit") || m.includes("rate limit") || m.includes("request quota") || m.includes("quota"))
