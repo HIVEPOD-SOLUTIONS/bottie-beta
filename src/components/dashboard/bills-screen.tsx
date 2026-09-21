@@ -14,7 +14,7 @@ import type { Chain } from "viem";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { refreshXrpBalance } from "@/hooks/use-xrp-balance";
+import { refreshXrpBalance, useXrpBalance } from "@/hooks/use-xrp-balance";
 import { showInterstitial } from "@/hooks/use-admob";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
@@ -904,6 +904,7 @@ function CheckoutSheet({
   const { wallets } = useWallets();
   const { wallets: solanaWallets } = useSolanaWallets();
   const { user, getAccessToken, sendTransaction } = usePrivy();
+  const { balance: xrpBalance } = useXrpBalance({ poll: false });
   // `sendTransaction(..., { sponsor: true })` triggers Privy's native gas
   // sponsorship (EIP-7702) on the user's existing embedded wallet — the
   // "Gas management" dashboard feature. Falls back to Layer 2 (user pays
@@ -981,6 +982,7 @@ function CheckoutSheet({
   const [xrpWalletRequestId, setXrpWalletRequestId]       = useState<string | null>(null);
   const [xrpSidebarTransferring, setXrpSidebarTransferring] = useState(false);
   const [xrpSidebarWallet, setXrpSidebarWallet]           = useState<{ id: string; address: string } | null>(null);
+  const xrpAutoTransferFired = useRef(false);
   const [xrpSwapSecsLeft, setXrpSwapSecsLeft]             = useState<number | null>(null);
   // Set when the swap itself fails/expires/gets refunded — detected by
   // polling the wallet's own status directly (see the effect below), not
@@ -1014,6 +1016,50 @@ function CheckoutSheet({
       .then((data) => { if (data?.id && data?.address) setXrpSidebarWallet({ id: data.id, address: data.address }); })
       .catch(() => {});
   }, [paymentMethodId, xrpSidebarWallet, getAccessToken]);
+
+  // Auto-transfer from sidebar wallet when step = "address" and all conditions are met.
+  // Fires once per purchase (xrpAutoTransferFired guards double-trigger).
+  // Only auto-pays if xrpBalance is known and covers the amount — otherwise the
+  // "Send from your Bluvfi XRP wallet" button stays for the user to click manually.
+  useEffect(() => {
+    if (
+      step !== "address" ||
+      paymentMethodId !== "xrp" ||
+      !xrpSidebarWallet ||
+      !xrpWalletRequestId ||
+      !depositAmount ||
+      xrpAutoTransferFired.current
+    ) return;
+    if (xrpBalance === null || Number(depositAmount) > xrpBalance) return;
+
+    xrpAutoTransferFired.current = true;
+    setXrpSidebarTransferring(true);
+    setErrMsg(null);
+
+    authFetch("/api/xrpl/transfer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceWalletRequestId: xrpSidebarWallet.id,
+        destinationWalletRequestId: xrpWalletRequestId,
+        amountXrp: depositAmount,
+      }),
+    }, getAccessToken)
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Transfer failed" }));
+          throw new Error((err as { error?: string }).error ?? "Transfer failed");
+        }
+        setStep("polling");
+        refreshXrpBalance();
+      })
+      .catch((err: unknown) => {
+        xrpAutoTransferFired.current = false;
+        setErrMsg((err as Error)?.message ?? "Transfer failed");
+      })
+      .finally(() => setXrpSidebarTransferring(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, paymentMethodId, xrpSidebarWallet, xrpWalletRequestId, depositAmount, xrpBalance]);
 
   // Gift flow
   const [isGift, setIsGift]               = useState(false);
@@ -1405,6 +1451,10 @@ function CheckoutSheet({
         setXrpSwapExpiresAt(xrp.swapExpiresAt ?? null);
         setXrpRequiredActivation(xrp.requiredActivationXrp ?? null);
         setXrpWalletRequestId(xrp.xrplWalletRequestId ?? null);
+        if (xrp.sidebarWallet?.id && xrp.sidebarWallet?.address) {
+          setXrpSidebarWallet({ id: xrp.sidebarWallet.id, address: xrp.sidebarWallet.address });
+        }
+        xrpAutoTransferFired.current = false;
         setStep("address");
         // Bitrefill's own webhook (not the XRPL swap alone) is what flips this
         // to "done" — see api/bitrefill/webhook's reportServiceConfirmation call.
