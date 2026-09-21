@@ -3,6 +3,7 @@ import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { getWalletRequest } from "@/lib/xrplBackend";
 import { markXrpPurchaseFailed } from "@/lib/xrp-purchase";
+import { recoverableXrpFromWallet } from "@/lib/xrplBalance";
 
 const FAILURE_SWAP_STATUSES = new Set(["FAILED", "REFUNDED", "EXPIRED"]);
 
@@ -38,7 +39,13 @@ export async function GET(req: NextRequest) {
   if (!walletRequestId) return NextResponse.json({ error: "walletRequestId is required" }, { status: 422 });
 
   try {
-    const wallet = await getWalletRequest(walletRequestId);
+    let wallet = await getWalletRequest(walletRequestId);
+
+    // Only 0 unless the purchase failed AND the wallet really holds XRP above
+    // its reserve. The live ledger balance is only fetched in that case —
+    // this route is polled every few seconds during a healthy purchase and
+    // shouldn't pay for a ledger lookup each time.
+    let recoverableXrp = 0;
 
     if (FAILURE_SWAP_STATUSES.has(wallet.swapStatus)) {
       const failStatus = wallet.swapStatus === "EXPIRED" ? "expired" : "failed";
@@ -48,18 +55,24 @@ export async function GET(req: NextRequest) {
       markXrpPurchaseFailed(walletRequestId, failStatus).catch((e: unknown) =>
         console.error("[xrpl/wallet-status] markXrpPurchaseFailed error", e),
       );
+
+      // If this lookup fails we report 0 rather than fail the request: the
+      // client still needs the failure status, and showing no recovery
+      // offer is safe — the My Bills list re-checks it independently.
+      wallet = await getWalletRequest(walletRequestId, { includeLedgerBalance: true }).catch(() => wallet);
+      recoverableXrp = recoverableXrpFromWallet(wallet);
     }
 
     return NextResponse.json({
       status: wallet.status,
       swapStatus: wallet.swapStatus,
       swapErrorMessage: wallet.swapErrorMessage,
-      // The portion reserved for the swap — recoverable via transfer if the
-      // swap failed/expired/was refunded, since it never left the wallet.
-      // The base ~1.05 XRP reserve is not included and isn't recoverable
-      // here (no completed swap, so bluvfi-xrpl's reserve-recovery sweep
-      // never applies to this wallet).
-      swapAmountDrops: wallet.swapAmountDrops,
+      // XRP the wallet actually holds above its reserve that can be moved back
+      // to the user (see recoverableXrpFromWallet). NOT the amount the purchase
+      // requested: an unfunded or already-recovered wallet reports 0, so the
+      // UI must not offer recovery when this is 0. The ~1.05 XRP reserve is
+      // never included — bluvfi-xrpl only sweeps it after a COMPLETED swap.
+      recoverableXrp,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to fetch wallet status";

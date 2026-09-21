@@ -37,7 +37,8 @@
  *     present) is already the decimal XRP string swapAmountXrp needs.
  */
 
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { recoverableXrpFromWallet } from "@/lib/xrplBalance";
 import { mcpBuyProducts } from "@/lib/bitrefill-mcp";
 import { getQuote, createWalletRequest, getWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
 import { db } from "@/lib/db";
@@ -593,7 +594,7 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
         isNull(bitrefillOrders.xrplRecoveredAt),
       ),
     )
-    .orderBy(bitrefillOrders.updatedAt)
+    .orderBy(desc(bitrefillOrders.updatedAt))
     .limit(20)
     .catch(() => []);
 
@@ -602,7 +603,7 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
   const results = await Promise.all(
     candidates.map(async (order): Promise<RecoverableXrpOrder | null> => {
       try {
-        const wallet = await getWalletRequest(order.xrplWalletRequestId!);
+        const wallet = await getWalletRequest(order.xrplWalletRequestId!, { includeLedgerBalance: true });
         if (!FAILURE_SWAP_STATUSES.has(wallet.swapStatus)) return null;
 
         if (order.status === "pending") {
@@ -610,8 +611,11 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
           await markXrpPurchaseFailed(order.xrplWalletRequestId!, failStatus).catch(() => {});
         }
 
-        const recoverableXrp = wallet.swapAmountDrops ? Number(wallet.swapAmountDrops) / 1_000_000 : 0;
-        if (!recoverableXrp || recoverableXrp <= 0) return null;
+        // What the wallet actually holds above its reserve — NOT the amount the
+        // purchase asked for. A never-funded or already-recovered wallet gets
+        // 0 here and so never shows the "your XRP is safe" banner.
+        const recoverableXrp = recoverableXrpFromWallet(wallet);
+        if (recoverableXrp <= 0) return null;
 
         return {
           invoiceId: order.invoiceId,
@@ -659,12 +663,12 @@ export async function recoverXrpOrder(
   if (!order) throw new Error("That payment wasn't found, or doesn't belong to this account.");
   if (order.xrplRecoveredAt) throw new Error("This payment's funds were already recovered.");
 
-  const wallet = await getWalletRequest(walletRequestId);
+  const wallet = await getWalletRequest(walletRequestId, { includeLedgerBalance: true });
   if (!FAILURE_SWAP_STATUSES.has(wallet.swapStatus)) {
     throw new Error("This payment hasn't failed (or already completed) — there's nothing to recover yet.");
   }
-  const recoverableXrp = wallet.swapAmountDrops ? Number(wallet.swapAmountDrops) / 1_000_000 : 0;
-  if (!recoverableXrp || recoverableXrp <= 0) {
+  const recoverableXrp = recoverableXrpFromWallet(wallet);
+  if (recoverableXrp <= 0) {
     throw new Error("There's no recoverable balance left on this payment.");
   }
 

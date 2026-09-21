@@ -9,6 +9,7 @@ import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice,
 import { getWalletRequest, recheckWalletRequest, transferBetweenWallets, friendlyXrpError } from "@/lib/xrplBackend";
 import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
+import { createCmcTools } from "@/lib/ai/cmc-tools";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -39,6 +40,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     return walletAddress ?? "";
   }
   return {
+    // ── Live market data (CoinMarketCap) — see lib/ai/cmc-tools.ts ────────────
+    ...createCmcTools(),
+
     // ── UI actions ────────────────────────────────────────────────────────────
 
     open_fund_wallet: tool({
