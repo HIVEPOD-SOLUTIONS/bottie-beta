@@ -5,8 +5,8 @@ import { DEMO_ASSETS } from "@/lib/demo-data";
 import { db } from "@/lib/db";
 import { payments, bitrefillOrders, xrplSidebarWallets } from "@/lib/db/schema";
 import { getProvider } from "@/lib/banking/registry";
-import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS } from "@/lib/bitrefill-mcp";
-import { getWalletRequest, recheckWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
+import { mcpSearchProducts, mcpGetProductDetails, mcpBuyProducts, mcpGetInvoice, ADDRESS_BASED_PAYMENT_METHODS, friendlyBitrefillError } from "@/lib/bitrefill-mcp";
+import { getWalletRequest, recheckWalletRequest, transferBetweenWallets, friendlyXrpError } from "@/lib/xrplBackend";
 import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 
@@ -384,8 +384,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
                 : `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}") — no text before the call. Keep retrying every ~3 s up to 20 times until complete/failed/expired. Code emailed to ${recipientEmail} on completion.`,
           };
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : "Purchase failed";
-          return { error: message };
+          const raw = err instanceof Error ? err.message : "Purchase failed";
+          return { error: friendlyBitrefillError(raw) };
         }
       },
     }),
@@ -720,7 +720,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           const result = await transferBetweenWallets(source.walletRequestId, order.xrplWalletRequestId, String(amountXrp));
           return { funded: true, invoiceId, productName: order.productName, amountXrp, txHash: result.txHash, message: "XRP payment funded; poll the order until processing completes." };
         } catch (err: unknown) {
-          return { funded: false, error: err instanceof Error ? err.message : "Failed to fund XRP payment" };
+          const raw = err instanceof Error ? err.message : "Failed to fund XRP payment";
+          return { funded: false, error: friendlyXrpError(raw) };
         }
       },
     }),
@@ -790,7 +791,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             message: `✅ ${result.recoveredXrp.toFixed(4)} XRP from the failed "${result.productName}" payment has been moved to the user's Bluvfi XRP wallet.`,
           };
         } catch (err: unknown) {
-          return { recovered: false, error: err instanceof Error ? err.message : "Recovery failed" };
+          const raw = err instanceof Error ? err.message : "Recovery failed";
+          return { recovered: false, error: friendlyXrpError(raw) };
         }
       },
     }),

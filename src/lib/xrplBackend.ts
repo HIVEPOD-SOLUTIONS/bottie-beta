@@ -54,6 +54,39 @@ async function request<T>(method: string, path: string, body?: Record<string, un
   }
 }
 
+/**
+ * Translate a raw bluvfi-xrpl error string into a user-readable message.
+ * The raw form thrown by request() is: "bluvfi-xrpl METHOD /path → STATUS: {json}"
+ * Exported so tools and API routes can surface the same friendly messages.
+ */
+export function friendlyXrpError(raw: string): string {
+  const jsonStart = raw.indexOf(": {");
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(raw.slice(jsonStart + 2)) as { error?: string; details?: string };
+      const detail = parsed.details ?? parsed.error ?? "";
+      if (/account not found/i.test(detail)) {
+        return "The payment wallet hasn't been activated on the XRP Ledger yet. Please send the XRP manually using the address shown.";
+      }
+      if (/insufficient/i.test(detail)) {
+        return "Your XRP wallet doesn't have enough balance for this transfer.";
+      }
+      if (/tecPATH_DRY|tecNO_LINE/i.test(detail)) {
+        return "The XRP transfer path is unavailable right now. Please try again shortly or send manually.";
+      }
+      if (/tecINSUFF_FEE|insufficient.*fee/i.test(detail)) {
+        return "Transfer failed — network fee could not be covered. Please try again.";
+      }
+    } catch {
+      // ignore JSON parse failures — fall through to generic message
+    }
+  }
+  if (raw.startsWith("bluvfi-xrpl")) {
+    return "XRP transfer failed. Please try sending manually using the address shown, or try again later.";
+  }
+  return raw;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Field names/types below match the live response exactly (verified 2026-08-31):
 // {"message":"...","user":{...},"wallet":{ id, address, sourceTag, status,

@@ -281,11 +281,15 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
 
   const handleBuy = async () => {
     if (txState.status === "pending") return;
-    const amtNum = Number(amount);
-    if (!amount || isNaN(amtNum) || amtNum < MIN_FUND_AMOUNT) {
-      setAmountError(`Minimum amount is $${MIN_FUND_AMOUNT}`);
+    const raw = Number(amount);
+    if (!amount || isNaN(raw) || raw <= 0) {
+      setAmountError("Please enter a valid amount");
       return;
     }
+    // Clamp to the minimum silently — MoonPay rejects sub-minimum orders,
+    // so always pass at least MIN_FUND_AMOUNT regardless of what was typed.
+    const amtNum = Math.max(raw, MIN_FUND_AMOUNT);
+    if (amtNum !== raw) setAmount(String(amtNum));
     setAmountError(null);
     setTxState({ status: "pending", label: "Opening funding flow…" });
     try {
@@ -368,7 +372,7 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
         {amountError ? (
           <p className="mt-1 text-xs text-red-400">{amountError}</p>
         ) : (
-          <p className="mt-1 text-xs text-[#A7A79A]">Minimum $11</p>
+          <p className="mt-1 text-xs text-[#A7A79A]">Minimum ${MIN_FUND_AMOUNT} — lower amounts are rounded up automatically</p>
         )}
       </div>
 

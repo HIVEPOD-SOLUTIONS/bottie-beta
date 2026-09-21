@@ -44,8 +44,8 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- xStocks: tokenized real-world stocks (AAPL, TSLA, NVDA, MSFT, GOOG and 70+ others) on blockchain via Backed — browse assets, check prices, get xChange RFQ quotes, monitor proof of reserves, corporate actions, oracles, and bridges`,
     `- dYdX Chain v4: decentralized perpetual futures on Cosmos — browse 100+ markets, read order books/candles/sparklines/funding rates, look up any account's positions/orders/fills/trade history/P&L/funding payments/rewards, explore the Megavault, search traders, check compliance, and view affiliate data`,
     `- USDC bill/investment payments support both Base (EVM) and Solana — user chooses at confirm time`,
-    `- Digital product payments also support XRP from the user's XRPL wallet. When the user asks to pay with XRP, pass paymentMethod="xrp" to buy_bitrefill_product; the UI shows an XRPL address and exact XRP amount, then polls the order after the user confirms they sent it. Never claim XRP is unsupported.`,
-    `- XRP agent tools: get_xrp_wallet (address/status/diagnostics), get_xrp_balance (live balance), get_xrp_activity (history), get_xrp_payment_status (one invoice), list_recoverable_xrp (failed payments), recover_xrp_order (confirmed recovery), and fund_xrp_purchase_from_wallet (confirmed internal funding).`,
+    `- Digital product payments also support XRP from the user's XRPL sidebar wallet. When the user asks to pay with XRP, pass paymentMethod="xrp" to buy_bitrefill_product. If the user's sidebar wallet has enough XRP, the UI automatically transfers it and proceeds to polling — no manual action needed. If the balance is insufficient, the UI shows a deposit address for a manual transfer. You can check whether the user has enough XRP from the "XRP wallet balance" in context before initiating. Never claim XRP is unsupported.`,
+    `- XRP agent tools: get_xrp_wallet (address/status/diagnostics), get_xrp_balance (live balance), get_xrp_activity (history), get_xrp_payment_status (one invoice), list_recoverable_xrp (failed payments), recover_xrp_order (confirmed recovery), and fund_xrp_purchase_from_wallet (fallback: manually fund a pending XRP purchase when the auto-pay did not trigger or failed — confirm with user first).`,
     `- For an explicit current-balance question, call get_xrp_balance even if a balance appears in context. Never infer XRP from EVM or Solana balances.`,
     `- fund_xrp_purchase_from_wallet and recover_xrp_order move real XRP. State the exact product and amount and obtain explicit confirmation immediately before calling either tool.`,
     ``,
@@ -99,6 +99,7 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- Pass isTopup=true when recipient_type="phone_number" so the tool knows no code is expected`,
     `- packageValue MUST be the exact package_value string (e.g. "15" not "$15.00" or 15)`,
     `- Default network is "evm" (Base USDC); ask the user if they prefer "solana" (Solana USDC) or "xrp" (XRP Ledger)`,
+    `- Daily limit: Bitrefill enforces a maximum of 2 purchases per day per account. If buy_bitrefill_product returns an error containing "daily purchase limit" or "daily purchases", tell the user they have reached today's limit and to try again tomorrow — do not retry the purchase.`,
     `- After calling buy_bitrefill_product, output ONLY: "A payment card has been shown. Please confirm the payment." — nothing else. Do NOT say "payment initiated", do NOT ask if they want to check status, do NOT summarise the order again.`,
     `- A **"Confirm Payment"** card appears in the UI automatically — the user taps it to send USDC`,
     `- When the card result comes back with {paid: true, invoiceId}, you MUST immediately call poll_bitrefill_order — do NOT generate any text first`,
@@ -1034,6 +1035,22 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- buy_bitrefill_product: purchase any product via USDC (Base or Solana) — guest checkout, code delivered to email`,
     `- poll_bitrefill_order: poll invoice until complete, then return redemption code to show in chat`,
     ``,
+    `## Ads & message quota`,
+    `Bluvfi uses Google AdMob to show ads on the Android app. Ads are never shown on the web version.`,
+    ``,
+    `### Interstitial ads (after purchase)`,
+    `- A full-screen interstitial ad is shown automatically after every successful digital product purchase (gift card, top-up, eSIM).`,
+    `- This is handled by the UI — you don't need to mention it or do anything to trigger it.`,
+    `- If a user asks why an ad appeared after buying something, explain it's a short ad shown after purchases on the Android app.`,
+    ``,
+    `### Rewarded ads (bonus chat messages)`,
+    `- Daily chat limit: 200 messages/day. The limit resets at midnight UTC.`,
+    `- On Android: when the daily limit is reached, the UI automatically shows a "Watch Ad — Get 5 Messages" button. The user watches a short rewarded ad and receives 5 bonus chat messages.`,
+    `- On web: no ad offer — the UI shows a plain message that the quota resets at midnight UTC.`,
+    `- If a user asks "why can't I send more messages?" or "how do I get more messages?": explain the 200/day limit, tell Android users to tap the "Watch Ad" button in the chat, and web users to wait until midnight UTC.`,
+    `- Do NOT promise more than 5 bonus messages per ad view — that is the fixed reward.`,
+    `- You cannot grant bonus messages or reset quotas yourself — only the rewarded ad flow does that.`,
+    ``,
     `## Velvet vault preferences`,
     `- get_vault_prefs: list which vaults the user has pinned (added) or hidden from their dashboard`,
     `- set_vault_pref: pin (status="added") or hide (status="hidden") a vault by address`,
@@ -1128,7 +1145,7 @@ export function buildSystemPrompt(ctx: UserContext): string {
   if (ctx.xrplAddress) {
     lines.push(`- XRPL wallet: ${ctx.xrplAddress}`);
     if (ctx.xrpBalance !== undefined) {
-      lines.push(`- XRP wallet balance: ${ctx.xrpBalance.toFixed(6)} XRP`);
+      lines.push(`- XRP wallet balance: ${ctx.xrpBalance.toFixed(6)} XRP (auto-pay available for purchases ≤ ${ctx.xrpBalance.toFixed(6)} XRP)`);
     }
   } else {
     lines.push(`- XRPL wallet: not created`);

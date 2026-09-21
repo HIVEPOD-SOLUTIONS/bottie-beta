@@ -129,8 +129,9 @@ function DashboardInner() {
       evmUsdt,
       solUsdc,
       solUsdt,
+      xrpBalance: xrpBalance ?? undefined,
     });
-  }, [sbLoading, monthlyBills, portfolioValue, purchasedCount, evmUsdc, evmUsdt, solUsdc, solUsdt, registerDashboardData]);
+  }, [sbLoading, monthlyBills, portfolioValue, purchasedCount, evmUsdc, evmUsdt, solUsdc, solUsdt, xrpBalance, registerDashboardData]);
 
   return (
     <div className="relative min-h-dvh">
