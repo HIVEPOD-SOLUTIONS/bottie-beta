@@ -1845,8 +1845,14 @@ function CheckoutSheet({
             : "this network";
           return `Insufficient ${token} balance on ${network}. Please add funds and try again.`;
         }
-        // eth_estimateGas rejection when wallet has no native gas token (POL, ETH, etc.)
+        // ArcKit / Layer 2 gas-only insufficiency — user has the stablecoin but
+        // not enough native ETH/POL/etc. to cover the gas fee.
+        // ArcKit error: "BALANCE_INSUFFICIENT_GAS: Insufficient native token on Base to cover gas fees"
+        // viem error: "insufficient funds for gas * price + value"
         if (
+          m.includes("balance_insufficient_gas") ||
+          m.includes("insufficient native token") ||
+          m.includes("native gas balance") ||
           m.includes("estimategas") ||
           m.includes("insufficient funds for gas") ||
           m.includes("insufficient funds for transfer") ||
@@ -1859,9 +1865,9 @@ function CheckoutSheet({
             : paymentMethodId.includes("arbitrum") ? "Arbitrum"
             : paymentMethodId.includes("optimism") ? "Optimism"
             : paymentMethodId.includes("erc20") ? "Ethereum"
+            : paymentMethodId.includes("base") ? "Base"
             : "this network";
-          const stableToken = paymentMethodId.includes("usdt") ? "USDT" : "USDC";
-          return `You need ${gasToken} for gas fees and ${stableToken} to send on ${network}. Please add both to your wallet and try again.`;
+          return `You need a small amount of ${gasToken} on ${network} to pay the gas fee. Please add ${gasToken} to your wallet and try again.`;
         }
         // Pass through pre-flight Solana SPL errors — they're already user-friendly
         // (e.g. "Insufficient USDC on Solana. You have $0.50 but need $1.00.")
