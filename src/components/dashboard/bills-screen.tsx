@@ -15,7 +15,7 @@ import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { refreshXrpBalance, useXrpBalance } from "@/hooks/use-xrp-balance";
-import { showInterstitial } from "@/hooks/use-admob";
+import { showInterstitial, prepareInterstitialAd } from "@/hooks/use-admob";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -1060,6 +1060,12 @@ function CheckoutSheet({
       .finally(() => setXrpSidebarTransferring(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, paymentMethodId, xrpSidebarWallet, xrpWalletRequestId, depositAmount, xrpBalance]);
+
+  // Pre-load the interstitial ad as soon as payment enters the polling phase
+  // so it is ready to display the instant the purchase is confirmed.
+  useEffect(() => {
+    if (step === "polling") void prepareInterstitialAd();
+  }, [step]);
 
   // Gift flow
   const [isGift, setIsGift]               = useState(false);

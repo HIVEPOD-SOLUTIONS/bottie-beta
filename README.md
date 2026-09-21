@@ -8,6 +8,7 @@ Bluvfi is a mobile-first AI financial assistant that lets you manage recurring s
 
 ## How it works
 
+
 1. **Sign up with email or social.** Privy creates an embedded EOA wallet — no seed phrases, no browser extension required.
 2. **Browse bills and investments.** 16 pre-loaded bills (streaming, internet, cable, utility) and 10 assets (stocks, ETFs, pre-IPO) are shown in the UI.
 3. **Pay manually or via the AI.**

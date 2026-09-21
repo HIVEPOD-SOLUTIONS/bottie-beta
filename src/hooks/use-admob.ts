@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 
-// TODO: remove TEST_MODE and restore real IDs once AdMob ad units are approved
-const TEST_MODE = true;
+const TEST_MODE = false;
 const INTERSTITIAL_AD_ID = TEST_MODE
   ? "ca-app-pub-3940256099942544/1033173712"
   : "ca-app-pub-4986320440788963/6729693281";
@@ -26,15 +25,36 @@ export function useAdMobInit() {
   }, []);
 }
 
-/** Show an interstitial ad. No-op on web. */
-export async function showInterstitial(): Promise<void> {
+/**
+ * Pre-load an interstitial ad in the background. Call when payment polling
+ * starts so the ad is ready to show the moment the purchase completes.
+ * No-op on web.
+ */
+export async function prepareInterstitialAd(): Promise<void> {
   if (!isCapacitorApp()) return;
   try {
     const { AdMob } = await import("@capacitor-community/admob");
     await AdMob.prepareInterstitial({ adId: INTERSTITIAL_AD_ID });
+  } catch (e) {
+    console.warn("[AdMob] prepare interstitial error:", e);
+  }
+}
+
+/** Show an interstitial ad. Assumes prepareInterstitialAd() was called first. No-op on web. */
+export async function showInterstitial(): Promise<void> {
+  if (!isCapacitorApp()) return;
+  try {
+    const { AdMob } = await import("@capacitor-community/admob");
     await AdMob.showInterstitial();
   } catch (e) {
-    console.warn("[AdMob] interstitial error:", e);
+    // If the pre-loaded ad expired or wasn't ready, load and show in one shot.
+    try {
+      const { AdMob } = await import("@capacitor-community/admob");
+      await AdMob.prepareInterstitial({ adId: INTERSTITIAL_AD_ID });
+      await AdMob.showInterstitial();
+    } catch (e2) {
+      console.warn("[AdMob] interstitial error:", e2);
+    }
   }
 }
 
