@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { isXrplBackendConfigured } from "@/lib/xrplBackend";
-import { initiateXrpPurchase, type UnderlyingMethod } from "@/lib/xrp-purchase";
+import { initiateXrpPurchase, getOrCreateSidebarWallet, type UnderlyingMethod } from "@/lib/xrp-purchase";
 
 /**
  * POST /api/bitrefill/xrp-purchase
@@ -61,7 +61,17 @@ export async function POST(req: NextRequest) {
       sendTo: body.sendTo,
       underlyingMethod: body.underlyingMethod,
     });
-    return NextResponse.json(result);
+
+    // Fetch (or create) the user's sidebar XRP wallet and include it in the
+    // response so bills-screen can auto-pay immediately without a second fetch.
+    let sidebarWallet: { id: string; address: string } | null = null;
+    try {
+      sidebarWallet = await getOrCreateSidebarWallet(userId);
+    } catch {
+      // Non-fatal — bills-screen falls back to its own /api/xrpl/sidebar-wallet fetch
+    }
+
+    return NextResponse.json({ ...result, sidebarWallet });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "XRP purchase failed";
     console.error("[bitrefill/xrp-purchase]", message);
