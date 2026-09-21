@@ -250,13 +250,14 @@ function TxResult({ state, onReset }: { state: TxState; onReset: () => void }) {
 // EVM_BALANCE_CHAINS) plus Solana — so funding into any option here
 // resolves the low-balance banner, not just Base.
 
+// CAIP-2 chain IDs and USDC contract addresses used by Privy's fund() API.
 const BUY_EVM_NETWORKS = [
-  { chain: base,      label: "Base",      icon: "🔷" },
-  { chain: mainnet,   label: "Ethereum",  icon: "⟠"  },
-  { chain: arbitrum,  label: "Arbitrum",  icon: "🔵" },
-  { chain: optimism,  label: "Optimism",  icon: "🔴" },
-  { chain: polygon,   label: "Polygon",   icon: "🟣" },
-  { chain: avalanche, label: "Avalanche", icon: "🔺" },
+  { chain: base,      label: "Base",      icon: "🔷", caip2: "eip155:8453",  usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+  { chain: mainnet,   label: "Ethereum",  icon: "⟠",  caip2: "eip155:1",     usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+  { chain: arbitrum,  label: "Arbitrum",  icon: "🔵", caip2: "eip155:42161", usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" },
+  { chain: optimism,  label: "Optimism",  icon: "🔴", caip2: "eip155:10",    usdc: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85" },
+  { chain: polygon,   label: "Polygon",   icon: "🟣", caip2: "eip155:137",   usdc: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" },
+  { chain: avalanche, label: "Avalanche", icon: "🔺", caip2: "eip155:43114", usdc: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6D" },
 ] as const;
 
 type BuyNetwork = (typeof BUY_EVM_NETWORKS)[number]["chain"]["id"] | "solana";
@@ -313,10 +314,8 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
         return;
       }
 
-      // No explorerUrl set — Privy's own docs note funds can take a few
-      // minutes to actually arrive even after this resolves "completed", so
-      // showing TxResult's "(confirmed on-chain)" badge here would overstate
-      // what's actually known at this point.
+      // Funds can take a few minutes to arrive even after the modal reports
+      // "completed", so we don't claim on-chain confirmation here.
       setTxState({
         status: "success",
         message: `Funded ${selected.label}${result.amount ? ` — ${result.amount} ${result.assetType ?? "USDC"}` : ""}. Funds may take a few minutes to arrive.`,
@@ -328,8 +327,8 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
         body: JSON.stringify({
           type: "deposit",
           referenceId: result.transactionHash ?? null,
-          description: `Card funding: ${result.amount ?? "?"} ${result.assetType ?? "USDC"} → ${selected.label} wallet`,
-          amountUsdc: result.amount ?? "0",
+          description: `Card funding: ${result.amount ?? amtNum} ${result.assetType ?? "USDC"} → ${selected.label} wallet`,
+          amountUsdc: result.amount ?? String(amtNum),
           status: "completed",
           txHash: result.transactionHash ?? null,
           chain: "evm",
