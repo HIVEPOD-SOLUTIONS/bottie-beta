@@ -1473,15 +1473,28 @@ function CheckoutSheet({
         return;
       }
 
-      // Truly link-only (fiat) OR fallback when no address returned
-      if (pm.chain === "link" || !paymentAddress || !paymentAmount) {
+      // Truly link-only (fiat) methods — open Bitrefill's checkout page.
+      // EVM/Solana methods must NOT fall through here: Bitrefill's checkout
+      // page cannot access the user's Privy embedded wallet and will always
+      // show "Insufficient balance" even when the wallet has enough funds.
+      if (pm.chain === "link") {
         if (inv.payment_link) {
           window.open(inv.payment_link, "_blank", "noopener,noreferrer");
           setStep("polling");
           pollInvoice(invoiceId, token, invCreatedTime, invExpirationMinutes);
           return;
         }
-        throw new Error("No payment link or address returned for this payment method");
+        throw new Error("No payment link returned for this payment method");
+      }
+
+      // For auto-pay methods (evm, solana, address) we need the payment address and amount.
+      // If Bitrefill didn't return them, bail with a clear error rather than opening their
+      // checkout page (which can't see the user's Privy wallet).
+      if (!paymentAddress) {
+        throw new Error("Payment address not returned by Bitrefill. Please try a different payment method.");
+      }
+      if (!paymentAmount) {
+        throw new Error("Payment amount not returned by Bitrefill. Please try a different payment method.");
       }
 
       if (pm.chain === "solana") {
