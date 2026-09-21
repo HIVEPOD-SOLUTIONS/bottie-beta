@@ -4,11 +4,12 @@ import { useRef } from "react";
 import { motion, useScroll, useTransform, MotionValue } from "framer-motion";
 import { HeroSection } from "./hero";
 import { TrustSignals } from "./trust-signals";
+import { PartnersSection } from "./partners";
 import { ValueProps } from "./value-props";
 import { HowItWorks } from "./how-it-works";
 import { Footer } from "./footer";
 
-const SECTIONS = [HeroSection, TrustSignals, ValueProps, HowItWorks, Footer];
+const SECTIONS = [HeroSection, TrustSignals, PartnersSection, ValueProps, HowItWorks, Footer];
 const N = SECTIONS.length;
 
 /* ── Each card tracks scroll progress and scales back as next slides in ── */
