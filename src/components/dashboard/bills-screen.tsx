@@ -1300,8 +1300,9 @@ function CheckoutSheet({
         // the swap never delivered anything to Bitrefill's address.
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
 
-        const recoverable = data.swapAmountDrops ? Number(data.swapAmountDrops) / 1_000_000 : null;
-        setXrpRecoverableXrp(recoverable);
+        // Only offer recovery when the server says the wallet really holds
+        // XRP to give back — 0 (never funded / already recovered) shows none.
+        setXrpRecoverableXrp(data.recoverableXrp > 0 ? data.recoverableXrp : null);
         setXrpSwapFailedMsg(data.swapErrorMessage ?? null);
 
         // Human-friendly translation — never surface raw internal wording
