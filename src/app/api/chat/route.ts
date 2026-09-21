@@ -234,7 +234,10 @@ export async function POST(req: Request) {
         messages: modelMessages,
         tools,
         stopWhen: stepCountIs(10),
-        onError: (err) => console.error(`[chat] ${name} streamText error (mid-stream):`, err),
+        onError: (err) => {
+        const modelId = (model as { modelId?: string }).modelId ?? name;
+        console.error(`[chat] ${name} (${modelId}) streamText error (mid-stream):`, err);
+      },
       });
       const response = result.toUIMessageStreamResponse({ headers: rateLimit.headers });
 
@@ -244,6 +247,16 @@ export async function POST(req: Request) {
       const reader = response.body!.getReader();
       const first = await reader.read();
       if (first.done) throw new Error(`${name} returned an empty stream`);
+
+      // DashScope quota errors (AllocationQuota.FreeTierOnly) arrive as the
+      // first SSE event after an HTTP 200 — the connection looks alive so the
+      // catch block above never fires. Decode the first chunk and look for the
+      // AI SDK data-stream error prefix ("3:"). If found, throw so the loop
+      // moves on to the next candidate before any bytes reach the client.
+      const firstText = new TextDecoder().decode(first.value);
+      if (firstText.split('\n').some(line => line.startsWith('3:'))) {
+        throw new Error(`${name} returned an error event: ${firstText.slice(0, 300)}`);
+      }
 
       const replay = new ReadableStream<Uint8Array>({
         start(controller) {
