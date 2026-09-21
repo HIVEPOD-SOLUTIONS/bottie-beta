@@ -28,6 +28,7 @@ import { FundWalletSheet } from "@/components/dashboard/fund-wallet-sheet";
 import { LOW_BALANCE_THRESHOLD_USD } from "@/hooks/use-usdc-balance";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
 import { useXrpBalance } from "@/hooks/use-xrp-balance";
+import { PriceTicker } from "@/components/dashboard/price-ticker";
 import { ASSET_PRICES } from "@/lib/demo-data";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
@@ -259,6 +260,9 @@ function DashboardInner() {
             </div>
           )}
         </div>
+
+        {/* Live crypto prices (CoinMarketCap). Hidden entirely if no API key is configured. */}
+        <PriceTicker className="mt-3" />
       </div>
 
       {/* Tab navigation — sticks BELOW the low-balance banner when it is visible */}

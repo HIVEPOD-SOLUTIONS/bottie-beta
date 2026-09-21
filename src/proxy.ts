@@ -48,6 +48,7 @@ const RATE_LIMITS: { path: string; windowMs: number; max: number }[] = [
   { path: "/api/payments",         windowMs: 60_000, max: 60  },
   { path: "/api/investments",      windowMs: 60_000, max: 30  },
   { path: "/api/swap-quote",       windowMs: 60_000, max: 30  },
+  { path: "/api/prices",           windowMs: 60_000, max: 60  }, // ticker polls every 30s; cached server-side
 ];
 
 function applyRateLimit(request: NextRequest): NextResponse | null {
