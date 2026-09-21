@@ -13,15 +13,45 @@ export function isCapacitorApp(): boolean {
   return (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() === true;
 }
 
-/** Initialize AdMob once when the Capacitor app starts. Call from layout/root. */
+/**
+ * Initialize AdMob once when the Capacitor app starts.
+ *
+ * play-services-ads v23+ (this plugin uses v25.4) requires the UMP consent
+ * flow to run on EVERY app launch before the SDK will serve any ads.
+ * Without requestConsentInfo(), canRequestAds stays false and all ad loads
+ * silently return no-fill — even for users outside the EU where consent is
+ * NOT_REQUIRED. This is the most common reason ads stop showing after an
+ * Admob SDK upgrade.
+ *
+ * Flow:
+ *  1. requestConsentInfo() — updates the consent status from the UMP server
+ *  2. showConsentForm()    — only when status === REQUIRED and form is available
+ *  3. initialize()         — only when canRequestAds is true
+ */
 export function useAdMobInit() {
   useEffect(() => {
     if (!isCapacitorApp()) return;
-    import("@capacitor-community/admob").then(({ AdMob }) => {
-      AdMob.initialize({ initializeForTesting: TEST_MODE }).catch(
-        (e: unknown) => console.warn("[AdMob] init error:", e),
-      );
-    });
+    (async () => {
+      try {
+        const { AdMob, AdmobConsentStatus } = await import("@capacitor-community/admob");
+
+        // Step 1 — refresh consent info (must run every launch)
+        let consentInfo = await AdMob.requestConsentInfo();
+
+        // Step 2 — show the UMP form if the user's region requires it
+        if (consentInfo.isConsentFormAvailable && consentInfo.status === AdmobConsentStatus.REQUIRED) {
+          consentInfo = await AdMob.showConsentForm();
+        }
+
+        // Step 3 — initialize only when the SDK is allowed to serve ads
+        // (canRequestAds = true when status is NOT_REQUIRED or OBTAINED)
+        if (consentInfo.canRequestAds) {
+          await AdMob.initialize({ initializeForTesting: TEST_MODE });
+        }
+      } catch (e: unknown) {
+        console.warn("[AdMob] init/consent error:", e);
+      }
+    })();
   }, []);
 }
 

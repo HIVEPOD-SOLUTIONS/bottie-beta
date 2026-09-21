@@ -1294,6 +1294,8 @@ export function ChatSheet({ visible }: ChatSheetProps) {
   const evmUsdt = dashboardData?.evmUsdt;
   const solUsdc = dashboardData?.solUsdc;
   const solUsdt = dashboardData?.solUsdt;
+  // XRP balance hint — used as fallback in the chat API when bluvfi-xrpl is temporarily unavailable.
+  const xrpBalanceClient = dashboardData?.xrpBalance;
 
   const bodyRef = useRef<Record<string, unknown>>({});
   bodyRef.current = {
@@ -1304,6 +1306,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
     evmUsdt,
     solUsdc,
     solUsdt,
+    xrpBalanceClient,
     paidBillIds,
     totalBillsDueUsd: dashboardData?.totalBillsDueUsd,
     portfolioValueUsd: dashboardData?.portfolioValueUsd,

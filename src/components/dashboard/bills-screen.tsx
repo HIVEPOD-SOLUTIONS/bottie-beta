@@ -1021,11 +1021,12 @@ function CheckoutSheet({
   // Fires once per purchase (xrpAutoTransferFired guards double-trigger).
   // Only auto-pays if xrpBalance is known and covers the amount — otherwise the
   // "Send from your Bluvfi XRP wallet" button stays for the user to click manually.
+  // Fetches the sidebar wallet ID on-demand if it was not pre-loaded (resilient to the
+  // initial /api/xrpl/sidebar-wallet fetch failing silently before the purchase completed).
   useEffect(() => {
     if (
       step !== "address" ||
       paymentMethodId !== "xrp" ||
-      !xrpSidebarWallet ||
       !xrpWalletRequestId ||
       !depositAmount ||
       xrpAutoTransferFired.current
@@ -1036,28 +1037,52 @@ function CheckoutSheet({
     setXrpSidebarTransferring(true);
     setErrMsg(null);
 
-    authFetch("/api/xrpl/transfer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sourceWalletRequestId: xrpSidebarWallet.id,
-        destinationWalletRequestId: xrpWalletRequestId,
-        amountXrp: depositAmount,
-      }),
-    }, getAccessToken)
-      .then(async (res) => {
+    (async () => {
+      try {
+        // Resolve sidebar wallet ID — use pre-loaded value or fetch on-demand.
+        let sourceId = xrpSidebarWallet?.id ?? null;
+        if (!sourceId) {
+          const wr = await authFetch("/api/xrpl/sidebar-wallet", {}, getAccessToken);
+          if (!wr.ok) {
+            // Wallet fetch failed — reset so the user can tap the button to retry.
+            xrpAutoTransferFired.current = false;
+            setErrMsg("Could not load your XRP wallet — tap the button below to retry");
+            setXrpSidebarTransferring(false);
+            return;
+          }
+          const wd = (await wr.json()) as { id?: string; address?: string };
+          if (!wd?.id || !wd?.address) {
+            xrpAutoTransferFired.current = false;
+            setErrMsg("Could not load your XRP wallet — tap the button below to retry");
+            setXrpSidebarTransferring(false);
+            return;
+          }
+          setXrpSidebarWallet({ id: wd.id, address: wd.address });
+          sourceId = wd.id;
+        }
+        const res = await authFetch("/api/xrpl/transfer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceWalletRequestId: sourceId,
+            destinationWalletRequestId: xrpWalletRequestId,
+            amountXrp: depositAmount,
+          }),
+        }, getAccessToken);
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: "Transfer failed" }));
+          // Keep fired=true on transfer failure so the effect does not loop;
+          // the button below lets the user retry manually.
           throw new Error((err as { error?: string }).error ?? "Transfer failed");
         }
         setStep("polling");
         refreshXrpBalance();
-      })
-      .catch((err: unknown) => {
-        xrpAutoTransferFired.current = false;
+      } catch (err: unknown) {
         setErrMsg((err as Error)?.message ?? "Transfer failed");
-      })
-      .finally(() => setXrpSidebarTransferring(false));
+      } finally {
+        setXrpSidebarTransferring(false);
+      }
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, paymentMethodId, xrpSidebarWallet, xrpWalletRequestId, depositAmount, xrpBalance]);
 
@@ -2717,18 +2742,29 @@ function CheckoutSheet({
                           : "⚠️ Payment window expired · Please start a new purchase"}
                       </p>
                     )}
-                    {xrpSidebarWallet && xrpWalletRequestId && depositAmount && (
+                    {xrpWalletRequestId && depositAmount &&
+                     xrpBalance !== null && xrpBalance >= Number(depositAmount) && (
                       <button
                         disabled={xrpSidebarTransferring}
                         onClick={async () => {
                           setXrpSidebarTransferring(true);
                           setErrMsg(null);
                           try {
+                            // Resolve sidebar wallet ID — use pre-loaded value or fetch on-demand.
+                            let sourceId = xrpSidebarWallet?.id ?? null;
+                            if (!sourceId) {
+                              const wr = await authFetch("/api/xrpl/sidebar-wallet", {}, getAccessToken);
+                              if (!wr.ok) throw new Error("Could not load your XRP wallet");
+                              const wd = (await wr.json()) as { id?: string; address?: string };
+                              if (!wd?.id || !wd?.address) throw new Error("Could not load your XRP wallet");
+                              setXrpSidebarWallet({ id: wd.id, address: wd.address });
+                              sourceId = wd.id;
+                            }
                             const res = await authFetch("/api/xrpl/transfer", {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({
-                                sourceWalletRequestId: xrpSidebarWallet.id,
+                                sourceWalletRequestId: sourceId,
                                 destinationWalletRequestId: xrpWalletRequestId,
                                 amountXrp: depositAmount,
                               }),
@@ -2738,7 +2774,7 @@ function CheckoutSheet({
                               throw new Error(err.error ?? "Transfer failed");
                             }
                             setStep("polling");
-                            refreshXrpBalance(); // sidebar wallet just paid out
+                            refreshXrpBalance();
                           } catch (err: unknown) {
                             setErrMsg((err as Error)?.message ?? "Transfer failed");
                           } finally {

@@ -28,6 +28,8 @@ export interface FinancialData {
   evmUsdt?: number;
   solUsdc?: number;
   solUsdt?: number;
+  // XRP sidebar wallet balance — polled by the dashboard, used as a hint in the chat API
+  xrpBalance?: number;
 }
 
 interface ChatContextType {

@@ -185,6 +185,23 @@ export function isConfigured(): boolean {
   return true;
 }
 
+/**
+ * Translate a raw Bitrefill/MCP error string into a user-readable message.
+ * Handles both the isError text path ("error: \"...\" code: ... details: ...")
+ * and the extracted JSON field path ("You've reached your max...").
+ * Exported so tools and API routes share the same friendly messages.
+ */
+export function friendlyBitrefillError(raw: string): string {
+  const m = raw.toLowerCase();
+  if (m.includes("purchase_limit_reached") || m.includes("max number of daily purchases") || m.includes("daily purchases"))
+    return "You've reached the daily purchase limit (2 orders per day). Try again tomorrow.";
+  if (m.includes("rate_limit_reached") || m.includes("rate_limit") || m.includes("quota"))
+    return "Too many requests — please wait a moment and try again.";
+  if (m.includes("streamable http error") || m.includes("bad gateway") || m.includes("<!doctype html"))
+    return "Bitrefill is temporarily unavailable. Please try again in a few minutes.";
+  return raw;
+}
+
 // ── MCP client factory ────────────────────────────────────────────────────────
 
 /**

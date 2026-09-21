@@ -160,16 +160,37 @@ export async function POST(req: NextRequest) {
 
     // Strip the MCP transport wrapper so callers get the real Bitrefill message.
     // "Streamable HTTP error: Error POSTing to endpoint: {…json…}"
+    // Bitrefill error JSON uses: { error, code, details: { status } } — NOT message/status at top level.
     let message = raw;
     const jsonStart = raw.indexOf("{");
     if (raw.includes("Streamable HTTP") && jsonStart !== -1) {
       try {
-        const inner = JSON.parse(raw.slice(jsonStart)) as { message?: string; status?: string };
-        message = inner.message ?? inner.status ?? raw;
+        const inner = JSON.parse(raw.slice(jsonStart)) as {
+          message?: string;
+          status?: string;
+          error?: string;
+          code?: string;
+          details?: { status?: string } | string;
+        };
+        const detailsStatus = typeof inner.details === "object" ? inner.details?.status : inner.details;
+        message = inner.message ?? inner.error ?? detailsStatus ?? inner.status ?? raw;
       } catch { /* keep raw */ }
     }
 
-    const status = message.toLowerCase().includes("rate_limit") || message.toLowerCase().includes("quota") ? 429 : 502;
-    return NextResponse.json({ error: message }, { status });
+    // Translate known Bitrefill business errors to friendly messages before sending to the client.
+    const ml = message.toLowerCase();
+    let friendly = message;
+    if (ml.includes("purchase_limit_reached") || ml.includes("max number of daily purchases") || ml.includes("daily purchases")) {
+      friendly = "You've reached the daily purchase limit (2 orders per day). Try again tomorrow.";
+    } else if (ml.includes("rate_limit_reached") || ml.includes("rate_limit") || ml.includes("quota")) {
+      friendly = "Too many requests — please wait a moment and try again.";
+    } else if (ml.includes("streamable http error") || ml.includes("bad gateway") || ml.includes("<!doctype html")) {
+      friendly = "Bitrefill is temporarily unavailable. Please try again in a few minutes.";
+    }
+
+    const httpStatus = ml.includes("purchase_limit_reached") || ml.includes("max number of daily purchases") ? 422
+      : ml.includes("rate_limit") || ml.includes("quota") ? 429
+      : 502;
+    return NextResponse.json({ error: friendly }, { status: httpStatus });
   }
 }

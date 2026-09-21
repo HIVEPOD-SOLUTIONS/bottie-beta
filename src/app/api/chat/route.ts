@@ -126,6 +126,7 @@ export async function POST(req: Request) {
     evmUsdt,
     solUsdc,
     solUsdt,
+    xrpBalanceClient,
     paidBillIds,
     totalBillsDueUsd,
     portfolioValueUsd,
@@ -139,6 +140,7 @@ export async function POST(req: Request) {
     evmUsdt?: number;
     solUsdc?: number;
     solUsdt?: number;
+    xrpBalanceClient?: number;
     paidBillIds?: string[];
     totalBillsDueUsd?: number;
     portfolioValueUsd?: number;
@@ -153,8 +155,9 @@ export async function POST(req: Request) {
   const recap = extractConversationRecap(messages);
   const windowed = windowMessages(messages);
 
-  // Resolve XRP server-side from the authenticated user's persistent wallet.
-  // Client balance fields are display hints; they must not be trusted for XRPL.
+  // Resolve XRP wallet address from DB (cheap) and live balance from bluvfi-xrpl (may fail).
+  // The client sends xrpBalanceClient — the dashboard's polled value — as a fallback so the
+  // agent always sees a balance even when bluvfi-xrpl is temporarily unavailable.
   let xrplAddress: string | undefined;
   let xrpBalance: number | undefined;
   try {
@@ -165,12 +168,19 @@ export async function POST(req: Request) {
       .limit(1);
     if (sidebarWallet) {
       xrplAddress = sidebarWallet.address;
-      const wallet = await getWalletRequest(sidebarWallet.walletRequestId, { includeLedgerBalance: true });
-      xrpBalance = resolveXrpBalance(wallet);
+      try {
+        const wallet = await getWalletRequest(sidebarWallet.walletRequestId, { includeLedgerBalance: true });
+        xrpBalance = resolveXrpBalance(wallet);
+      } catch {
+        // bluvfi-xrpl is down — fall back to the dashboard's polled balance as a hint.
+        if (typeof xrpBalanceClient === "number" && Number.isFinite(xrpBalanceClient)) {
+          xrpBalance = xrpBalanceClient;
+        }
+      }
     }
   } catch (err) {
-    // Chat should remain available if the XRPL service is temporarily down.
-    console.warn("[chat] failed to resolve XRP balance:", err);
+    // DB query failed — chat remains available.
+    console.warn("[chat] failed to resolve XRP wallet:", err);
   }
 
   let modelMessages;

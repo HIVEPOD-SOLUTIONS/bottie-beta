@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
-import { transferBetweenWallets, isXrplBackendConfigured } from "@/lib/xrplBackend";
+import { transferBetweenWallets, isXrplBackendConfigured, friendlyXrpError } from "@/lib/xrplBackend";
 import { db } from "@/lib/db";
 import { bitrefillOrders } from "@/lib/db/schema";
 import { walletRequestBelongsToUser, recoverXrpOrder } from "@/lib/xrp-purchase";
@@ -78,9 +78,9 @@ export async function POST(req: Request) {
       const result = await recoverXrpOrder(userId, sourceWalletRequestId);
       return Response.json({ message: "Recovered", amountDrops: String(Math.round(result.recoveredXrp * 1_000_000)) });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Recovery failed";
-      console.error("[xrpl/transfer] recovery error", message);
-      return Response.json({ error: message }, { status: 502 });
+      const raw = err instanceof Error ? err.message : "Recovery failed";
+      console.error("[xrpl/transfer] recovery error", raw);
+      return Response.json({ error: friendlyXrpError(raw) }, { status: 502 });
     }
   }
 
@@ -97,8 +97,8 @@ export async function POST(req: Request) {
     const result = await transferBetweenWallets(sourceWalletRequestId, destinationWalletRequestId, String(amountXrp));
     return Response.json(result);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Transfer failed";
-    console.error("[xrpl/transfer]", message);
-    return Response.json({ error: message }, { status: 502 });
+    const raw = err instanceof Error ? err.message : "Transfer failed";
+    console.error("[xrpl/transfer]", raw);
+    return Response.json({ error: friendlyXrpError(raw) }, { status: 502 });
   }
 }
