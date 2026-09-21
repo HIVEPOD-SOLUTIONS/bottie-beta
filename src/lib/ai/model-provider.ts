@@ -19,7 +19,25 @@ import type { LanguageModel } from "ai";
 
 export type ModelCandidate = { name: "openai" | "qwen"; model: LanguageModel };
 
-function buildQwenModel(): LanguageModel {
+// Ordered list of Qwen text models to try when AI_PROVIDER=qwen.
+// Most capable first; flash models last as high-availability fallbacks.
+// Each has a 1M-token free quota on DashScope — if one's quota is exhausted
+// the chat route automatically retries the next one in the list.
+const QWEN_MODEL_FALLBACK_CHAIN = [
+  "qwen3.6-max-preview",
+  "qwen3.7-max-preview",
+  "qwen3.7-max-2026-05-17",
+  "qwen3.6-plus",
+  "qwen3.7-plus",
+  "qwen3.5-plus",
+  "qwen3-max",
+  "qwen3.7-flash",
+  "qwen3.6-flash",
+  "qwen3.5-flash",
+  "qwen-plus-2025-12-01",
+];
+
+function buildQwenCandidates(): LanguageModel[] {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) throw new Error("QWEN_API_KEY is not set");
 
@@ -48,10 +66,15 @@ function buildQwenModel(): LanguageModel {
     fetch: remapFetch,
   });
 
-  const model = process.env.QWEN_MODEL ?? "qwen-plus";
+  // If QWEN_MODEL is explicitly set, put it first; otherwise use the full chain.
+  const primary = process.env.QWEN_MODEL;
+  const chain = primary
+    ? [primary, ...QWEN_MODEL_FALLBACK_CHAIN.filter((m) => m !== primary)]
+    : QWEN_MODEL_FALLBACK_CHAIN;
+
   // Use Chat Completions format — Qwen's compatible-mode endpoint does not
   // support the OpenAI Responses API format that qwen(model) defaults to.
-  return qwen.chat(model) as LanguageModel;
+  return chain.map((modelId) => qwen.chat(modelId) as LanguageModel);
 }
 
 function buildOpenAiModel(): LanguageModel {
@@ -70,18 +93,27 @@ export function getLanguageModelCandidates(): ModelCandidate[] {
   const hasQwenKey = !!process.env.QWEN_API_KEY;
   const hasOpenAiKey = !!process.env.OPENAI_API_KEY;
 
-  const order: Array<"openai" | "qwen"> =
-    preferred === "qwen" ? ["qwen", "openai"] : ["openai", "qwen"];
-
   const candidates: ModelCandidate[] = [];
-  for (const name of order) {
-    if (name === "qwen" && hasQwenKey) candidates.push({ name, model: buildQwenModel() });
-    if (name === "openai" && hasOpenAiKey) candidates.push({ name, model: buildOpenAiModel() });
+
+  if (preferred === "qwen") {
+    // All Qwen models in priority order, then OpenAI as the final fallback.
+    if (hasQwenKey) {
+      for (const model of buildQwenCandidates()) {
+        candidates.push({ name: "qwen", model });
+      }
+    }
+    if (hasOpenAiKey) candidates.push({ name: "openai", model: buildOpenAiModel() });
+  } else {
+    // OpenAI first, then Qwen models as fallbacks.
+    if (hasOpenAiKey) candidates.push({ name: "openai", model: buildOpenAiModel() });
+    if (hasQwenKey) {
+      for (const model of buildQwenCandidates()) {
+        candidates.push({ name: "qwen", model });
+      }
+    }
   }
 
   if (candidates.length === 0) {
-    // Neither key detected — surface the same clear error the old code gave
-    // for the preferred provider, rather than silently doing nothing.
     if (preferred === "qwen") throw new Error("QWEN_API_KEY is not set");
     throw new Error("OPENAI_API_KEY is not set");
   }
@@ -89,7 +121,7 @@ export function getLanguageModelCandidates(): ModelCandidate[] {
   return candidates;
 }
 
-/** Back-compat: returns just the preferred provider's model (no fallback list). */
+/** Back-compat: returns the first (highest-priority) model. */
 export function getLanguageModel(): LanguageModel {
   return getLanguageModelCandidates()[0].model;
 }
