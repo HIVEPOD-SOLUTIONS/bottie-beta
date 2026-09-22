@@ -17,45 +17,106 @@ const PARTNERS: Partner[] = [
   // AI & LLM
   { name: "Anthropic", domain: "anthropic.com", category: "AI" },
   { name: "OpenAI", domain: "openai.com", category: "AI" },
-  { name: "Google Gemini", domain: "gemini.google.com", category: "AI" },
-  { name: "Qwen", domain: "alibabacloud.com", category: "AI" },
+  {
+    name: "Google Gemini", domain: "gemini.google.com", category: "AI",
+    logoUrl: "https://www.gstatic.com/lamda/images/gemini_favicon_f069958c85030456e93de685481c559f160ea06.svg",
+  },
+  {
+    name: "Qwen", domain: "qwen.ai", category: "AI",
+    logoUrl: "https://qwenlm.github.io/favicon.ico",
+  },
   // Blockchain Infra
   { name: "Alchemy", domain: "alchemy.com", category: "Infra" },
-  { name: "Helius", domain: "helius.dev", category: "Infra" },
+  {
+    name: "Helius", domain: "helius.dev", category: "Infra",
+    logoUrl: "https://www.helius.dev/favicon.ico",
+  },
   { name: "QuickNode", domain: "quicknode.com", category: "Infra" },
-  { name: "MagicBlock", domain: "magicblock.gg", category: "Infra" },
+  {
+    name: "MagicBlock", domain: "magicblock.gg", category: "Infra",
+    logoUrl: "https://www.magicblock.gg/favicon.ico",
+  },
   // Payments
   { name: "MoonPay", domain: "moonpay.com", category: "Payments" },
   { name: "Circle", domain: "circle.com", category: "Payments" },
-  { name: "Arc AppKit", domain: "developers.circle.com", category: "Payments" },
-  { name: "x402", domain: "x402.org", category: "Payments" },
-  { name: "SpherePay", domain: "spherepay.co", category: "Payments" },
-  { name: "Fuze Finance", domain: "fuze.finance", category: "Payments" },
+  {
+    name: "Arc AppKit", domain: "developers.circle.com", category: "Payments",
+    logoUrl: "https://developers.circle.com/favicon.ico",
+  },
+  {
+    name: "x402", domain: "x402.org", category: "Payments",
+    logoUrl: "https://x402.org/favicon.ico",
+  },
+  {
+    name: "Solana Pay", domain: "solanapay.com", category: "Payments",
+    logoUrl: "https://solanapay.com/src/img/branding/SolanaPay_Horizontal_white.svg",
+  },
+  {
+    name: "SpherePay", domain: "spherepay.co", category: "Payments",
+    logoUrl: "https://spherepay.co/favicon.ico",
+  },
+  {
+    name: "Fuze Finance", domain: "fuze.finance", category: "Payments",
+    logoUrl: "https://fuze.finance/favicon.ico",
+  },
   // Bills
   { name: "Bitrefill", domain: "bitrefill.com", category: "Bills" },
   // DeFi / Trading
-  { name: "Flash Trade", domain: "flash.trade", category: "DeFi" },
-  { name: "Velvet Capital", domain: "velvet.capital", category: "DeFi" },
+  {
+    name: "Flash Trade", domain: "flash.trade", category: "DeFi",
+    logoUrl: "https://flash.trade/favicon.ico",
+  },
+  {
+    name: "Velvet Capital", domain: "velvet.capital", category: "DeFi",
+    logoUrl: "https://velvet.capital/favicon.ico",
+  },
   { name: "dYdX", domain: "dydx.exchange", category: "DeFi" },
   { name: "0x Protocol", domain: "0x.org", category: "DeFi" },
-  { name: "Doma Protocol", domain: "doma.xyz", category: "DeFi" },
-  { name: "Yo Protocol", domain: "yoprotocol.io", category: "DeFi" },
+  {
+    name: "Doma Protocol", domain: "doma.xyz", category: "DeFi",
+    logoUrl: "https://doma.xyz/favicon.ico",
+  },
+  {
+    name: "Yo Protocol", domain: "yoprotocol.io", category: "DeFi",
+    logoUrl: "https://yoprotocol.io/favicon.ico",
+  },
   // RWA
-  { name: "xStocks", domain: "xstocks.com", category: "RWA" },
-  { name: "Backed", domain: "backed.fi", category: "RWA" },
-  { name: "GRAIL", domain: "grail.finance", category: "RWA" },
+  {
+    name: "xStocks", domain: "xstocks.com", category: "RWA",
+    logoUrl: "https://xstocks.com/favicon.ico",
+  },
+  {
+    name: "Backed", domain: "backed.fi", category: "RWA",
+    logoUrl: "https://backed.fi/favicon.ico",
+  },
+  {
+    name: "GRAIL", domain: "grail.finance", category: "RWA",
+    logoUrl: "https://grail.finance/favicon.ico",
+  },
   // XRP / XRPL
   { name: "XRPL", domain: "xrpl.org", category: "XRP" },
   { name: "NEAR Intents", domain: "near.org", category: "Intents" },
   // Banking
-  { name: "Credible Finance", domain: "credible.finance", category: "Banking" },
+  {
+    name: "Credible Finance", domain: "credible.finance", category: "Banking",
+    logoUrl: "https://credible.finance/favicon.ico",
+  },
   { name: "Ripple", domain: "ripple.com", category: "Banking" },
   // GPU / Compute
-  { name: "Nosana", domain: "nosana.io", category: "GPU" },
+  {
+    name: "Nosana", domain: "nosana.io", category: "GPU",
+    logoUrl: "https://nosana.io/favicon.ico",
+  },
   // Storage
-  { name: "Irys", domain: "irys.xyz", category: "Storage" },
+  {
+    name: "Irys", domain: "irys.xyz", category: "Storage",
+    logoUrl: "https://irys.xyz/favicon.ico",
+  },
   // Entertainment
-  { name: "Roaster", domain: "roaster.gg", category: "Gaming" },
+  {
+    name: "Roaster", domain: "roaster.gg", category: "Gaming",
+    logoUrl: "https://roaster.gg/favicon.ico",
+  },
   // Market Data
   { name: "CoinMarketCap", domain: "coinmarketcap.com", category: "Data" },
   // Ads
@@ -64,8 +125,19 @@ const PARTNERS: Partner[] = [
   { name: "Neon", domain: "neon.tech", category: "Database" },
   { name: "Upstash", domain: "upstash.com", category: "Database" },
   // Mobile / PWA
-  { name: "Capacitor", domain: "capacitorjs.com", category: "Mobile" },
+  {
+    name: "Capacitor", domain: "capacitorjs.com", category: "Mobile",
+    logoUrl: "https://capacitorjs.com/favicon.ico",
+  },
+  {
+    name: "Serwist", domain: "serwist.pages.dev", category: "Mobile",
+    logoUrl: "https://serwist.pages.dev/favicon.ico",
+  },
   // SDK / Protocol
+  {
+    name: "MCP", domain: "modelcontextprotocol.io", category: "SDK",
+    logoUrl: "https://modelcontextprotocol.io/favicon.ico",
+  },
   { name: "Wagmi", domain: "wagmi.sh", category: "SDK" },
   { name: "viem", domain: "viem.sh", category: "SDK" },
   // Hosting
@@ -88,17 +160,20 @@ const MARQUEE_CSS = `
   }
 `;
 
-type ImgState = "clearbit" | "favicon" | "letter";
+type ImgState = "direct" | "clearbit" | "favicon" | "letter";
 
 function PartnerChip({ partner }: { partner: Partner }) {
   const clearbitUrl = `https://logo.clearbit.com/${partner.domain}?size=64`;
   const faviconUrl = `https://www.google.com/s2/favicons?domain=${partner.domain}&sz=64`;
 
   const [imgSrc, setImgSrc] = useState<string>(partner.logoUrl ?? clearbitUrl);
-  const [state, setState] = useState<ImgState>(partner.logoUrl ? "favicon" : "clearbit");
+  const [state, setState] = useState<ImgState>(partner.logoUrl ? "direct" : "clearbit");
 
   const handleError = () => {
-    if (state === "clearbit") {
+    if (state === "direct") {
+      setImgSrc(clearbitUrl);
+      setState("clearbit");
+    } else if (state === "clearbit") {
       setImgSrc(faviconUrl);
       setState("favicon");
     } else {
