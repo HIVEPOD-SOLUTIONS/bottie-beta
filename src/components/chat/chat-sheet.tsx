@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback, type PointerEvent as ReactPointerEvent } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { showRewardedAd, isCapacitorApp } from "@/hooks/use-admob";
@@ -1283,6 +1284,13 @@ export function ChatSheet({ visible }: ChatSheetProps) {
 
   const { paidBillIds } = useDemoState();
 
+  const [appVersion, setAppVersion] = useState<string | undefined>();
+  useEffect(() => {
+    CapacitorApp.getInfo().then(info => {
+      setAppVersion(`${info.version} (${info.build})`);
+    }).catch(() => {}); // no-op on web
+  }, []);
+
   const accounts = (user?.linkedAccounts as any[]) ?? [];
   const walletAddress = user?.smartWallet?.address ?? user?.wallet?.address;
   const solanaWallet = accounts.find((a: any) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
@@ -1311,6 +1319,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
     totalBillsDueUsd: dashboardData?.totalBillsDueUsd,
     portfolioValueUsd: dashboardData?.portfolioValueUsd,
     billCount: dashboardData?.billCount,
+    appVersion,
   };
 
   const getAccessTokenRef = useRef(getAccessToken);
@@ -1324,7 +1333,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
     for (const key of [
       "walletAddress", "solanaAddress", "userName",
       "evmUsdc", "evmUsdt", "solUsdc", "solUsdt", "paidBillIds",
-      "totalBillsDueUsd", "portfolioValueUsd", "billCount",
+      "totalBillsDueUsd", "portfolioValueUsd", "billCount", "appVersion",
     ]) {
       Object.defineProperty(liveBody, key, {
         get: () => bodyRef.current[key],

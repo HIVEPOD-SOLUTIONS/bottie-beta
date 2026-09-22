@@ -17,6 +17,8 @@ interface UserContext {
   billCount?: number;
   conversationRecap?: string;
   currentDate?: string;
+  /** e.g. "1.3.0 (53)" — from Capacitor App.getInfo() on Android; absent on web */
+  appVersion?: string;
 }
 
 export function buildSystemPrompt(ctx: UserContext): string {
@@ -159,12 +161,21 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- After calling buy_bitrefill_product, output ONLY: "A payment card has been shown. Please confirm the payment." — nothing else. Do NOT say "payment initiated", do NOT ask if they want to check status, do NOT summarise the order again.`,
     `- A **"Confirm Payment"** card appears in the UI automatically — the user taps it to send USDC`,
     `- When the card result comes back with {paid: true, invoiceId}, you MUST immediately call poll_bitrefill_order — do NOT generate any text first`,
-    `- Invoice statuses: unpaid → payment_detected → payment_confirmed → pending → complete`,
+    `- Invoice statuses: unpaid → payment_detected → payment_confirmed → pending → complete. Terminal errors: failed, expired, cancelled. Special: blocked (compliance review — agent cannot resolve; tell user to contact Bitrefill support)`,
+    ``,
+    `### buy_bitrefill_product error handling`,
+    `- **PAYMENT_UNCERTAIN** ({error:"PAYMENT_UNCERTAIN"}): a balance payment may have already started — DO NOT call buy_bitrefill_product again (could double-charge). Call get_bitrefill_orders to find the pending invoice, then poll it with poll_bitrefill_order.`,
+    `- **verification_required / access_denied**: Bitrefill requires the user to complete identity verification on their website. Tell the user: "Bitrefill needs to verify your identity before this purchase can go through — please visit bitrefill.com to complete verification." Do not retry.`,
+    `- **SERVICE_UNAVAILABLE**: Bitrefill is temporarily unavailable. Safe to retry once (unlike PAYMENT_UNCERTAIN). If it fails again, ask the user to try in a few minutes.`,
+    `- **invalid_package**: the packageValue is not valid for this product. The error message lists the valid values — re-confirm the denomination with the user and retry with the correct packageValue.`,
+    `- **number_missing**: forgot to pass sendTo for a phone top-up (recipient_type="phone_number"). Ask the user for their phone number in E.164 format and retry.`,
+    `- **product_not_found / product_not_available**: product ID is wrong or the product is not available. Call get_bills again to search for the correct product.`,
+    `- **PURCHASE_LIMIT_REACHED** ({error:"PURCHASE_LIMIT_REACHED"}): the user has hit Bitrefill's guest checkout daily limit (2 per day). Do NOT retry — retrying will always fail until the limit resets. Tell the user: "You've reached the daily purchase limit for today (2 orders per day on guest checkout). Please try again tomorrow, or create a Bitrefill account at bitrefill.com for higher limits."`,
     ``,
     `### Step 5 — Confirm delivery (poll_bitrefill_order)`,
     `- The moment you receive {paid: true} from buy_bitrefill_product, call poll_bitrefill_order(invoiceId, isTopup) — NO text before the call, NO asking the user`,
-    `- If status is still pending/processing, call poll_bitrefill_order again immediately — keep retrying silently up to 20 times (~3 s apart)`,
-    `- Only speak to the user once you get status = "complete" or a terminal failure`,
+    `- If status is still pending/processing, call poll_bitrefill_order again after ~10 seconds — keep retrying silently up to 20 times (Bitrefill recommends 10–30 s between polls)`,
+    `- Only speak to the user once you get status = "complete", "blocked", or a terminal failure (failed/expired)`,
     `- **Gift cards**: when complete, redemption code is shown in chat and emailed to recipientEmail`,
     `- **Mobile top-ups**: when complete, airtime has been credited to the phone — tell the user to check their phone balance. Do NOT say a code was sent.`,
     `- **eSIMs**: show the install link instead of a code`,
@@ -1086,10 +1097,11 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- Goals are for motivation/tracking only — they don't lock funds or auto-invest`,
     ``,
     `## Digital products (Bills section)`,
-    `- get_bills: search the live product catalog — gift cards, mobile top-ups, eSIM plans (10,000+ products)`,
-    `- get_product_details: get full denominations and package_value for a product — call before buying`,
-    `- buy_bitrefill_product: purchase any product via USDC (Base or Solana) — guest checkout, code delivered to email`,
-    `- poll_bitrefill_order: poll invoice until complete, then return redemption code to show in chat`,
+    `- get_bills: search the live product catalog — gift cards, mobile top-ups, eSIM plans (10,000+ products worldwide); use country="KN" to list Bitrefill test products (slugs ending in "-syldavia") during development`,
+    `- get_product_details: get full denominations, exact package_value strings, payment_methods groups (address_based/link_only/balance), and recipient_type — always call before buy_bitrefill_product`,
+    `- buy_bitrefill_product: purchase any product via USDC (Base or Solana) or XRP — code delivered to recipientEmail; see error-handling rules in Step 4 above`,
+    `- poll_bitrefill_order: poll invoice every ~10 s until complete/blocked/failed/expired — returns redemption code, eSIM install link, or top-up confirmation`,
+    `- get_bitrefill_orders: order history — use to look up a lost redemption code, check a pending invoice, or recover an invoiceId after PAYMENT_UNCERTAIN`,
     ``,
     `## AI model & service errors`,
     `Bluvfi routes chat through a multi-provider, multi-model fallback chain:`,
@@ -1191,6 +1203,10 @@ export function buildSystemPrompt(ctx: UserContext): string {
 
   if (ctx.currentDate) {
     lines.push(`- Today's date: ${ctx.currentDate}`);
+  }
+
+  if (ctx.appVersion) {
+    lines.push(`- App version: ${ctx.appVersion} (Android)`);
   }
 
   if (ctx.userName) {

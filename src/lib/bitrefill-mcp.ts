@@ -105,7 +105,7 @@ async function getBearerToken(): Promise<string> {
     grant_type: "client_credentials",
     client_id: clientId,
     scope: "mcp",
-    resource: "https://api.bitrefill.com/",
+    resource: "https://api.bitrefill.com/mcp",
   });
 
   const res = await fetch(BITREFILL_TOKEN_URL, {
@@ -197,6 +197,8 @@ export function friendlyBitrefillError(raw: string): string {
     return "You've reached the daily purchase limit (2 orders per day). Try again tomorrow.";
   if (m.includes("rate_limit_reached") || m.includes("rate_limit") || m.includes("quota"))
     return "Too many requests — please wait a moment and try again.";
+  if (m.includes("payment_uncertain"))
+    return "PAYMENT_UNCERTAIN: a balance payment may have started. Do not retry — poll the invoice with get-invoice-by-id instead.";
   if (m.includes("streamable http error") || m.includes("bad gateway") || m.includes("<!doctype html"))
     return "Bitrefill is temporarily unavailable. Please try again in a few minutes.";
   return raw;
@@ -819,7 +821,7 @@ export async function mcpSearchProducts(opts: {
   };
   if (opts.query)   args.query   = opts.query;
   if (opts.country) args.country = opts.country;
-  if (opts.limit)   args.limit   = opts.limit;
+  if (opts.limit)   args.per_page = opts.limit;
 
   const raw = await callTool("search-products", args);
   return normalizeProducts(raw);

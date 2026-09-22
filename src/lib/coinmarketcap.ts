@@ -146,7 +146,7 @@ let cache: { snapshot: Omit<PriceSnapshot, "stale"> } | null = null;
 let inflight: Promise<Omit<PriceSnapshot, "stale">> | null = null;
 
 async function fetchTickerPrices(): Promise<Omit<PriceSnapshot, "stale">> {
-  const body = await cmcRequest("/v3/cryptocurrency/quotes/latest", {
+  const body = await cmcRequest("/v1/cryptocurrency/quotes/latest", {
     id: TRACKED_COINS.map((c) => c.id).join(","),
     convert: "USD",
   });

@@ -131,6 +131,7 @@ export async function POST(req: Request) {
     totalBillsDueUsd,
     portfolioValueUsd,
     billCount,
+    appVersion,
   } = body as {
     messages: UIMessage[];
     walletAddress?: string;
@@ -145,6 +146,7 @@ export async function POST(req: Request) {
     totalBillsDueUsd?: number;
     portfolioValueUsd?: number;
     billCount?: number;
+    appVersion?: string;
   };
 
   if (!Array.isArray(messages)) {
@@ -209,6 +211,7 @@ export async function POST(req: Request) {
     billCount,
     conversationRecap: recap || undefined,
     currentDate: new Date().toISOString().slice(0, 10),
+    appVersion: typeof appVersion === "string" ? appVersion : undefined,
   });
 
   // ── Cross-provider fallback ────────────────────────────────────────────
