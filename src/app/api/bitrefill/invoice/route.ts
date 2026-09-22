@@ -158,12 +158,13 @@ export async function POST(req: NextRequest) {
     const raw = err instanceof Error ? err.message : "Invoice creation failed";
     console.error("[/api/bitrefill/invoice POST]", raw);
 
-    // Strip the MCP transport wrapper so callers get the real Bitrefill message.
-    // "Streamable HTTP error: Error POSTing to endpoint: {…json…}"
+    // Extract the real Bitrefill message from the MCP transport wrapper or raw JSON.
+    // MCP may deliver it as: "Streamable HTTP error: Error POSTing to endpoint: {…json…}"
+    // OR as a bare JSON string when the error comes from the isError MCP response.
     // Bitrefill error JSON uses: { error, code, details: { status } } — NOT message/status at top level.
     let message = raw;
     const jsonStart = raw.indexOf("{");
-    if (raw.includes("Streamable HTTP") && jsonStart !== -1) {
+    if (jsonStart !== -1) {
       try {
         const inner = JSON.parse(raw.slice(jsonStart)) as {
           message?: string;

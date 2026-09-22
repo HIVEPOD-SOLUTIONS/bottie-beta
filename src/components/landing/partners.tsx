@@ -7,14 +7,17 @@ interface Partner {
   name: string;
   domain: string;
   category: string;
+  /** Direct logo URL — skips Clearbit entirely when set. */
+  logoUrl?: string;
 }
 
 const PARTNERS: Partner[] = [
   // Auth
   { name: "Privy", domain: "privy.io", category: "Auth" },
   // AI & LLM
+  { name: "Anthropic", domain: "anthropic.com", category: "AI" },
   { name: "OpenAI", domain: "openai.com", category: "AI" },
-  { name: "Google Gemini", domain: "google.com", category: "AI" },
+  { name: "Google Gemini", domain: "gemini.google.com", category: "AI" },
   { name: "Qwen", domain: "alibabacloud.com", category: "AI" },
   // Blockchain Infra
   { name: "Alchemy", domain: "alchemy.com", category: "Infra" },
@@ -22,8 +25,9 @@ const PARTNERS: Partner[] = [
   { name: "QuickNode", domain: "quicknode.com", category: "Infra" },
   { name: "MagicBlock", domain: "magicblock.gg", category: "Infra" },
   // Payments
+  { name: "MoonPay", domain: "moonpay.com", category: "Payments" },
   { name: "Circle", domain: "circle.com", category: "Payments" },
-  { name: "Arc AppKit", domain: "circle.com", category: "Payments" },
+  { name: "Arc AppKit", domain: "developers.circle.com", category: "Payments" },
   { name: "x402", domain: "x402.org", category: "Payments" },
   { name: "SpherePay", domain: "spherepay.co", category: "Payments" },
   { name: "Fuze Finance", domain: "fuze.finance", category: "Payments" },
@@ -32,12 +36,12 @@ const PARTNERS: Partner[] = [
   // DeFi / Trading
   { name: "Flash Trade", domain: "flash.trade", category: "DeFi" },
   { name: "Velvet Capital", domain: "velvet.capital", category: "DeFi" },
-  { name: "dYdX", domain: "dydx.trade", category: "DeFi" },
+  { name: "dYdX", domain: "dydx.exchange", category: "DeFi" },
   { name: "0x Protocol", domain: "0x.org", category: "DeFi" },
   { name: "Doma Protocol", domain: "doma.xyz", category: "DeFi" },
   { name: "Yo Protocol", domain: "yoprotocol.io", category: "DeFi" },
   // RWA
-  { name: "xStocks", domain: "xstocks.fi", category: "RWA" },
+  { name: "xStocks", domain: "xstocks.com", category: "RWA" },
   { name: "Backed", domain: "backed.fi", category: "RWA" },
   { name: "GRAIL", domain: "grail.finance", category: "RWA" },
   // XRP / XRPL
@@ -48,6 +52,8 @@ const PARTNERS: Partner[] = [
   { name: "Ripple", domain: "ripple.com", category: "Banking" },
   // GPU / Compute
   { name: "Nosana", domain: "nosana.io", category: "GPU" },
+  // Storage
+  { name: "Irys", domain: "irys.xyz", category: "Storage" },
   // Entertainment
   { name: "Roaster", domain: "roaster.gg", category: "Gaming" },
   // Market Data
@@ -56,6 +62,7 @@ const PARTNERS: Partner[] = [
   { name: "AdMob", domain: "admob.google.com", category: "Ads" },
   // Database
   { name: "Neon", domain: "neon.tech", category: "Database" },
+  { name: "Upstash", domain: "upstash.com", category: "Database" },
   // Mobile / PWA
   { name: "Capacitor", domain: "capacitorjs.com", category: "Mobile" },
   // SDK / Protocol
@@ -64,7 +71,6 @@ const PARTNERS: Partner[] = [
   // Hosting
   { name: "AWS Amplify", domain: "aws.amazon.com", category: "Infra" },
   { name: "Vercel", domain: "vercel.com", category: "Infra" },
-  { name: "Upstash", domain: "upstash.com", category: "Database" },
 ];
 
 const MID = Math.ceil(PARTNERS.length / 2);
@@ -82,29 +88,44 @@ const MARQUEE_CSS = `
   }
 `;
 
+type ImgState = "clearbit" | "favicon" | "letter";
+
 function PartnerChip({ partner }: { partner: Partner }) {
-  const [imgOk, setImgOk] = useState(true);
+  const clearbitUrl = `https://logo.clearbit.com/${partner.domain}?size=64`;
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${partner.domain}&sz=64`;
+
+  const [imgSrc, setImgSrc] = useState<string>(partner.logoUrl ?? clearbitUrl);
+  const [state, setState] = useState<ImgState>(partner.logoUrl ? "favicon" : "clearbit");
+
+  const handleError = () => {
+    if (state === "clearbit") {
+      setImgSrc(faviconUrl);
+      setState("favicon");
+    } else {
+      setState("letter");
+    }
+  };
 
   return (
     <div
       className="flex flex-none items-center gap-2.5 rounded-xl border border-border/40 bg-cream-dark/70 px-4 py-2.5 backdrop-blur-sm"
       style={{ minWidth: 130 }}
     >
-      {imgOk ? (
-        <img
-          src={`https://logo.clearbit.com/${partner.domain}?size=64`}
-          alt=""
-          width={28}
-          height={28}
-          className="h-7 w-7 flex-none rounded-md object-contain"
-          onError={() => setImgOk(false)}
-        />
-      ) : (
+      {state === "letter" ? (
         <div className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-sage/10">
           <span className="text-[11px] font-bold text-sage">
             {partner.name.slice(0, 2).toUpperCase()}
           </span>
         </div>
+      ) : (
+        <img
+          src={imgSrc}
+          alt=""
+          width={28}
+          height={28}
+          className="h-7 w-7 flex-none rounded-md object-contain"
+          onError={handleError}
+        />
       )}
       <div className="min-w-0">
         <p className="truncate text-xs font-medium text-ink/80 leading-tight">{partner.name}</p>
@@ -178,7 +199,7 @@ export function PartnersSection() {
           className="mt-5 font-display text-3xl leading-snug text-ink sm:text-4xl"
         >
           Integrated with{" "}
-          <span className="text-sage">40+ trusted partners</span> — from AI
+          <span className="text-sage">{PARTNERS.length}+ trusted partners</span> — from AI
           models to blockchain infrastructure and payments.
         </motion.p>
       </div>

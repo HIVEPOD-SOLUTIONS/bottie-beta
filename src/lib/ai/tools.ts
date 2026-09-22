@@ -384,11 +384,30 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
                     : `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"). Code will be emailed to ${recipientEmail} after confirmation.`)
                 : `Deposit address shown to user, but Bitrefill did not provide an exact amount for this payment method. Tell the user to open ${paymentLink ?? "the payment link"} to see the exact amount to send (Bitrefill's own checkout page), then send that amount to the address already shown. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${isTopup ? ", isTopup=true" : ""}).`
               : isTopup
-                ? `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true) — no text before the call. Keep retrying every ~3 s up to 20 times until complete/failed/expired. Airtime credited directly to phone; receipt to ${recipientEmail}.`
-                : `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}") — no text before the call. Keep retrying every ~3 s up to 20 times until complete/failed/expired. Code emailed to ${recipientEmail} on completion.`,
+                ? `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true) — no text before the call. Keep retrying every ~10 s up to 20 times until complete/failed/expired. Airtime credited directly to phone; receipt to ${recipientEmail}.`
+                : `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}") — no text before the call. Keep retrying every ~10 s up to 20 times until complete/failed/expired. Code emailed to ${recipientEmail} on completion.`,
           };
         } catch (err: unknown) {
           const raw = err instanceof Error ? err.message : "Purchase failed";
+          // PAYMENT_UNCERTAIN means a balance-debit may have already started —
+          // the docs explicitly say do NOT retry buy-products. Return a special
+          // marker so the agent knows to poll the invoice instead.
+          if (raw.toLowerCase().includes("payment_uncertain")) {
+            return {
+              error:   "PAYMENT_UNCERTAIN",
+              tip:     "A balance debit may have started. Do NOT call buy_bitrefill_product again. Call poll_bitrefill_order with this invoice to check the status.",
+            };
+          }
+          if (
+            raw.toLowerCase().includes("purchase_limit_reached") ||
+            raw.toLowerCase().includes("max number of daily purchases") ||
+            raw.toLowerCase().includes("daily purchase limit")
+          ) {
+            return {
+              error: "PURCHASE_LIMIT_REACHED",
+              tip:   "The user has hit Bitrefill's guest checkout daily limit (2 per day). Do NOT retry — it will always fail until tomorrow. Tell the user: 'You've reached the daily purchase limit for today (2 orders per day on guest checkout). Please try again tomorrow, or create a Bitrefill account at bitrefill.com for higher limits.'",
+            };
+          }
           return { error: friendlyBitrefillError(raw) };
         }
       },
@@ -543,6 +562,14 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             };
           }
 
+          if (invoice.status === "blocked") {
+            return {
+              status:    "blocked",
+              invoiceId,
+              error:     "This purchase is under a compliance review by Bitrefill and cannot be completed automatically. Tell the user their order is on hold for a compliance check — they need to visit the Bitrefill website or contact Bitrefill support to resolve it.",
+            };
+          }
+
           if (invoice.status === "failed" || invoice.status === "expired") {
             // Update both tables to failed/expired
             if (userId) {
@@ -565,7 +592,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             message:   invoice.status === "payment_detected"
               ? "Payment detected by Bitrefill — confirming on-chain…"
               : "Payment received — Bitrefill is processing the order…",
-            tip:       "Payment was already sent by the client card. Call poll_bitrefill_order again in ~3 seconds (do NOT ask the user anything — keep retrying up to 20 times until status is complete/failed/expired).",
+            tip:       "Payment was already sent by the client card. Call poll_bitrefill_order again in ~10 seconds (do NOT ask the user anything — keep retrying up to 20 times until status is complete/failed/expired/blocked).",
           };
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Status check failed";
