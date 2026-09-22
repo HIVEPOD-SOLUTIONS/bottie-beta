@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { usePrivy, useWallets, useFundWallet } from "@privy-io/react-auth";
+import { usePrivy, useWallets, useFiatOnramp } from "@privy-io/react-auth";
 import { useFundWallet as useFundSolanaWallet } from "@privy-io/react-auth/solana";
 import { base, mainnet, arbitrum, optimism, polygon, avalanche } from "viem/chains";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
@@ -266,7 +266,7 @@ const MIN_FUND_AMOUNT = 11;
 
 function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaAddress?: string }) {
   const { getAccessToken } = usePrivy();
-  const { fundWallet: fundEvmWallet } = useFundWallet();
+  const { fund: fiatOnramp } = useFiatOnramp();
   const { fundWallet: fundSolanaWallet } = useFundSolanaWallet();
   const [network, setNetwork] = useState<BuyNetwork>(base.id);
   const [amount, setAmount] = useState(String(MIN_FUND_AMOUNT));
@@ -307,22 +307,21 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
       }
 
       const selected = BUY_EVM_NETWORKS.find((n) => n.chain.id === network)!;
-      const result = await fundEvmWallet({
-        address: agentAddress,
-        options: { chain: selected.chain, asset: "USDC", amount: String(amtNum) },
+
+      // useFiatOnramp passes defaultAmount as MoonPay's quoteCurrencyAmount (the
+      // crypto amount to receive). useFundWallet's `amount` option was silently
+      // ignored on Android, causing MoonPay to default to 0.1 USDC.
+      const result = await fiatOnramp({
+        source: {},
+        destination: { asset: "USDC", chain: selected.caip2, address: agentAddress },
+        defaultAmount: String(amtNum),
       });
 
-      if (result.status !== "completed") {
-        // User closed the modal before finishing — not an error, just reset.
-        setTxState({ status: "idle" });
-        return;
-      }
-
-      // Funds can take a few minutes to arrive even after the modal reports
-      // "completed", so we don't claim on-chain confirmation here.
+      // FundResult only carries 'submitted' | 'confirmed' — no cancellation
+      // status; cancellation throws, caught below.
       setTxState({
         status: "success",
-        message: `Funded ${selected.label}${result.amount ? ` — ${result.amount} ${result.assetType ?? "USDC"}` : ""}. Funds may take a few minutes to arrive.`,
+        message: `Funded ${selected.label} — ${amtNum} USDC. Funds may take a few minutes to arrive.`,
       });
 
       authFetch("/api/payments", {
@@ -330,11 +329,11 @@ function BuyTab({ agentAddress, solanaAddress }: { agentAddress: string; solanaA
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "deposit",
-          referenceId: result.transactionHash ?? null,
-          description: `Card funding: ${result.amount ?? amtNum} ${result.assetType ?? "USDC"} → ${selected.label} wallet`,
-          amountUsdc: result.amount ?? String(amtNum),
-          status: "completed",
-          txHash: result.transactionHash ?? null,
+          referenceId: null,
+          description: `Card funding: ${amtNum} USDC → ${selected.label} wallet`,
+          amountUsdc: String(amtNum),
+          status: result.status,
+          txHash: null,
           chain: "evm",
         }),
       }, getAccessToken).catch(() => {});
