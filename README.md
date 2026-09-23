@@ -109,6 +109,49 @@ await arcKit.bridge({
 | `nanopay_deposit` | Deposit USDC into Gateway for gas-free spending |
 | `nanopay_pay` | Pay any x402-protected URL using Gateway |
 | `nanopay_withdraw` | Withdraw unused Gateway balance back to wallet |
+| `get_crypto_prices` | Live price + 1h/24h/7d/30d % change + market cap for BTC/ETH/SOL/XRP, or any symbols the user names |
+| `get_crypto_market_overview` | Global total market cap, BTC/ETH dominance, and top coins by market cap |
+| `get_top_movers` | Gainers or losers sorted by 1h/24h/7d % change, with a market-cap floor so illiquid coins don't dominate the list |
+| `get_trending_crypto` | Trending coins (CMC Startup-tier+ only; on a lower plan it returns a clear message pointing at `get_top_movers` instead of a raw 403) |
+| `convert_crypto` | Converts an amount between a crypto and one or more fiat/crypto currencies using CMC's own conversion rates |
+
+---
+
+## CoinMarketCap API integration
+
+*Submitted to [Build with CMC: API Hackathon](https://dorahacks.io/hackathon/coinmarketcap-api-202609/detail) — track: **AI Agents and Automation**.*
+
+Bluvfi already has an AI chat agent with wallet, payment, and history tools (above). This integration gives that agent — and the dashboard — live market data instead of guessing or working from stale training data: a price ticker on the dashboard, and five agent tools so users can ask the AI things like "what's XRP doing today", "what are the top gainers right now", or "what's 250 XRP worth in NGN".
+
+### Endpoints used
+
+| Endpoint | Used for | Files |
+|----------|----------|-------|
+| `GET /v3/cryptocurrency/quotes/latest` | Dashboard price ticker (BTC/ETH/SOL/XRP) + `get_crypto_prices` tool | [`src/lib/coinmarketcap.ts`](src/lib/coinmarketcap.ts), [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+| `GET /v3/cryptocurrency/listings/latest` | `get_top_movers` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+| `GET /v1/global-metrics/quotes/latest` | `get_crypto_market_overview` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+| `GET /v1/cryptocurrency/trending/latest` | `get_trending_crypto` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+| `GET /v2/tools/price-conversion` | `convert_crypto` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+
+### Architecture
+
+- [`src/lib/coinmarketcap.ts`](src/lib/coinmarketcap.ts) — the only place that talks to CMC. Authenticates with the `X-CMC_PRO_API_KEY` header (never a query param), wraps every call with an 8s timeout, and normalizes errors — including the "200 OK with an error body" case CMC returns for some failures (see feedback below). A server-side cache (15 min default TTL, configurable via `COINMARKETCAP_CACHE_TTL_SECONDS`) with in-flight de-duplication means the dashboard ticker's 30s poll and repeated AI tool calls don't multiply API credit usage; errors are never cached, so a bad response doesn't get stuck.
+- [`src/lib/coinmarketcap-parse.ts`](src/lib/coinmarketcap-parse.ts) — pure parsers, tested against fixtures taken verbatim from CMC's own docs examples, that tolerate the shape differences between endpoint versions (see feedback below) so a docs update or an undocumented edge case fails closed (empty result) instead of throwing.
+- [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) — the five Vercel AI SDK tools listed in the table above, wired into the agent in [`src/lib/ai/tools.ts`](src/lib/ai/tools.ts). Every result carries `source: "CoinMarketCap"` and an `asOf` timestamp so the agent (per its [system prompt](src/lib/ai/system-prompt.ts)) always cites where a number came from instead of presenting it as its own knowledge.
+- [`src/app/api/prices/route.ts`](src/app/api/prices/route.ts) — authenticated, rate-limited (60/min, see [`src/proxy.ts`](src/proxy.ts)) route the dashboard polls.
+- [`src/hooks/use-crypto-prices.ts`](src/hooks/use-crypto-prices.ts) + [`src/components/dashboard/price-ticker.tsx`](src/components/dashboard/price-ticker.tsx) — the live ticker shown on the dashboard ([`src/app/app/page.tsx`](src/app/app/page.tsx)), polling every 30s and marking itself stale rather than blank if a poll fails.
+
+### What the API made possible, and where it got in the way
+
+The API itself is straightforward to build against — clear docs, one auth header, predictable pagination. What we ran into integrating it into a typed, tested codebase:
+
+- **`quote` is shaped differently across API versions.** `/v3/cryptocurrency/quotes/latest` and `/v3/cryptocurrency/listings/latest` return `quote` as an **array** of `{ symbol: "USD", price, ... }`; `/v1/cryptocurrency/trending/latest` and `/v2/tools/price-conversion` return it as an **object keyed by currency** (`{ USD: { price, ... } }`). Both are documented, but nothing on the endpoint reference calls out that the shape itself differs between v1/v2 and v3 — we only caught it by writing parser tests against real examples from each doc page.
+- **`/v3/cryptocurrency/quotes/latest`'s own docs example renders the response as a bare top-level array**, not wrapped in `{ data: [...] }` the way every other endpoint's example (and v3's own `listings/latest`) is shown. A parser written against the general "everything is `{ data, status }`" pattern silently drops this endpoint's response.
+- **`error_code` changes type between API versions** — a string (`"0"`, `"500"`) on v3 endpoints, an integer (`0`, `1006`) on v1/v2. A client that checks `status.error_code === 0` to confirm success works for v1/v2 and silently misreads every v3 response.
+- **A request to an unrecognized path still returns HTTP 200** with an error status body, rather than a 404 — so any code that treats `res.ok` as success needs to also inspect `status.error_code` on every call, not just the ones that came back non-200.
+- **Plan-gating and rate-limiting look identical to a generic error.** `/v1/cryptocurrency/trending/latest` on a plan that doesn't include it returns the same `{ status: { error_code, error_message } }` shape as a malformed request — telling "your plan doesn't support this" apart from "you sent bad params" means reading `error_message` text, since there's no distinct machine-readable code for plan-gating.
+
+None of this is a blocker — CMC's data is exactly as advertised once you build around the above — but a "response shape by endpoint version" note on the API reference page would have saved the trial-and-error.
 
 ---
 
@@ -397,14 +440,18 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Hackathon
+## Hackathons
 
-Built for **Lepton by Canteen** — Circle / Arc hackathon.
+### Lepton by Canteen — Circle / Arc hackathon
 
 **Circle tools used:**
 - `@circle-fin/app-kit` — Arc AppKit Send + Bridge (fund wallet sheet) + gasless bill/investment payments
 - `@circle-fin/adapter-viem-v2` — bridges Privy embedded wallet EIP-1193 provider into Arc AppKit
 - `@circle-fin/x402-batching` — Circle Gateway x402 nanopayments (buyer client + facilitator/seller)
+
+### Build with CMC: API Hackathon — CoinMarketCap
+
+Track: **AI Agents and Automation**. See [CoinMarketCap API integration](#coinmarketcap-api-integration) above for endpoints used, architecture, and API feedback.
 
 ---
 
