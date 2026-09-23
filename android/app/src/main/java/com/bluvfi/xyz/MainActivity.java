@@ -1,27 +1,26 @@
 package com.bluvfi.xyz;
 
+import android.os.Bundle;
 import android.webkit.PermissionRequest;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
 
 public class MainActivity extends BridgeActivity {
     @Override
-    public void onStart() {
-        super.onStart();
-        // Override WebView permission requests to ensure audio capture works.
-        // Capacitor's BridgeWebChromeClient may not properly forward the Android
-        // OS-level RECORD_AUDIO grant to the WebView context on all devices/versions.
-        // Android OS still enforces RECORD_AUDIO independently, so granting all
-        // WebView permission requests here is safe.
-        try {
-            getBridge().getWebView().setWebChromeClient(
-                new BridgeWebChromeClient(getBridge()) {
-                    @Override
-                    public void onPermissionRequest(final PermissionRequest request) {
-                        request.grant(request.getResources());
-                    }
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // Safety net: directly grant WebView audio/video capture requests.
+        // Capacitor's default handler also requires MODIFY_AUDIO_SETTINGS in the
+        // manifest; this override skips that launcher path entirely.
+        // Registered here (in onCreate) so registerForActivityResult lifecycle
+        // constraints are satisfied.
+        getBridge().getWebView().setWebChromeClient(
+            new BridgeWebChromeClient(getBridge()) {
+                @Override
+                public void onPermissionRequest(final PermissionRequest request) {
+                    request.grant(request.getResources());
                 }
-            );
-        } catch (Exception ignored) {}
+            }
+        );
     }
 }
