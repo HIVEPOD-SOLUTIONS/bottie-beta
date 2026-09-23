@@ -95,9 +95,18 @@ export function useVoiceRecorder() {
     }
 
     // Pre-check permission state so we surface a clear "denied" error instead
-    // of letting getUserMedia throw a generic NotAllowedError on Android when
-    // the user previously tapped "Deny" with "Don't ask again".
-    if (navigator.permissions) {
+    // of letting getUserMedia throw a generic NotAllowedError on the web when
+    // the user previously tapped "Block".
+    // Skip this check on Capacitor: the WebView's internal permission state is
+    // separate from Android's OS-level permission and can incorrectly report
+    // "denied" even when RECORD_AUDIO is granted in Android Settings.
+    const isCapacitorWebView =
+      typeof window !== "undefined" &&
+      (window.location.protocol === "capacitor:" ||
+        (window.location.hostname === "localhost" &&
+          (window as { Capacitor?: unknown }).Capacitor != null));
+
+    if (!isCapacitorWebView && navigator.permissions) {
       try {
         const perm = await navigator.permissions.query({ name: "microphone" as PermissionName });
         if (perm.state === "denied") {
@@ -105,8 +114,8 @@ export function useVoiceRecorder() {
           return;
         }
       } catch {
-        // navigator.permissions.query may throw on some WebViews — ignore and
-        // let getUserMedia surface the real error below.
+        // navigator.permissions.query may throw — ignore and let getUserMedia
+        // surface the real error below.
       }
     }
 
