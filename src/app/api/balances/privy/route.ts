@@ -31,6 +31,16 @@ const EVM_CHAINS: Record<string, { usdtContract: string }> = {
   avalanche: { usdtContract: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7" },
 };
 
+// ── Solana SPL mint addresses ─────────────────────────────────────────────────
+// Privy's named-asset shortcut (`asset=usdt&chain=solana`) is rejected outright
+// — confirmed live against the API: {"error":"usdt asset is not supported for
+// solana wallets"}. Privy has no canonical "usdt" mapping for Solana the way it
+// does for EVM chains. USDT balances DO work on Solana through this same
+// endpoint, just via the `token=<chain>:<mint address>` parameter instead of
+// the named `asset` shortcut (also confirmed live, both mints in one request).
+const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOLANA_USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function makeAuthHeader(appId: string, appSecret: string) {
   return `Basic ${Buffer.from(`${appId}:${appSecret}`).toString("base64")}`;
@@ -71,12 +81,17 @@ function parseEntryAmount(entry: PrivyBalanceEntry, label: string) {
 function parseEntries(
   data: PrivyBalanceEntry[],
   usdtContract?: string,
+  usdcContract?: string,
 ): { usdc: number; usdt: number } {
   let usdc = 0;
   let usdt = 0;
   for (const entry of data) {
     const label  = (entry.asset ?? entry.token ?? "").toLowerCase();
-    if (label === "usdc" || label.includes("usdc")) {
+    if (
+      label === "usdc" ||
+      label.includes("usdc") ||
+      (usdcContract && label.includes(usdcContract.toLowerCase()))
+    ) {
       usdc += parseEntryAmount(entry, "usdc");
     } else if (
       label === "usdt" ||
@@ -111,16 +126,22 @@ async function fetchEvmChain(
   return parseEntries(json?.balances ?? json?.data ?? [], usdtContract);
 }
 
-// Fetch Solana USDC + USDT from Privy
+// Fetch Solana USDC + USDT from Privy via the `token=<chain>:<mint>` param,
+// NOT the named `asset` shortcut. Privy has no canonical "usdt" mapping for
+// Solana under `asset` — confirmed live against the API: requesting
+// `asset=usdc&asset=usdt&chain=solana` fails the ENTIRE call with
+// {"error":"usdt asset is not supported for solana wallets"}, silently
+// zeroing out the (valid) USDC balance too. Querying both SPL mints directly
+// via `token=` works for both in one request (also confirmed live) — `token`
+// cannot be mixed with `asset`/`chain`/`include_currency` in the same call.
 async function fetchSolanaWallet(
   walletId: string,
   authHeader: string,
   appId: string,
 ): Promise<{ usdc: number; usdt: number }> {
   const params = new URLSearchParams();
-  params.append("asset", "usdc");
-  params.append("asset", "usdt");
-  params.append("chain", "solana");
+  params.append("token", `solana:${SOLANA_USDC_MINT}`);
+  params.append("token", `solana:${SOLANA_USDT_MINT}`);
 
   const res = await fetch(
     `${PRIVY_API}/wallets/${encodeURIComponent(walletId)}/balance?${params}`,
@@ -128,7 +149,9 @@ async function fetchSolanaWallet(
   );
   if (!res.ok) throw new Error(`Privy Solana balance fetch failed: ${res.status}`);
   const json = await res.json();
-  return parseEntries(json?.balances ?? json?.data ?? []);
+  // Token-by-mint responses key `asset` as the raw mint address rather than
+  // "usdc"/"usdt", so match by mint address instead of the named shortcuts.
+  return parseEntries(json?.balances ?? json?.data ?? [], SOLANA_USDT_MINT, SOLANA_USDC_MINT);
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────

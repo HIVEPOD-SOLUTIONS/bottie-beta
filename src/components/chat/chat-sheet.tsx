@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback, type PointerEvent as ReactPointerEvent } from "react";
-import { App as CapacitorApp } from "@capacitor/app";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { showRewardedAd, isCapacitorApp } from "@/hooks/use-admob";
@@ -1286,9 +1285,19 @@ export function ChatSheet({ visible }: ChatSheetProps) {
 
   const [appVersion, setAppVersion] = useState<string | undefined>();
   useEffect(() => {
-    CapacitorApp.getInfo().then(info => {
-      setAppVersion(`${info.version} (${info.build})`);
-    }).catch(() => {}); // no-op on web
+    // Dynamic import, guarded — @capacitor/app pulls in @capacitor/core, whose
+    // web runtime sets `window.Capacitor` as a side effect of merely loading,
+    // in ANY browser, not just the native app. A static top-level import here
+    // once caused the plain web build to misdetect itself as the Capacitor
+    // app (see isCapacitorApp in use-admob.ts) and show the mobile onboarding
+    // screen on the website. Every other Capacitor plugin use in this
+    // codebase follows this same lazy, guarded pattern for that reason.
+    if (!isCapacitorApp()) return;
+    import("@capacitor/app").then(({ App }) => {
+      App.getInfo().then(info => {
+        setAppVersion(`${info.version} (${info.build})`);
+      }).catch(() => {});
+    }).catch(() => {});
   }, []);
 
   const accounts = (user?.linkedAccounts as any[]) ?? [];
