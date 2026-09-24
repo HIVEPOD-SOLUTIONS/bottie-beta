@@ -51,6 +51,18 @@ const nextConfig: NextConfig = {
 
   // Security headers applied to every response (belt-and-suspenders alongside middleware).
   // These cover static files that the middleware matcher intentionally skips.
+  async redirects() {
+    return [
+      // trailingSlash:true (Capacitor build) causes /api/chat/ etc. to 404
+      // on the production server. Strip trailing slashes from all API paths.
+      {
+        source: "/api/:path*/",
+        destination: "/api/:path*",
+        permanent: false,
+      },
+    ];
+  },
+
   async headers() {
     return [
       {
