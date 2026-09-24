@@ -5,6 +5,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useChatSheet } from "@/contexts/chat-context";
 import { useDemoState } from "@/contexts/demo-state-context";
 import { BillsScreen } from "@/components/dashboard/bills-screen";
+import { InvestmentsScreen } from "@/components/dashboard/investments-screen";
 import { PaymentsScreen } from "@/components/dashboard/payments-screen";
 import { PaymentsProvider, usePaymentsContext } from "@/contexts/payments-context";
 
@@ -291,7 +292,7 @@ function DashboardInner() {
       {/* Content */}
       <div className="px-5 py-4">
         {activeTab === "bills"       && <BillsScreen />}
-        {activeTab === "investments" && <ComingSoon icon="📈" title="Invest" description="Stock, ETF & pre-IPO investing is on its way. You'll be able to build your portfolio right here." />}
+        {activeTab === "investments" && <InvestmentsScreen />}
         {activeTab === "banking"     && <ComingSoon icon="🏦" title="Banking" description="Onramp, offramp, payouts & stablecoin banking are coming soon. Global fiat ↔ crypto rails, all in one place." />}
         {activeTab === "payments"    && <PaymentsScreen />}
       </div>

@@ -3,14 +3,7 @@
 import { useEffect, useState } from "react";
 import { LandingStack } from "@/components/landing/landing-stack";
 import { OnboardingScreen } from "@/components/onboarding/onboarding-screen";
-
-function isCapacitorApp() {
-  if (typeof window === "undefined") return false;
-  return (
-    !!(window as unknown as { Capacitor?: unknown }).Capacitor ||
-    window.location.protocol === "capacitor:"
-  );
-}
+import { isCapacitorApp } from "@/hooks/use-admob";
 
 export default function LandingPage() {
   const [isMobile, setIsMobile] = useState(false);

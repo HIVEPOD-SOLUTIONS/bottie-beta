@@ -29,7 +29,7 @@
     "@google/genai": "^2.17.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@neondatabase/serverless": "^1.0.2",
-    "@privy-io/react-auth": "^3.17.0",
+    "@privy-io/react-auth": "3.28.0",
     "@privy-io/server-auth": "^1.32.5",
     "@privy-io/wagmi": "^4.0.2",
     "@serwist/next": "^9.5.6",
@@ -72,10 +72,16 @@
   },
   "overrides": {
     "wagmi": "~2.19.5",
-    "@solana/pay-kit": {
-      "@solana-program/token": "^0.15.0",
-      "@solana-program/compute-budget": "^0.17.0",
-      "@solana-program/token-2022": "^0.13.0"
+    "@solana-program/token": "^0.15.0",
+    "@solana-program/compute-budget": "^0.17.0",
+    "@solana-program/token-2022": "^0.13.0",
+    "x402": {
+      "@solana-program/token": "^0.9.0",
+      "@solana-program/compute-budget": "^0.11.0",
+      "@solana-program/token-2022": "^0.6.1"
+    },
+    "@coinbase/cdp-sdk": {
+      "@solana-program/token": "^0.9.0"
     },
     "viem": "^2.47.1"
   },

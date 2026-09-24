@@ -7,6 +7,7 @@ import { WagmiProvider } from "@privy-io/wagmi";
 import { useState } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
 import { privyConfig } from "@/lib/privy";
+import { isCapacitorApp } from "@/hooks/use-admob";
 
 // After Google OAuth, Privy redirects here.
 // - Capacitor: Android App Links intercepts this HTTPS URL and opens the app.
@@ -23,8 +24,13 @@ const CAPACITOR_OAUTH_REDIRECT_URL = "https://www.bluvfi.xyz";
 
 function getOAuthRedirectUrl(): string | undefined {
   if (typeof window === "undefined") return undefined;
-  const isCapacitor = !!(window as unknown as { Capacitor?: unknown }).Capacitor;
-  if (isCapacitor) return CAPACITOR_OAUTH_REDIRECT_URL;
+  // isCapacitorApp() checks Capacitor.isNativePlatform(), not just whether
+  // `window.Capacitor` exists — @capacitor/core's web runtime defines that
+  // global as a side effect of merely loading in ANY browser, so a plain
+  // truthy check misfires as soon as some other component's Capacitor import
+  // loads on the website (this exact bug once sent web login through the
+  // native app's OAuth redirect URL — see isCapacitorApp in use-admob.ts).
+  if (isCapacitorApp()) return CAPACITOR_OAUTH_REDIRECT_URL;
   // Web: use origin only (e.g. "https://www.bluvfi.xyz") — clean, no stale params.
   // Both bluvfi.xyz and www.bluvfi.xyz are in Privy's allowed OAuth redirect URLs.
   return window.location.origin;
