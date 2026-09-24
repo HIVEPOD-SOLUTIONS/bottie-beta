@@ -50,6 +50,8 @@
 
     <!-- Permissions -->
 
+    <!-- In-app billing (RevenueCat subscriptions) -->
+    <uses-permission android:name="com.android.vending.BILLING" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Voice input (microphone for Bluvfi voice queries) -->

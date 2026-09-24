@@ -16,9 +16,10 @@ import {
   ScreenStackWrapper,
 } from "@/components/dashboard/settings-sidebar";
 import { isCapacitorApp } from "@/hooks/use-admob";
+import { initRevenueCat } from "@/lib/revenuecat";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { ready, authenticated } = usePrivy();
+  const { ready, authenticated, user } = usePrivy();
   const router = useRouter();
 
   useEffect(() => {
@@ -31,6 +32,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }, 800);
     return () => clearTimeout(t);
   }, [ready, authenticated, router]);
+
+  // Initialize RevenueCat once the user is authenticated on Android.
+  useEffect(() => {
+    if (!ready || !authenticated || !user?.id) return;
+    initRevenueCat(user.id);
+  }, [ready, authenticated, user?.id]);
 
   if (!ready) {
     return (
