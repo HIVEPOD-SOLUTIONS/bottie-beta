@@ -1215,9 +1215,22 @@ function CheckoutSheet({
         clearInterval(pollRef.current);
         pollRef.current = null;
       }
-      setErrMsg("Invoice timed out. Please start a new purchase.");
+      // Timeout can mean the operator rejected the top-up (Bitrefill issues a
+      // refund email but the invoice never transitions to "failed" in the API).
+      setErrMsg(
+        "Order not confirmed — the operator may have rejected your top-up. " +
+        "Check your email: if you received a refund notice from Bitrefill, " +
+        "your funds will be returned automatically. Otherwise, please try again."
+      );
       setStep("error");
     }, deadlineMs);
+
+    // Counters to detect a stuck poll (persistent API errors or stale "unpaid").
+    let consecutiveErrors = 0;
+    // Once payment is detected by Bitrefill, start a delivery deadline. Operator
+    // failures show up here: invoice stays "pending" but delivery never completes.
+    let deliveryDeadlineId: ReturnType<typeof setTimeout> | null = null;
+    const DELIVERY_TIMEOUT_MS = 6 * 60 * 1000; // 6 min after payment confirmed
 
     pollRef.current = setInterval(async () => {
       try {
@@ -1225,9 +1238,25 @@ function CheckoutSheet({
         const inv: BitrefillInvoice & { error?: string } = await res.json();
 
         if (!res.ok || inv.error) {
-          console.warn("[pollInvoice] poll error:", inv.error ?? res.status, "| id:", id, "| hasToken:", !!accessToken);
-          return; // keep polling — transient error or missing access token
+          consecutiveErrors++;
+          console.warn("[pollInvoice] poll error:", inv.error ?? res.status, "| id:", id, "| hasToken:", !!accessToken, "| streak:", consecutiveErrors);
+          // After 10 consecutive failures (~100 s) bail out rather than spinning forever.
+          if (consecutiveErrors >= 10) {
+            clearTimeout(timeoutId);
+            if (deliveryDeadlineId) clearTimeout(deliveryDeadlineId);
+            clearInterval(pollRef.current!);
+            setErrMsg(
+              "Unable to check order status. " +
+              "Check your email — Bitrefill will send a delivery or refund confirmation. " +
+              "If the top-up wasn't applied, please try again."
+            );
+            setStep("error");
+          }
+          return;
         }
+
+        // Reset error streak on a successful response.
+        consecutiveErrors = 0;
 
         // Track intermediate status for UI label
         if (inv.status) setPollStatus(inv.status);
@@ -1248,6 +1277,25 @@ function CheckoutSheet({
           setDepositPaymentUri((prev) => prev ?? inv.payment_info!.paymentUri!);
         }
 
+        // Once Bitrefill detects payment, start a delivery deadline. An operator
+        // rejection keeps the invoice in "pending"/"payment_confirmed" without ever
+        // reaching "complete" — this catches that case after 6 minutes.
+        if (!deliveryDeadlineId && inv.status && inv.status !== "unpaid") {
+          deliveryDeadlineId = setTimeout(() => {
+            if (pollRef.current) {
+              clearTimeout(timeoutId);
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setErrMsg(
+                "Your payment was received but the top-up couldn't be delivered — " +
+                "the operator may have rejected it. Check your email: Bitrefill will " +
+                "send a refund if the top-up wasn't applied. You can also try again."
+              );
+              setStep("error");
+            }
+          }, DELIVERY_TIMEOUT_MS);
+        }
+
         // "complete" is the authoritative invoice_status; also accept delivery confirmation.
         // orders_delivery_status === "delivered" means all items were dispatched even if
         // invoice_status hasn't updated yet (race on Bitrefill's side).
@@ -1258,6 +1306,7 @@ function CheckoutSheet({
 
         if (isComplete) {
           clearTimeout(timeoutId);
+          if (deliveryDeadlineId) clearTimeout(deliveryDeadlineId);
           clearInterval(pollRef.current!);
           // Route attaches code as a top-level convenience field
           const redemptionCode = inv.code ?? null;
@@ -1267,8 +1316,15 @@ function CheckoutSheet({
           showInterstitial();
         } else if (TERMINAL_ERROR.has(inv.status)) {
           clearTimeout(timeoutId);
+          if (deliveryDeadlineId) clearTimeout(deliveryDeadlineId);
           clearInterval(pollRef.current!);
-          setErrMsg(`Payment ${inv.status}. Please try again.`);
+          const isRefund = inv.status === "refunded";
+          setErrMsg(
+            isRefund
+              ? "Top-up couldn't be delivered — the operator rejected it. " +
+                "Bitrefill will refund you automatically. Please check your email."
+              : `Payment ${inv.status}. Please try again.`
+          );
           setStep("error");
         }
         // payment_detected | payment_confirmed | pending → keep polling, update label

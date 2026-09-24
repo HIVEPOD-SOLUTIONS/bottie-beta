@@ -46,12 +46,26 @@ function findRouteFiles(dir) {
 }
 
 // ── Sanity-check for leftover .bak files from a crashed previous run ─────────
-const testBak = findRouteFiles(apiDir.replace(/api$/, ""))
-  .filter(f => f.endsWith(".android.bak"));
-if (testBak.length > 0) {
-  console.warn(`⚠   Found ${testBak.length} leftover .android.bak files from a previous run.`);
+// findRouteFiles only matches route.ts|tsx, so use a separate recursive scan
+// that looks for the .android.bak extension directly.
+function findBakFiles(dir) {
+  const results = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findBakFiles(full));
+    } else if (entry.name.endsWith(".android.bak")) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+const leftoverBaks = findBakFiles(apiDir);
+if (leftoverBaks.length > 0) {
+  console.warn(`⚠   Found ${leftoverBaks.length} leftover .android.bak files from a previous run.`);
   console.warn("    Restoring them before proceeding…");
-  for (const bak of testBak) {
+  for (const bak of leftoverBaks) {
     renameSync(bak, bak.replace(/\.android\.bak$/, ""));
   }
 }
