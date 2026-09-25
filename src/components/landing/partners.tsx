@@ -62,14 +62,6 @@ const PARTNERS: Partner[] = [
   // Bills
   { name: "Bitrefill", domain: "bitrefill.com", category: "Bills" },
   // DeFi / Trading
-  {
-    name: "Flash Trade", domain: "flash.trade", category: "DeFi",
-    logoUrl: "https://flash.trade/favicon.ico",
-  },
-  {
-    name: "Velvet Capital", domain: "velvet.capital", category: "DeFi",
-    logoUrl: "https://velvet.capital/favicon.ico",
-  },
   { name: "dYdX", domain: "dydx.exchange", category: "DeFi" },
   { name: "0x Protocol", domain: "0x.org", category: "DeFi" },
   {
@@ -111,11 +103,6 @@ const PARTNERS: Partner[] = [
   {
     name: "Irys", domain: "irys.xyz", category: "Storage",
     logoUrl: "https://irys.xyz/favicon.ico",
-  },
-  // Entertainment
-  {
-    name: "Roaster", domain: "roaster.gg", category: "Gaming",
-    logoUrl: "https://roaster.gg/favicon.ico",
   },
   // Market Data
   { name: "CoinMarketCap", domain: "coinmarketcap.com", category: "Data" },

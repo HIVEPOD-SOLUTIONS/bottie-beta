@@ -32,6 +32,9 @@ function appBase() {
   return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 }
 
+const SAMPLE_CATALOG_NOTICE =
+  "Sample data only: these prices are frozen illustrative numbers, not live market data, and these assets cannot be bought in Bluvfi yet. Do not present them as current prices.";
+
 export function createTools(walletAddress?: string, userId?: string, solanaAddress?: string, paidBillIds: string[] = [], userName?: string) {
   // Pick the right address for a given blockchain context
   function addressFor(blockchain?: string): string {
@@ -760,7 +763,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     // Two tools, deliberately split into a free-to-call read (list) and a
     // fund-moving write (recover) that requires the AI to confirm with the
     // user first — same pattern as every other fund-movement tool in this
-    // file (e.g. rebalance_velvet_portfolio: "Always confirm details before
+    // file (e.g. buy_bitrefill_product: "Always confirm details before
     // calling"). Both call the exact same shared functions
     // (src/lib/xrp-purchase.ts) that back bills-screen.tsx's "My Bills"
     // recovery list and /api/xrpl/transfer's recovery-direction branch, so
@@ -832,7 +835,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     get_investments: tool({
       description:
-        "List available investments — stocks, pre-IPO companies, and ETFs with current prices and 24h change.",
+        "List the SAMPLE investment catalog (stocks, pre-IPO companies, ETFs). These prices are frozen illustrative numbers, NOT live market data, and none of these assets can be bought in Bluvfi yet. " +
+        "For real prices of tokenized stocks use xstocks_list_assets / xstocks_get_asset_price_data.",
       inputSchema: z.object({
         type: z
           .enum(["stock", "ipo", "etf", "all"])
@@ -853,74 +857,31 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             change24h: a.change24h,
             description: a.description,
           })),
+          notice: SAMPLE_CATALOG_NOTICE,
         };
       },
     }),
 
     buy_investment: tool({
       description:
-        "Queue an investment purchase for user confirmation. Returns a pending action that renders a Confirm card in the UI. " +
-        "The card lets the user choose to pay in USDC on Base (EVM) or Solana — the actual transfer and portfolio update happen client-side when they tap Confirm. " +
-        "Pass network='evm' or network='solana' to pre-select and lock a network; omit to show the selector. " +
-        "Minimum payment is $0.000001 USDC (1 base unit) on both networks — reject if shares × price would be below this.",
+        "NOT AVAILABLE. Buying stocks, ETFs and pre-IPO shares is not supported in Bluvfi yet — the catalog behind it is sample data with frozen prices, so this tool never starts a payment. " +
+        "Call it only to get the standard explanation to relay to the user; do NOT tell the user a purchase is pending or that a Confirm card will appear.",
       inputSchema: z.object({
-        symbol: z
-          .string()
-          .max(16)
-          .describe("Ticker symbol to buy, e.g. AAPL, TSLA, SPACEX, SPY"),
-        shares: z
-          .string()
-          .max(32)
-          .describe("Number of shares to buy, e.g. '1', '0.5', '2'"),
-        network: z
-          .enum(["evm", "solana"])
-          .optional()
-          .describe(
-            "Which network to pay on. Pass 'evm' for Base (EVM) USDC or 'solana' for Solana USDC. " +
-            "Omit to let the user choose in the UI. Pass when the user has explicitly requested a specific network.",
-          ),
+        symbol: z.string().max(16).describe("Ticker the user asked to buy, e.g. AAPL, TSLA, SPY"),
+        shares: z.string().max(32).optional().describe("Quantity the user asked for"),
+        network: z.enum(["evm", "solana"]).optional().describe("Ignored"),
       }),
-      execute: async ({ symbol, shares, network }) => {
-        const sym = symbol.toUpperCase();
-        const asset = DEMO_ASSETS.find((a) => a.symbol === sym);
-
-        if (!asset) {
-          return {
-            error: `Unknown symbol: ${sym}. Use get_investments to see available assets.`,
-          };
-        }
-
-        const sharesNum = Number(shares);
-        if (isNaN(sharesNum) || sharesNum <= 0) {
-          return { error: "Invalid number of shares" };
-        }
-
-        const totalUsdc = sharesNum * asset.priceUsd;
-        if (totalUsdc < 0.000001) {
-          return {
-            error: `Total cost $${totalUsdc.toFixed(6)} USDC is below the $0.000001 minimum. Increase the number of shares.`,
-          };
-        }
-
-        // Return pending — the UI renders a confirm card with network selector.
-        // If network is specified it locks the selector; otherwise user picks in UI.
-        return {
-          pendingPurchase: true,
-          symbol: sym,
-          assetName: asset.name,
-          shares: sharesNum,
-          priceUsd: asset.priceUsd,
-          totalUsdc,
-          icon: asset.icon,
-          type: asset.type,
-          ...(network ? { network } : {}),
-        };
-      },
+      execute: async ({ symbol }) => ({
+        error:
+          `Buying ${symbol.toUpperCase()} isn't available in Bluvfi yet — stock, ETF and pre-IPO purchases are coming soon, and no payment was started. ` +
+          "Tokenized stocks can be browsed under Invest → Stocks (xStocks), but trading them isn't enabled yet either.",
+      }),
     }),
 
     get_market_prices: tool({
       description:
-        "Get current prices and 24h change for all available stocks, ETFs, and pre-IPO companies.",
+        "Get the SAMPLE catalog prices for stocks, ETFs and pre-IPO companies. These are frozen illustrative numbers, NOT live market data — never present them as current prices. " +
+        "For real tokenized-stock prices use xstocks_get_asset_price_data; for crypto use get_crypto_prices.",
       inputSchema: z.object({
         type: z
           .enum(["stock", "ipo", "etf", "all"])
@@ -947,6 +908,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
             change24h: a.change24h,
             description: a.description,
           })),
+          notice: SAMPLE_CATALOG_NOTICE,
         };
       },
     }),
@@ -2717,1189 +2679,6 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       },
     }),
 
-    // ── Velvet Capital — Portfolio Management ────────────────────────────────
-
-    get_velvet_portfolios: tool({
-      description:
-        "List all Velvet Capital on-chain portfolios (vaults) owned by the user's wallet on Base. Returns portfolio names, IDs, and all contract addresses needed for further operations.",
-      inputSchema: z.object({
-        chain: z.enum(["base"]).optional().describe("Chain to query (default: base)"),
-      }),
-      execute: async ({ chain }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { getPortfoliosByOwner } = await import("@/lib/velvet");
-          const portfolios = await getPortfoliosByOwner(walletAddress, chain ?? "base");
-          return {
-            portfolios: portfolios.map((p) => ({
-              portfolio_id: p.portfolioId,
-              name: p.name,
-              symbol: p.symbol,
-              portfolio_address: p.portfolio,
-              vault_address: p.vaultAddress,
-              rebalancing_address: p.rebalancing,
-              asset_management_config: p.assetManagementConfig,
-              token_exclusion_manager: p.tokenExclusionManager,
-              is_public: p.public,
-              chain: p.chainName,
-              created_at: p.createdAt,
-            })),
-            count: portfolios.length,
-          };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to fetch portfolios" };
-        }
-      },
-    }),
-
-    get_velvet_portfolio_info: tool({
-      description:
-        "Get full details of a Velvet portfolio: the user's token balance, ownership percentage, total supply, and each underlying token with its symbol and vault balance. Use this for a comprehensive portfolio view.",
-      inputSchema: z.object({
-        portfolio_id: z.string().describe("Portfolio ID from get_velvet_portfolios"),
-      }),
-      execute: async ({ portfolio_id }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { getPortfoliosByOwner, getPortfolioInfo } = await import("@/lib/velvet");
-          const portfolios = await getPortfoliosByOwner(walletAddress);
-          const portfolio = portfolios.find(
-            (p) => p.portfolioId === portfolio_id || p.portfolio.toLowerCase() === portfolio_id.toLowerCase()
-          );
-          if (!portfolio) return { error: "Portfolio not found" };
-          const info = await getPortfolioInfo(portfolio, walletAddress);
-          return info;
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to fetch portfolio info" };
-        }
-      },
-    }),
-
-    get_velvet_portfolio_by_address: tool({
-      description:
-        "Look up a Velvet Capital portfolio directly by its on-chain contract address, without needing to be the owner. " +
-        "Returns full portfolio info including tokens, balances, ownership %, rebalancing_address, asset_management_config, and token_exclusion_manager. " +
-        "Use when the user provides a portfolio contract address directly rather than selecting from their list.",
-      inputSchema: z.object({
-        portfolio_address: z.string().describe("Velvet portfolio contract address (0x…) on Base"),
-        user_address: z.string().describe("User's EVM wallet address (0x…) to calculate ownership share"),
-      }),
-      execute: async ({ portfolio_address, user_address }) => {
-        try {
-          const params = new URLSearchParams({ portfolio: portfolio_address, address: user_address });
-          const r = await fetch(`${appBase()}/api/velvet/portfolio-by-address?${params}`);
-          if (!r.ok) return { error: await r.text() };
-          return r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    manage_velvet_vault_list: tool({
-      description:
-        "Manage the user's Privy-stored Velvet vault watchlist — add, remove, hide, or unhide a vault from their dashboard. " +
-        "Different from set_vault_pref (which uses the DB): this writes to Privy custom_metadata and manages the velvet_vaults / velvet_hidden lists. " +
-        "Actions: add_vault (pin to dashboard), remove_vault (unpin), hide_vault (hide + unpin), unhide_vault (un-hide). " +
-        "Use get_vault_prefs to read the current list before modifying.",
-      inputSchema: z.object({
-        action: z.enum(["add_vault", "remove_vault", "hide_vault", "unhide_vault"]).describe("Action to perform"),
-        address: z.string().describe("Velvet portfolio contract address (0x…) on Base"),
-      }),
-      execute: async ({ action, address }) => {
-        try {
-          const r = await fetch(`${appBase()}/api/velvet/vaults`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action, address }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          return r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    get_velvet_vault_list: tool({
-      description:
-        "Get the user's Privy-stored Velvet vault watchlist — which portfolio addresses they've added (velvet_vaults) and which they've hidden (velvet_hidden). " +
-        "Use this before manage_velvet_vault_list to see the current state, or when the user asks 'what vaults am I tracking?'.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        try {
-          const r = await fetch(`${appBase()}/api/velvet/vaults`);
-          if (!r.ok) return { error: await r.text() };
-          return r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    rebalance_velvet_portfolio: tool({
-      description:
-        "Prepare a rebalance transaction for a Velvet portfolio — swaps one token for another within the vault, changing the token composition. Returns encoded tx data the user must sign. Only call when the user explicitly confirms.",
-      inputSchema: z.object({
-        rebalancing_address: z.string().describe("Rebalancing contract address from get_velvet_portfolios"),
-        sell_token: z.string().describe("Token address to sell out of the vault"),
-        buy_token: z.string().describe("Token address to buy into the vault"),
-        sell_amount: z.string().describe("Amount to sell in token's smallest unit (e.g. '1000000' for 1 USDC with 6 decimals)"),
-        remaining_tokens: z.array(z.string()).describe("Addresses of tokens that will remain in the vault after this trade"),
-        slippage_bps: z.string().optional().describe("Slippage tolerance in basis points — default '100' (1%)"),
-      }),
-      execute: async ({ rebalancing_address, sell_token, buy_token, sell_amount, remaining_tokens, slippage_bps }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { getRebalanceTxData } = await import("@/lib/velvet");
-          const txData = await getRebalanceTxData({
-            rebalanceAddress: rebalancing_address,
-            sellToken: sell_token,
-            buyToken: buy_token,
-            sellAmount: sell_amount,
-            slippage: slippage_bps ?? "100",
-            remainingTokens: remaining_tokens,
-            owner: walletAddress,
-          });
-          return {
-            pendingRebalance: true,
-            rebalancing_address,
-            new_tokens: txData.newTokens,
-            sell_tokens: txData.sellTokens,
-            sell_amounts: txData.sellAmounts,
-            handler: txData.handler,
-            call_data: txData.callData,
-            estimate_gas: txData.estimateGas,
-            gas_price: txData.gasPrice,
-          };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to prepare rebalance" };
-        }
-      },
-    }),
-
-    update_velvet_weights: tool({
-      description:
-        "Prepare a weight-update transaction for a Velvet portfolio — adjusts token allocations without adding or removing tokens (sells some of one token to buy more of another already in the vault). Returns encoded tx data. Only call when user explicitly confirms.",
-      inputSchema: z.object({
-        rebalancing_address: z.string().describe("Rebalancing contract address from get_velvet_portfolios"),
-        sell_token: z.string().describe("Token address to reduce (sell)"),
-        buy_token: z.string().describe("Token address to increase (buy)"),
-        sell_amount: z.string().describe("Amount to sell in token's smallest unit"),
-        remaining_tokens: z.array(z.string()).describe("All current vault token addresses (no change to token list)"),
-        slippage_bps: z.string().optional().describe("Slippage tolerance in basis points — default '100' (1%)"),
-      }),
-      execute: async ({ rebalancing_address, sell_token, buy_token, sell_amount, remaining_tokens, slippage_bps }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { getRebalanceTxData } = await import("@/lib/velvet");
-          // updateWeights keeps all existing tokens — newTokens = all current tokens (no additions)
-          const txData = await getRebalanceTxData({
-            rebalanceAddress: rebalancing_address,
-            sellToken: sell_token,
-            buyToken: buy_token,
-            sellAmount: sell_amount,
-            slippage: slippage_bps ?? "100",
-            remainingTokens: remaining_tokens,
-            owner: walletAddress,
-          });
-          return {
-            pendingWeightUpdate: true,
-            rebalancing_address,
-            sell_tokens: txData.sellTokens,
-            sell_amounts: txData.sellAmounts,
-            handler: txData.handler,
-            call_data: txData.callData,
-            estimate_gas: txData.estimateGas,
-            gas_price: txData.gasPrice,
-          };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to prepare weight update" };
-        }
-      },
-    }),
-
-    deposit_velvet_portfolio: tool({
-      description:
-        "Prepare a deposit transaction to add ERC-20 tokens into a Velvet portfolio vault. Returns transaction data the user must sign. Only call when the user explicitly confirms.",
-      inputSchema: z.object({
-        portfolio_address: z.string().describe("Portfolio contract address from get_velvet_portfolios"),
-        deposit_token: z.string().describe("ERC-20 token address to deposit"),
-        deposit_amount: z.string().describe("Amount in token's smallest unit (e.g. '1000000' for 1 USDC with 6 decimals)"),
-      }),
-      execute: async ({ portfolio_address, deposit_token, deposit_amount }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { getDepositTxData } = await import("@/lib/velvet");
-          const txData = await getDepositTxData({
-            portfolio: portfolio_address,
-            depositAmount: deposit_amount,
-            depositToken: deposit_token,
-            user: walletAddress,
-          });
-          return {
-            pendingDeposit: true,
-            portfolio_address,
-            deposit_token,
-            deposit_amount,
-            tx: { to: txData.to, data: txData.data, gas_limit: txData.gasLimit, gas_price: txData.gasPrice },
-          };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to prepare deposit" };
-        }
-      },
-    }),
-
-    withdraw_velvet_portfolio: tool({
-      description:
-        "Prepare a withdrawal transaction to burn portfolio tokens and receive an ERC-20 token from the Velvet vault. Returns transaction data the user must sign. Only call when the user explicitly confirms.",
-      inputSchema: z.object({
-        portfolio_address: z.string().describe("Portfolio contract address from get_velvet_portfolios"),
-        withdraw_token: z.string().describe("ERC-20 token address to receive after withdrawal"),
-        withdraw_amount: z.string().describe("Portfolio token amount to burn in smallest unit (18 decimals)"),
-      }),
-      execute: async ({ portfolio_address, withdraw_token, withdraw_amount }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { getWithdrawTxData } = await import("@/lib/velvet");
-          const txData = await getWithdrawTxData({
-            portfolio: portfolio_address,
-            withdrawAmount: withdraw_amount,
-            withdrawToken: withdraw_token,
-            user: walletAddress,
-          });
-          return {
-            pendingWithdrawal: true,
-            portfolio_address,
-            withdraw_token,
-            withdraw_amount,
-            tx: { to: txData.to, data: txData.data, gas_limit: txData.gasLimit, gas_price: txData.gasPrice },
-          };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to prepare withdrawal" };
-        }
-      },
-    }),
-
-    remove_velvet_token: tool({
-      description:
-        "Prepare a transaction to remove a token from a Velvet portfolio vault (asset managers only). Can remove fully or partially by percentage. Only call when user explicitly confirms.",
-      inputSchema: z.object({
-        rebalancing_address: z.string().describe("Rebalancing contract address from get_velvet_portfolios"),
-        token_address: z.string().describe("Address of the token to remove from the vault"),
-        partial: z.boolean().describe("If true, removes only a percentage of the token; if false, removes entirely"),
-        percentage: z.number().min(0).max(100).optional().describe("Percentage to remove (0–100) when partial=true"),
-      }),
-      execute: async ({ rebalancing_address, token_address, partial, percentage }) => {
-        try {
-          const { encodeRemovePortfolioToken } = await import("@/lib/velvet");
-          const tx = partial && percentage !== undefined
-            ? encodeRemovePortfolioToken(rebalancing_address, token_address, true, percentage)
-            : encodeRemovePortfolioToken(rebalancing_address, token_address, false);
-          return { pendingRemoveToken: true, token_address, partial, percentage, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to prepare token removal" };
-        }
-      },
-    }),
-
-    propose_velvet_fee: tool({
-      description:
-        "Propose a new fee for a Velvet portfolio (asset managers only). After proposing, the fee takes effect 28 days later via update_velvet_fee. Returns encoded tx data to sign.",
-      inputSchema: z.object({
-        asset_management_config: z.string().describe("AssetManagementConfig contract address from get_velvet_portfolios"),
-        fee_type: z.enum(["management", "performance", "entry_and_exit"]).describe("Which fee to change"),
-        new_fee_bps: z.number().min(0).describe("New fee in basis points (e.g. 100 = 1%). For entry_and_exit this is the entry fee."),
-        new_exit_fee_bps: z.number().min(0).optional().describe("New exit fee in basis points — only for fee_type 'entry_and_exit'"),
-      }),
-      execute: async ({ asset_management_config, fee_type, new_fee_bps, new_exit_fee_bps }) => {
-        try {
-          const { encodeFeeCall } = await import("@/lib/velvet");
-          const tx = encodeFeeCall(asset_management_config, fee_type, "propose", new_fee_bps, new_exit_fee_bps);
-          return {
-            pendingFeeProposal: true,
-            fee_type,
-            new_fee_bps,
-            new_exit_fee_bps,
-            note: "Fee will be active after calling update_velvet_fee in 28 days",
-            tx,
-          };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode fee proposal" };
-        }
-      },
-    }),
-
-    update_velvet_fee: tool({
-      description:
-        "Finalize a previously proposed Velvet fee update (asset managers only). Can only succeed 28 days after the proposal. Can also cancel a pending proposal. Returns encoded tx data to sign.",
-      inputSchema: z.object({
-        asset_management_config: z.string().describe("AssetManagementConfig contract address from get_velvet_portfolios"),
-        fee_type: z.enum(["management", "performance", "entry_and_exit"]).describe("Which fee to update or cancel"),
-        action: z.enum(["update", "cancel"]).describe("'update' finalizes the fee after 28 days; 'cancel' deletes the pending proposal"),
-      }),
-      execute: async ({ asset_management_config, fee_type, action }) => {
-        try {
-          const { encodeFeeCall } = await import("@/lib/velvet");
-          const tx = encodeFeeCall(asset_management_config, fee_type, action);
-          return { pendingFeeAction: true, fee_type, action, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode fee action" };
-        }
-      },
-    }),
-
-    manage_velvet_whitelist: tool({
-      description:
-        "Add or remove users from a Velvet portfolio's depositor whitelist (asset managers only). Only whitelisted users can deposit into private portfolios. Returns encoded tx data to sign.",
-      inputSchema: z.object({
-        asset_management_config: z.string().describe("AssetManagementConfig contract address from get_velvet_portfolios"),
-        action: z.enum(["add", "remove"]).describe("'add' grants deposit access; 'remove' revokes it"),
-        users: z.array(z.string()).describe("Wallet addresses to add or remove from the whitelist"),
-      }),
-      execute: async ({ asset_management_config, action, users }) => {
-        try {
-          const { encodeWhitelistCall } = await import("@/lib/velvet");
-          const tx = encodeWhitelistCall(asset_management_config, action, users);
-          return { pendingWhitelistUpdate: true, action, users, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode whitelist update" };
-        }
-      },
-    }),
-
-    update_velvet_settings: tool({
-      description:
-        "Update Velvet portfolio settings (asset managers only): transferability, convert to public fund, update treasury address, set minimum holding amount, set initial portfolio amount, or enable Uniswap V3 management. Returns encoded tx data to sign.",
-      inputSchema: z.object({
-        asset_management_config: z.string().describe("AssetManagementConfig contract address from get_velvet_portfolios"),
-        setting: z.enum(["transferability", "convert_to_public", "treasury", "min_holding_amount", "initial_amount", "enable_uniswap_v3"]).describe("Which setting to update"),
-        transferable: z.boolean().optional().describe("For 'transferability': whether portfolio tokens can be transferred"),
-        public_transfer: z.boolean().optional().describe("For 'transferability': whether transfers to non-whitelisted addresses are allowed"),
-        new_treasury: z.string().optional().describe("For 'treasury': new address where management fees accumulate"),
-        amount_wei: z.string().optional().describe("For 'min_holding_amount' or 'initial_amount': amount in wei (18 decimals)"),
-      }),
-      execute: async ({ asset_management_config, setting, transferable, public_transfer, new_treasury, amount_wei }) => {
-        try {
-          const lib = await import("@/lib/velvet");
-          let tx: { to: string; data: string };
-          if (setting === "transferability") {
-            if (transferable === undefined) return { error: "transferable is required for transferability setting" };
-            tx = lib.encodeTransferabilityCall(asset_management_config, transferable, public_transfer ?? false);
-          } else if (setting === "convert_to_public") {
-            tx = lib.encodeConvertToPublicCall(asset_management_config);
-          } else if (setting === "treasury") {
-            if (!new_treasury) return { error: "new_treasury address is required for treasury setting" };
-            tx = lib.encodeTreasuryCall(asset_management_config, new_treasury);
-          } else if (setting === "min_holding_amount") {
-            if (!amount_wei) return { error: "amount_wei is required for min_holding_amount" };
-            tx = lib.encodeMinHoldingAmountCall(asset_management_config, BigInt(amount_wei));
-          } else if (setting === "initial_amount") {
-            if (!amount_wei) return { error: "amount_wei is required for initial_amount" };
-            tx = lib.encodeInitialPortfolioAmountCall(asset_management_config, BigInt(amount_wei));
-          } else {
-            tx = lib.encodeEnableUniswapV3ManagerCall(asset_management_config);
-          }
-          return { pendingSettingsUpdate: true, setting, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode settings update" };
-        }
-      },
-    }),
-
-    manage_velvet_collateral: tool({
-      description:
-        "Enable or disable specific tokens as collateral in a Velvet portfolio vault (asset managers only). Collateral tokens can be used for borrowing against the vault's holdings. Returns encoded tx data to sign.",
-      inputSchema: z.object({
-        rebalancing_address: z.string().describe("Rebalancing contract address from get_velvet_portfolios"),
-        action: z.enum(["enable", "disable"]).describe("Whether to enable or disable the tokens as collateral"),
-        tokens: z.array(z.string()).describe("Token addresses to enable or disable as collateral"),
-        controller: z.string().describe("Lending protocol controller address"),
-      }),
-      execute: async ({ rebalancing_address, action, tokens, controller }) => {
-        try {
-          const { encodeCollateralTokensCall } = await import("@/lib/velvet");
-          const tx = encodeCollateralTokensCall(rebalancing_address, action, tokens, controller);
-          return { pendingCollateralUpdate: true, action, tokens, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode collateral update" };
-        }
-      },
-    }),
-
-    velvet_borrow: tool({
-      description:
-        "Borrow a token from a lending pool against collateral held in a Velvet portfolio vault (asset managers only). Enable collateral tokens first via manage_velvet_collateral. Returns encoded tx data to sign.",
-      inputSchema: z.object({
-        rebalancing_address: z.string().describe("Rebalancing contract address from get_velvet_portfolios"),
-        pool: z.string().describe("Lending pool contract address"),
-        tokens: z.array(z.string()).describe("Collateral token addresses pledged for the borrow"),
-        token_to_borrow: z.string().describe("Address of the token to borrow"),
-        controller: z.string().describe("Lending protocol controller address"),
-        amount_wei: z.string().describe("Amount to borrow in the token's smallest unit"),
-      }),
-      execute: async ({ rebalancing_address, pool, tokens, token_to_borrow, controller, amount_wei }) => {
-        try {
-          const { encodeBorrowCall } = await import("@/lib/velvet");
-          const tx = encodeBorrowCall(rebalancing_address, pool, tokens, token_to_borrow, controller, BigInt(amount_wei));
-          return { pendingBorrow: true, token_to_borrow, amount_wei, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode borrow" };
-        }
-      },
-    }),
-
-    // ── Flash Trade — Read-only queries ──────────────────────────────────────
-
-    flash_get_tokens: tool({
-      description: "List all tokens available on Flash Trade for swapping and liquidity operations (e.g. SOL, USDC, BTC, ETH, JitoSOL). Call this when the user asks what they can swap or deposit.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/tokens`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    // ── Flash Trade — Quotes (read-only) ─────────────────────────────────────
-
-    flash_get_open_quote: tool({
-      description: "Get a price quote for opening a Flash Trade position — returns estimated entry price, fee, and size. Call this before flash_open_position so the user can see the cost.",
-      inputSchema: z.object({
-        market: z.string().describe("Market symbol, e.g. 'SOL', 'BTC'"),
-        side: z.enum(["long", "short"]),
-        collateralUsd: z.number().positive().describe("Collateral in USD"),
-        leverage: z.number().min(1).max(100),
-      }),
-      execute: async ({ market, side, collateralUsd, leverage }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const { getMarketsInfo } = await import("@/lib/flash");
-          const markets = getMarketsInfo();
-          const m = markets.find(mk => mk.symbol.toUpperCase() === market.toUpperCase() && mk.side === side);
-          if (!m) return { error: `Market ${market} ${side} not found` };
-          const r = await fetch(`${appBase()}/api/flash/quote?marketId=${m.marketId}&collateral=${collateralUsd}&leverage=${leverage}`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_get_close_quote: tool({
-      description: "Get a price quote for closing a Flash Trade position — returns estimated exit price, fees, PnL, and how much the user will receive. Call before flash_close_position to show the user what they'll get.",
-      inputSchema: z.object({
-        marketId: z.number().int().describe("Market ID from flash_get_positions"),
-        sizeDeltaUsd: z.number().positive().optional().describe("USD size to close — omit for full close quote"),
-      }),
-      execute: async ({ marketId, sizeDeltaUsd }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const params = new URLSearchParams({ wallet: solanaAddress, marketId: String(marketId) });
-          if (sizeDeltaUsd != null) params.set("sizeDeltaUsd", String(sizeDeltaUsd));
-          const r = await fetch(`${appBase()}/api/flash/close-quote?${params}`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_get_collateral_quote: tool({
-      description: "Get a quote for adding or removing collateral on an open Flash Trade position — returns new leverage and new liquidation price. Call before flash_add_collateral or flash_remove_collateral.",
-      inputSchema: z.object({
-        marketId: z.number().int().describe("Market ID from flash_get_positions"),
-        direction: z.enum(["add", "remove"]).describe("Whether the user is adding or removing collateral"),
-        collateralUsd: z.number().positive().describe("Amount of collateral in USD"),
-      }),
-      execute: async ({ marketId, direction, collateralUsd }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const params = new URLSearchParams({ wallet: solanaAddress, marketId: String(marketId), direction, collateralUsd: String(collateralUsd) });
-          const r = await fetch(`${appBase()}/api/flash/collateral-quote?${params}`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_get_swap_quote: tool({
-      description: "Get a price quote for swapping tokens on Flash — returns estimated output amount and fee. Call before flash_swap to show the user what they'll receive.",
-      inputSchema: z.object({
-        inSymbol: z.string().describe("Token to sell, e.g. 'SOL'"),
-        outSymbol: z.string().describe("Token to buy, e.g. 'USDC'"),
-        amountIn: z.number().positive().describe("Amount of inSymbol to sell"),
-      }),
-      execute: async ({ inSymbol, outSymbol, amountIn }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/swap-quote?inSymbol=${inSymbol}&outSymbol=${outSymbol}&amountIn=${amountIn}`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_get_liquidity_quote: tool({
-      description: "Get a quote for Flash liquidity operations — how much FLP/sFLP you'll receive when adding, or how much token you'll get when removing. Call before flash_add_liquidity, flash_remove_liquidity, flash_add_compounding, or flash_remove_compounding.",
-      inputSchema: z.object({
-        action: z.enum(["add", "remove", "sflp-add", "sflp-remove"]).describe("'add'=add FLP, 'remove'=remove FLP, 'sflp-add'=add sFLP, 'sflp-remove'=remove sFLP"),
-        symbol: z.string().describe("Token symbol — for add: the token you deposit (e.g. 'USDC'); for remove: the token you want back (e.g. 'USDC')"),
-        amount: z.number().positive().describe("For add: amount of token to deposit; for remove: amount of FLP/sFLP tokens to burn"),
-      }),
-      execute: async ({ action, symbol, amount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/liquidity-quote?action=${action}&symbol=${symbol}&amount=${amount}`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    // ── Flash Trade — Perpetuals ──────────────────────────────────────────────
-
-    flash_get_markets: tool({
-      description: "List all Flash Trade perpetual markets with current prices, funding rates and available leverage. Call this before opening a position or when the user asks about tradeable assets.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/markets`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_get_positions: tool({
-      description: "Get the user's open Flash Trade positions and pending orders on Solana. Returns marketId, side, size, collateral, entry price, and current PnL for each position.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/positions?ownerAddress=${solanaAddress}`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_get_position_stats: tool({
-      description: "Get real-time PnL and liquidation price for a specific open Flash Trade position. Call after flash_get_positions to get the marketId.",
-      inputSchema: z.object({
-        marketId: z.number().int().describe("Market ID from flash_get_positions"),
-      }),
-      execute: async ({ marketId }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(
-            `${appBase()}/api/flash/position-stats?wallet=${solanaAddress}&marketId=${marketId}`
-          );
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_deposit_to_vault: tool({
-      description: "Deposit tokens into the Flash Trade vault to use as collateral for trading. The vault holds funds ready for positions.",
-      inputSchema: z.object({
-        tokenSymbol: z.string().describe("Token to deposit, e.g. 'USDC', 'SOL'"),
-        amount: z.number().positive().describe("Amount to deposit"),
-      }),
-      execute: async ({ tokenSymbol, amount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/deposit-direct`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, tokenSymbol, amount }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "deposit_to_vault", args: { tokenSymbol, amount }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_withdraw_from_vault: tool({
-      description: "Withdraw tokens from the Flash Trade vault back to the user's wallet.",
-      inputSchema: z.object({
-        tokenSymbol: z.string().describe("Token to withdraw, e.g. 'USDC'"),
-        amount: z.number().positive().describe("Amount to withdraw"),
-      }),
-      execute: async ({ tokenSymbol, amount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/withdrawal`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, tokenSymbol, amount }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "withdraw_from_vault", args: { tokenSymbol, amount }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_open_position: tool({
-      description: "Prepare a leveraged long or short position on Flash Trade. Returns a pending Solana transaction for the user to sign — NEVER call without explicit confirmation of market, side, collateral and leverage. To add TP/SL, call flash_place_trigger_order after the position is confirmed open.",
-      inputSchema: z.object({
-        market: z.string().describe("Market symbol, e.g. 'SOL', 'BTC', 'ETH'"),
-        side: z.enum(["long", "short"]).describe("Direction of the trade"),
-        collateralSymbol: z.string().default("USDC").describe("Token used as collateral, usually 'USDC'"),
-        collateralUsd: z.number().positive().describe("Collateral amount in USD"),
-        leverage: z.number().min(1).max(100).describe("Leverage multiplier (1–100)"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-open`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "open_position", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_close_position: tool({
-      description: "Close or partially close an open Flash Trade position. Use flash_get_positions first to get the marketId.",
-      inputSchema: z.object({
-        marketId: z.number().int().describe("Market ID from flash_get_positions"),
-        closePercent: z.number().min(1).max(100).default(100).describe("Percentage to close (100 = full close)"),
-        collateralSymbol: z.string().default("USDC").describe("Collateral token symbol"),
-      }),
-      execute: async ({ marketId, closePercent, collateralSymbol }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const endpoint = closePercent < 100 ? "/api/flash/build-partial-close" : "/api/flash/build-close";
-          const r = await fetch(`${appBase()}${endpoint}`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, marketId, closePercent, collateralSymbol }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "close_position", args: { marketId, closePercent }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_place_limit_order: tool({
-      description: "Place a limit entry order on Flash Trade at a specific price.",
-      inputSchema: z.object({
-        market: z.string().describe("Market symbol, e.g. 'SOL'"),
-        side: z.enum(["long", "short"]),
-        collateralSymbol: z.string().default("USDC"),
-        collateralUsd: z.number().positive(),
-        leverage: z.number().min(1).max(100),
-        limitPrice: z.number().positive().describe("Entry price trigger in USD"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-limit-order`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "limit_order", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_place_trigger_order: tool({
-      description: "Set a stop-loss or take-profit trigger on an open Flash Trade position.",
-      inputSchema: z.object({
-        marketId: z.number().int(),
-        isStopLoss: z.boolean().describe("true = stop-loss, false = take-profit"),
-        triggerPrice: z.number().positive().describe("Trigger price in USD"),
-        deltaSizeUsd: z.number().positive().describe("Position size reduction in USD when triggered"),
-        collateralSymbol: z.string().default("USDC"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-trigger-order`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "trigger_order", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_cancel_order: tool({
-      description: "Cancel a pending Flash Trade limit or trigger order. For trigger orders, isStopLoss must match the order being cancelled — get it from flash_get_positions.",
-      inputSchema: z.object({
-        marketId: z.number().int(),
-        orderId: z.number().int(),
-        orderType: z.enum(["limit", "trigger"]),
-        isStopLoss: z.boolean().optional().describe("Required when orderType='trigger': true for stop-loss, false for take-profit"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/cancel-order`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "cancel_order", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_add_collateral: tool({
-      description: "Add collateral to an open Flash Trade position to reduce liquidation risk.",
-      inputSchema: z.object({
-        marketId: z.number().int(),
-        collateralSymbol: z.string().default("USDC"),
-        amountUsd: z.number().positive().describe("Amount of collateral to add in USD"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-add-collateral`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "add_collateral", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_remove_collateral: tool({
-      description: "Remove collateral from an open Flash Trade position.",
-      inputSchema: z.object({
-        marketId: z.number().int(),
-        collateralSymbol: z.string().default("USDC"),
-        amountUsd: z.number().positive().describe("Amount of collateral to remove in USD"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-remove-collateral`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "remove_collateral", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    // ── Flash Swap & Earn ─────────────────────────────────────────────────────
-
-    flash_swap: tool({
-      description: "Swap one token for another using Flash Trade's AMM on Solana. Call this when the user says 'swap X SOL for USDC' or similar.",
-      inputSchema: z.object({
-        inSymbol: z.string().describe("Token to sell, e.g. 'SOL'"),
-        outSymbol: z.string().describe("Token to buy, e.g. 'USDC'"),
-        amountIn: z.number().positive().describe("Amount of inSymbol to sell"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-swap`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "swap", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_add_liquidity: tool({
-      description: "Add liquidity to Flash's FLP pool to earn trading fees. The user deposits a token and receives FLP tokens.",
-      inputSchema: z.object({
-        inSymbol: z.string().describe("Token to deposit, e.g. 'USDC', 'SOL'"),
-        amountIn: z.number().positive(),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-add-liquidity`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "add_liquidity", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_remove_liquidity: tool({
-      description: "Remove FLP liquidity from Flash pool. The user burns FLP tokens and receives a chosen token back.",
-      inputSchema: z.object({
-        outSymbol: z.string().describe("Token to receive back, e.g. 'USDC'"),
-        lpAmountIn: z.number().positive().describe("Amount of FLP tokens to burn"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-remove-liquidity`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "remove_liquidity", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_add_compounding: tool({
-      description: "Add sFLP (auto-compounding) liquidity to Flash pool. Rewards are automatically reinvested.",
-      inputSchema: z.object({
-        inSymbol: z.string().describe("Token to deposit"),
-        amountIn: z.number().positive(),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-add-compounding`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "add_compounding", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_remove_compounding: tool({
-      description: "Remove sFLP (auto-compounding) liquidity from Flash pool.",
-      inputSchema: z.object({
-        outSymbol: z.string().describe("Token to receive back"),
-        sflpAmountIn: z.number().positive().describe("Amount of sFLP tokens to burn"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-remove-compounding`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "remove_compounding", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_stake_flash: tool({
-      description: "Stake FLASH tokens to earn protocol rewards.",
-      inputSchema: z.object({ amount: z.number().positive().describe("Amount of FLASH tokens to stake") }),
-      execute: async ({ amount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-stake`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, amount }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "stake_flash", args: { amount }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_unstake_flash: tool({
-      description: "Request to unstake FLASH tokens (starts a cooldown period on-chain).",
-      inputSchema: z.object({ amount: z.number().positive().describe("Amount of FLASH tokens to unstake") }),
-      execute: async ({ amount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-unstake`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, amount }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "unstake_flash", args: { amount }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_cancel_unstake: tool({
-      description: "Cancel a pending FLASH unstake request by its request ID.",
-      inputSchema: z.object({ withdrawRequestId: z.number().int().min(0) }),
-      execute: async ({ withdrawRequestId }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/cancel-unstake`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, withdrawRequestId }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "cancel_unstake", args: { withdrawRequestId }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_withdraw_flash: tool({
-      description: "Withdraw FLASH tokens after the unstake cooldown has completed. Requires the withdraw request ID.",
-      inputSchema: z.object({ withdrawRequestId: z.number().int().min(0) }),
-      execute: async ({ withdrawRequestId }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/withdraw-flash`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, withdrawRequestId }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "withdraw_flash", args: { withdrawRequestId }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_collect_stake_reward: tool({
-      description: "Collect accumulated FLASH token staking rewards.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/collect-stake-reward`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "collect_stake_reward", args: {}, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_collect_flp_reward: tool({
-      description: "Collect FLP liquidity staking rewards (paid in USDC).",
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/collect-flp-reward`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "collect_flp_reward", args: {}, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_collect_rebate: tool({
-      description: "Collect accumulated Flash Trade trading fee rebates (paid in USDC).",
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/collect-rebate`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "collect_rebate", args: {}, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_cancel_all_triggers: tool({
-      description: "Cancel ALL stop-loss and take-profit trigger orders for a specific market at once.",
-      inputSchema: z.object({
-        marketId: z.number().int().describe("Market ID from flash_get_positions"),
-      }),
-      execute: async ({ marketId }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/cancel-all-triggers`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, marketId }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "cancel_all_triggers", args: { marketId }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_migrate_to_sflp: tool({
-      description: "Convert staked FLP tokens into sFLP (auto-compounding). Rewards then compound automatically instead of needing manual claims.",
-      inputSchema: z.object({
-        flpAmount: z.number().positive().describe("Amount of FLP tokens to convert to sFLP"),
-      }),
-      execute: async ({ flpAmount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/migrate-stake`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, flpAmount }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "migrate_to_sflp", args: { flpAmount }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_migrate_to_flp: tool({
-      description: "Convert sFLP (auto-compounding) back into staked FLP. Rewards must then be claimed manually.",
-      inputSchema: z.object({
-        sflpAmount: z.number().positive().describe("Amount of sFLP tokens to convert back to staked FLP"),
-      }),
-      execute: async ({ sflpAmount }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/migrate-flp`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, sflpAmount }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "migrate_to_flp", args: { sflpAmount }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_collect_revenue: tool({
-      description: "Collect referral program revenue share from Flash Trade (for users who have referred active traders).",
-      inputSchema: z.object({
-        revenueTokenSymbol: z.string().default("USDC").describe("Token to receive revenue in, usually USDC"),
-      }),
-      execute: async ({ revenueTokenSymbol }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/collect-revenue`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, revenueTokenSymbol }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "collect_revenue", args: { revenueTokenSymbol }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_increase_position: tool({
-      description: "Increase the size of an existing open Flash Trade position by adding more collateral and increasing leverage. Use when the user says 'add to my position', 'increase my long', or 'scale into my trade'. Call flash_get_positions first to get the marketId.",
-      inputSchema: z.object({
-        marketId: z.number().int().describe("Market ID from flash_get_positions"),
-        addCollateralUsd: z.number().positive().describe("Additional collateral to add in USD"),
-        sizeDeltaUsd: z.number().positive().describe("Position size increase in USD notional"),
-        slippageBps: z.number().int().min(1).max(500).default(100).describe("Slippage tolerance in basis points (100 = 1%)"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/build-increase-position`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "increase_position", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_edit_limit_order: tool({
-      description: "Edit an existing Flash Trade limit order — change the entry price, size, take-profit, or stop-loss. Use flash_get_positions first to get the marketId and orderId.",
-      inputSchema: z.object({
-        marketId: z.number().int(),
-        orderId: z.number().int(),
-        newLimitPrice: z.number().positive().describe("New entry limit price in USD"),
-        newSizeUsd: z.number().positive().describe("New position size in USD notional"),
-        newTakeProfitPrice: z.number().positive().optional().describe("New take-profit price in USD"),
-        newStopLossPrice: z.number().positive().optional().describe("New stop-loss price in USD"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/edit-order`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, orderType: "limit", ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "edit_limit_order", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_edit_trigger_order: tool({
-      description: "Edit an existing Flash Trade stop-loss or take-profit trigger order — change the trigger price or size. Use flash_get_positions first to get the marketId and orderId.",
-      inputSchema: z.object({
-        marketId: z.number().int(),
-        orderId: z.number().int(),
-        isStopLoss: z.boolean().describe("true = stop-loss, false = take-profit"),
-        newTriggerPrice: z.number().positive().describe("New trigger price in USD"),
-        newDeltaSizeUsd: z.number().positive().describe("New size reduction in USD when triggered"),
-      }),
-      execute: async (args) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/edit-order`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, orderType: "trigger", ...args }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "edit_trigger_order", args, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    flash_create_session: tool({
-      description: "Create a Flash Trade trading session so the user can trade without signing every transaction. The session lasts up to 24 hours. After approval, Bluvfi can execute trades automatically on their behalf. Always confirm before creating.",
-      inputSchema: z.object({
-        durationHours: z.number().min(0.5).max(24).default(8).describe("Session duration in hours (max 24)"),
-      }),
-      // The session keypair must be generated client-side (FlashSessionApprovalCard) so the private key
-      // never touches the server. We just return the pending marker here; the card handles the API call.
-      execute: async ({ durationHours }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        return { pendingFlashSession: true, action: "create_session", args: { durationHours }, solanaAddress };
-      },
-    }),
-
-    flash_revoke_session: tool({
-      description: "Revoke the active Flash Trade trading session, stopping automatic trade execution immediately.",
-      inputSchema: z.object({}),
-      // The session keypair pubkey lives in the browser's localStorage — the server cannot access it.
-      // Return a pendingFlashRevoke marker; FlashRevokeSessionCard reads localStorage and handles the full flow client-side.
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        return { pendingFlashRevoke: true, solanaAddress };
-      },
-    }),
-
-    flash_create_referral: tool({
-      description: "Link a referrer wallet address for the user on Flash Trade to start earning rebates.",
-      inputSchema: z.object({ referrerAddress: z.string().describe("The referrer's Solana wallet address") }),
-      execute: async ({ referrerAddress }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const r = await fetch(`${appBase()}/api/flash/create-referral`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ownerAddress: solanaAddress, referrerAddress }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          const { transaction } = await r.json();
-          return { pendingFlashTx: true, action: "create_referral", args: { referrerAddress }, transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
 
     grail_find_user: tool({
       description: `Look up or register the user's Oro GRAIL gold-trading account by their Solana wallet address.
@@ -4222,192 +3001,11 @@ Returns: { redemption_id, status, estimated_delivery } — success means physica
       },
     }),
 
-    // ── Roaster ──────────────────────────────────────────────────────────────
-
-    roaster_list_battles: tool({
-      description: `List Roaster AI rap battles. Roaster is a platform on Solana where AI writes the bars, an AI Jury (Claude + GPT + Gemini) picks the winner, and users back a side with USDC.
-Returns: { battles: [...], total } — each battle has: battle_id, topic, sides[0/1] (name, pool_usdc, track_url, rap_id, creator_address), status (open/live/judging/settled/voided), duration_tier (15m/6h/24h), starts_at, ends_at, total_pool_usdc, winner_side (0 or 1 if settled), jury_transcript_url, jury_irys_tx_id.
-Use to browse active battles, check pools, find a specific battle, or load the user's created battles.`,
-      inputSchema: z.object({
-        status: z.enum(["open", "live", "judging", "settled", "voided"]).optional()
-          .describe("Filter by status — omit for all battles"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Number of battles to return"),
-        offset: z.number().int().min(0).default(0).describe("Pagination offset for loading more"),
-        creator_address: z.string().optional().describe("Filter to battles created by this Solana address"),
-      }),
-      execute: async ({ status, limit, offset, creator_address }) => {
-        try {
-          const { listBattles } = await import("@/lib/roaster");
-          return await listBattles({ status, limit, offset, creator_address });
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_get_battle: tool({
-      description: `Get full details of a specific Roaster rap battle by ID.
-Returns: battle_id, topic, sides[0/1] (name, pool_usdc, track_url, rap_id, creator_address), status (open/live/judging/settled/voided), duration_tier, starts_at, ends_at, total_pool_usdc, winner_side (0|1 if settled), jury_transcript_url, jury_irys_tx_id, creator_address (battle creator), creation_bond_usdc.
-Use when the user mentions a specific battle_id, wants status on a battle, or you need pool sizes before estimating payout.`,
-      inputSchema: z.object({
-        battle_id: z.string().describe("Battle ID from roaster_list_battles or mentioned by the user"),
-      }),
-      execute: async ({ battle_id }) => {
-        try {
-          const { getBattle } = await import("@/lib/roaster");
-          return await getBattle(battle_id);
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_get_leaderboard: tool({
-      description: `Get the Roaster leaderboard — top earners, most wins, or top battle creators.
-Returns: { entries: [...], total } — each entry: rank, address, username, wins, losses, total_backed_usdc, total_earned_usdc, battles_created, raps_created.
-Present as a ranked list. Top 3 get a trophy emoji. Abbreviate addresses to first4…last4.`,
-      inputSchema: z.object({
-        metric: z.enum(["earnings", "wins", "battles_created"]).default("earnings")
-          .describe("Sort metric: earnings (total USDC earned), wins (win count), battles_created"),
-        limit: z.number().int().min(1).max(50).default(10).describe("Number of entries to return"),
-        offset: z.number().int().min(0).default(0).describe("Pagination offset"),
-      }),
-      execute: async ({ metric, limit, offset }) => {
-        try {
-          const { getLeaderboard } = await import("@/lib/roaster");
-          return await getLeaderboard({ metric, limit, offset });
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_get_wallet: tool({
-      description: `Get the user's Roaster Battle Wallet balance and pending payouts on Solana.
-Returns: { address, balance_usdc, pending_payouts_usdc }.
-The Battle Wallet is an embedded Solana wallet auto-created at signup — USDC goes in/out to battle vaults on-chain.`,
-      inputSchema: z.object({}),
-      execute: async () => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const { getBattleWallet } = await import("@/lib/roaster");
-          return await getBattleWallet(solanaAddress);
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_get_my_backings: tool({
-      description: `List the user's battle backings on Roaster — which sides they've backed and for how much.
-Returns: { backings: [...] } — each: backing_id, battle_id, side (0=A or 1=B), amount_usdc, time_weight (higher = earlier backer = more potential payout), potential_payout_usdc, created_at.
-Use to show portfolio of bets, check a specific battle backing, or summarise total USDC at risk.`,
-      inputSchema: z.object({
-        battle_id: z.string().optional().describe("Filter to a specific battle"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Number of backings to return"),
-      }),
-      execute: async ({ battle_id, limit }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const { getMyBackings } = await import("@/lib/roaster");
-          return await getMyBackings({ backer_address: solanaAddress, battle_id, limit });
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_get_backings: tool({
-      description: `List all backings for a specific battle on Roaster — who backed which side, for how much, and what their time-weighted potential payout is.
-Unlike roaster_get_my_backings (which filters to the current user), this returns ALL backings for a battle.
-Returns: { backings: [...] } — each: backing_id, battle_id, side (0=A or 1=B), backer_address, amount_usdc, time_weight, potential_payout_usdc, created_at.
-Use when user asks "who backed this battle?", "show me all bets on battle X", or to display a battle's backer leaderboard.`,
-      inputSchema: z.object({
-        backer_address: z.string().describe("Filter to backings by this Solana wallet address"),
-        battle_id: z.string().optional().describe("Filter to a specific battle ID"),
-        limit: z.number().int().min(1).max(50).optional().describe("Max backings to return"),
-      }),
-      execute: async ({ backer_address, battle_id, limit }) => {
-        try {
-          const { getMyBackings } = await import("@/lib/roaster");
-          return await getMyBackings({ backer_address, battle_id, limit });
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_get_rap: tool({
-      description: `Get the status and details of a specific Roaster rap by ID.
-Use to check if AI generation finished (status: generating → ready), get the track URL, or view the bars.
-Returns: rap_id, battle_id, side (0=A/1=B), creator_address, angles, bars, track_url, status (generating/ready/failed), created_at.`,
-      inputSchema: z.object({
-        rap_id: z.string().describe("Rap ID — returned when a rap is created, or from battle sides"),
-      }),
-      execute: async ({ rap_id }) => {
-        try {
-          const { getRap } = await import("@/lib/roaster");
-          return await getRap(rap_id);
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_create_rap: tool({
-      description: `Submit creative angles for a Roaster battle side — AI writes every bar and produces the full audio track. No signing required, no USDC cost.
-The first creator to finish a side locks it — one song per side per battle.
-Rap creator earns 0.60% of all backing volume on the battle and receives an IP Revenue NFT at settlement (win or lose).
-Returns: { rap_id, battle_id, side, status: "generating", ... } — poll roaster_get_rap until status = "ready", then share track_url so the user can listen.
-Confirm the battle, side, and angles with the user before calling.`,
-      inputSchema: z.object({
-        battle_id: z.string().describe("Battle ID from roaster_list_battles"),
-        side: z.number().int().min(0).max(1).describe("0 = Side A, 1 = Side B"),
-        angles: z.array(z.string().min(1)).min(1).max(6)
-          .describe("Creative directions for the AI — e.g. ['wordplay', 'storytelling', 'braggadocio']. 1–6 items."),
-      }),
-      execute: async ({ battle_id, side, angles }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const { createRap } = await import("@/lib/roaster");
-          return await createRap({ battle_id, side: side as 0 | 1, angles, creator_address: solanaAddress });
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_back_side: tool({
-      description: `Initiate backing a Roaster battle side with USDC. Returns a pendingRoasterBack marker — a wallet-signing card renders inline in chat and the user approves there.
-Fee: 1.25% of amount (0.25% creator / 0.60% rap creators / 0.30% protocol / 0.10% referral).
-Earlier backing earns a higher time-weight — the pool is parimutuel and time-weighted so backing sooner means a larger share of winnings.
-IMPORTANT: Always call roaster_get_battle first to get live pool sizes, compute the payout estimate, confirm battle/side/amount with user, then call this.
-Payout estimate if user's side wins: stake + (stake / side_pool) × other_pool. E.g. $10 on Side A ($40 pool) when Side B pool is $25 → $10 + (10/40 × $25) = $16.25.`,
-      inputSchema: z.object({
-        battle_id: z.string().describe("Battle ID — from roaster_list_battles or mentioned by the user"),
-        side: z.number().int().min(0).max(1).describe("0 = Side A, 1 = Side B"),
-        amount_usdc: z.number().positive().describe("USDC amount to back with"),
-        referrer_address: z.string().optional().describe("Referrer's Solana address if the user was referred (earns 0.10%)"),
-      }),
-      execute: async ({ battle_id, side, amount_usdc, referrer_address }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const { backSide } = await import("@/lib/roaster");
-          const data = await backSide({ battle_id, side: side as 0 | 1, amount_usdc, backer_address: solanaAddress, referrer_address });
-          return { pendingRoasterBack: true, battle_id, side, amount_usdc, platform_fee_usdc: data.platform_fee_usdc, time_weight: data.time_weight, transaction: data.transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    roaster_create_battle: tool({
-      description: `Create a new Roaster rap battle. Requires a non-refundable 10 USDC creation bond — a wallet-signing card renders inline in chat and the user approves there.
-Returns { pendingRoasterBond: true, battle_id, bond_transaction } — signing card handles the on-chain bond payment, no redirect needed.
-Creator earns 0.25% of all backing volume as a fee. Duration tiers: 15m / 6h / 24h.
-IMPORTANT: Always confirm topic, side A name, side B name, and duration with the user before calling. The 10 USDC bond is non-refundable.`,
-      inputSchema: z.object({
-        topic: z.string().min(3).describe("The rap battle topic, e.g. 'AI vs Human Creativity'"),
-        side_a_name: z.string().min(1).describe("Name for Side A, e.g. 'Robots'"),
-        side_b_name: z.string().min(1).describe("Name for Side B, e.g. 'Humans'"),
-        duration_tier: z.enum(["15m", "6h", "24h"]).describe("Battle duration: 15m (15 minutes), 6h (6 hours), 24h (24 hours)"),
-      }),
-      execute: async ({ topic, side_a_name, side_b_name, duration_tier }) => {
-        if (!solanaAddress) return { error: "Solana wallet not connected" };
-        try {
-          const { createBattle } = await import("@/lib/roaster");
-          const data = await createBattle({ topic, side_a_name, side_b_name, duration_tier, creator_address: solanaAddress });
-          return { pendingRoasterBond: true, battle_id: data.battle_id, bond_transaction: data.bond_transaction, solanaAddress };
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
 
     // ── Nosana GPU Cloud ───────────────────────────────────────────────────────
 
     nosana_list_deployments: tool({
-      description: `List all Nosana GPU deployments for this account. Returns id, name, status (DRAFT/STARTING/RUNNING/STOPPING/STOPPED/ARCHIVED/ERROR/INSUFFICIENT_FUNDS), market, replicas, timeout, endpoint (if running), price_per_hour_usd, created_at. Use when the user asks to see their GPU deployments or workloads.`,
+      description: `List all Nosana GPU deployments for this account. Returns id, name, status (DRAFT/STARTING/RUNNING/STOPPING/STOPPED/ARCHIVED/ERROR/INSUFFICIENT_FUNDS), market, replicas, timeout, endpoint (public URL, if it exposes a port), created_at. Use when the user asks to see their GPU deployments or workloads.`,
       inputSchema: z.object({}),
       execute: async () => {
         try {
@@ -4431,7 +3029,7 @@ IMPORTANT: Always confirm topic, side A name, side B name, and duration with the
     }),
 
     nosana_list_markets: tool({
-      description: `List available Nosana GPU markets. Each market has address, name, gpu model, vram (GB), price_per_hour_usd, and type (PREMIUM or COMMUNITY). Use when the user wants to choose a GPU, compare prices, or deploy a workload.`,
+      description: `List available Nosana GPU markets. Each market has address, name, gpu model, vram (GB, or null when not published), price_nos_per_hour (job cost in NOS per hour), and type (PREMIUM, COMMUNITY or OTHER). Use when the user wants to choose a GPU, compare prices, or deploy a workload.`,
       inputSchema: z.object({}),
       execute: async () => {
         try {
@@ -4455,7 +3053,7 @@ IMPORTANT: Always confirm topic, side A name, side B name, and duration with the
     nosana_create_deployment: tool({
       description: `Create AND start a Nosana GPU deployment. Builds a job definition from image + optional cmd/expose_port/env, then POSTs to create + auto-starts. No wallet signing — billing is credit-based. Returns the deployment object with id and status (will be STARTING).
 Call nosana_list_markets first if the user hasn't specified a market address.
-IMPORTANT: Confirm the Docker image, market, and estimated cost with the user before deploying. Cost = price_per_hour_usd × (timeout / 60) × replicas.`,
+IMPORTANT: Confirm the Docker image, market, and estimated cost with the user before deploying. Cost = price_nos_per_hour × (timeout / 60) × replicas, in NOS (not dollars).`,
       inputSchema: z.object({
         name: z.string().min(1).describe("Friendly name for the deployment"),
         image: z.string().describe("Docker image, e.g. 'ollama/ollama:latest'"),
@@ -4498,7 +3096,7 @@ IMPORTANT: Confirm the Docker image, market, and estimated cost with the user be
     }),
 
     nosana_get_spending_history: tool({
-      description: `Get Nosana credit spending history — a list of transactions showing how much was spent on each deployment and when. Use when the user asks about spending, usage costs, or billing history. Optionally filter by date range.`,
+      description: `Get Nosana credit SPENDING history — one row per day (newest first) with the amount spent in USD and a per-market breakdown. It does not break spending down per deployment. Use when the user asks about spending or usage costs. Optional from/to date range (from defaults to 90 days ago). For top-ups and purchases of credits use nosana_get_credit_transactions instead.`,
       inputSchema: z.object({
         from: z.string().optional().describe("ISO date string — earliest date to include, e.g. '2025-01-01'"),
         to: z.string().optional().describe("ISO date string — latest date to include, e.g. '2025-12-31'"),
@@ -4508,6 +3106,20 @@ IMPORTANT: Confirm the Docker image, market, and estimated cost with the user be
         try {
           const { getSpendingHistory } = await import("@/lib/nosana");
           return await getSpendingHistory({ from, to, limit });
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    nosana_get_credit_transactions: tool({
+      description: `List Nosana credit TOP-UPS and purchases (not spending) — each with id, type, amountUsd, createdAt and payment method. Use when the user asks what they paid, when they last topped up, or their purchase history. For what they SPENT use nosana_get_spending_history.`,
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(200).optional().describe("Max transactions to return (default 50)"),
+        offset: z.number().int().min(0).optional().describe("Skip this many transactions (for paging)"),
+      }),
+      execute: async ({ limit, offset }) => {
+        try {
+          const { getCreditTransactions } = await import("@/lib/nosana");
+          return await getCreditTransactions({ limit, offset });
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
@@ -4536,26 +3148,6 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
           const { archiveDeployment } = await import("@/lib/nosana");
           return await archiveDeployment(id);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    claim_velvet_removed_tokens: tool({
-      description:
-        "Claim the user's proportionate share of tokens that were removed from a Velvet portfolio vault. Use when the user mentions tokens were excluded or removed from a vault they hold.",
-      inputSchema: z.object({
-        token_exclusion_manager: z.string().describe("TokenExclusionManager contract address from get_velvet_portfolios"),
-        start_id: z.number().int().min(0).describe("Starting exclusion event ID to claim from"),
-        end_id: z.number().int().min(0).describe("Ending exclusion event ID to claim to (inclusive)"),
-      }),
-      execute: async ({ token_exclusion_manager, start_id, end_id }) => {
-        if (!walletAddress) return { error: "Wallet not connected" };
-        try {
-          const { encodeClaimRemovedTokens } = await import("@/lib/velvet");
-          const tx = encodeClaimRemovedTokens(token_exclusion_manager, walletAddress, start_id, end_id);
-          return { pendingClaim: true, user: walletAddress, start_id, end_id, tx };
-        } catch (err: any) {
-          return { error: err?.message ?? "Failed to encode claim" };
-        }
       },
     }),
 
@@ -8498,62 +7090,6 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
       },
     }),
 
-    // ─── Velvet Vault Preferences ─────────────────────────────────────────────
-
-    get_vault_prefs: tool({
-      description:
-        "Get the user's Velvet vault preferences — which vaults they've manually added to their dashboard and which they've hidden. " +
-        "Returns two lists: 'added' (manually pinned vaults) and 'hidden' (vaults removed from view). " +
-        "Call when you need to know which vaults the user has customized their view for.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        try {
-          const r = await fetch(`${appBase()}/api/velvet/vault-prefs`);
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    set_vault_pref: tool({
-      description:
-        "Pin or hide a Velvet vault on the user's dashboard. " +
-        "status='added' pins the vault so it always appears; status='hidden' removes it from view. " +
-        "Call when user says 'add this vault to my dashboard', 'hide this vault', or 'I want to track this vault'.",
-      inputSchema: z.object({
-        portfolioAddress: z.string().describe("The Velvet vault/portfolio contract address"),
-        status: z.enum(["added", "hidden"]).describe("'added' to pin, 'hidden' to remove from view"),
-      }),
-      execute: async ({ portfolioAddress, status }) => {
-        try {
-          const r = await fetch(`${appBase()}/api/velvet/vault-prefs`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ portfolioAddress, status }),
-          });
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
-    remove_vault_pref: tool({
-      description:
-        "Remove a vault preference entirely — resets the vault to its default display state (neither pinned nor hidden). " +
-        "Call when user says 'reset my preference for this vault' or 'stop tracking/hiding this vault'.",
-      inputSchema: z.object({
-        portfolioAddress: z.string().describe("The Velvet vault/portfolio contract address to reset"),
-      }),
-      execute: async ({ portfolioAddress }) => {
-        try {
-          const r = await fetch(`${appBase()}/api/velvet/vault-prefs?portfolio=${encodeURIComponent(portfolioAddress)}`, {
-            method: "DELETE",
-          });
-          if (!r.ok) return { error: await r.text() };
-          return await r.json();
-        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
 
     // ─── Banking Collection & Ledger ──────────────────────────────────────────
 
@@ -8626,7 +7162,7 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     get_goals: tool({
       description:
-        "Fetch all of the user's savings goals linked to their Velvet Capital vaults. " +
+        "Fetch all of the user's savings goals linked to their vaults. " +
         "Each goal has a name, target amount, currency, and the vault it belongs to. " +
         "Call when user asks 'what are my savings goals?', 'show my goals', or 'am I on track?'.",
       inputSchema: z.object({}),
@@ -8643,11 +7179,11 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     create_goal: tool({
       description:
-        "Create or update a savings goal for a Velvet Capital vault. " +
+        "Create or update a savings goal for a vault. " +
         "Associates a target amount and name with a vault so the user can track progress. " +
         "Call when user says 'set a goal of $5000 for my vault' or 'I want to save 10 ETH in this vault'.",
       inputSchema: z.object({
-        vaultId: z.string().describe("Velvet vault address or ID the goal is linked to"),
+        vaultId: z.string().describe("Vault address or ID the goal is linked to"),
         name: z.string().describe("Goal name, e.g. 'Emergency Fund', 'Buy a car'"),
         targetAmount: z.string().describe("Target amount as a string, e.g. '5000'"),
         currency: z.string().describe("Currency code, e.g. 'USDC', 'ETH'"),
@@ -8684,11 +7220,11 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     delete_goal: tool({
       description:
-        "Delete a savings goal linked to a Velvet vault. " +
+        "Delete a savings goal linked to a vault. " +
         "Call when user says 'remove my goal for this vault' or 'I no longer want to track this savings goal'. " +
         "Confirm with the user before deleting.",
       inputSchema: z.object({
-        vaultId: z.string().describe("Velvet vault address or ID whose goal to delete"),
+        vaultId: z.string().describe("Vault address or ID whose goal to delete"),
       }),
       execute: async ({ vaultId }) => {
         try {
@@ -8705,7 +7241,7 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     get_activities: tool({
       description:
-        "Fetch the user's recent DeFi activity log — Velvet vault deposits, withdrawals, swaps, and swap-and-deposits. " +
+        "Fetch the user's recent DeFi activity log — vault deposits, withdrawals, swaps, and swap-and-deposits. " +
         "Each record includes type, amount, token, vault, txHash, and timestamp. " +
         "Call when user asks 'what have I done recently?', 'show my transaction history', or 'what was my last deposit?'.",
       inputSchema: z.object({

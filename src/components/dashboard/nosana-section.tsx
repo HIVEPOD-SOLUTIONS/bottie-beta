@@ -12,10 +12,16 @@ interface Market {
   address: string;
   name: string;
   gpu: string;
-  vram: number;
-  price_per_hour_usd: number;
-  type: "PREMIUM" | "COMMUNITY";
+  /** GB, or null when the market doesn't publish it (about half of them don't). */
+  vram: number | null;
+  /** NOS per hour — what a job costs on this market. */
+  price_nos_per_hour: number;
+  type: "PREMIUM" | "COMMUNITY" | "OTHER";
 }
+
+const fmtNos = (n: number | null | undefined, d = 3) =>
+  typeof n === "number" && Number.isFinite(n) ? n.toFixed(d) : "—";
+const fmtVram = (v: number | null | undefined) => (typeof v === "number" ? `${v}GB` : "—");
 
 interface JobDefinitionOp {
   type: string;
@@ -162,8 +168,8 @@ function DeploymentCard({ dep, onRefresh }: { dep: Deployment; onRefresh: () => 
 
       {dep.status === "INSUFFICIENT_FUNDS" && (
         <div className="mt-3 rounded-xl bg-red-400/5 border border-red-400/20 px-3 py-2 text-xs text-red-400">
-          Insufficient NOS credits — top up on the{" "}
-          <a href="https://dashboard.nosana.io" target="_blank" rel="noreferrer" className="underline">
+          Insufficient credits — top up on the{" "}
+          <a href="https://deploy.nosana.com" target="_blank" rel="noreferrer" className="underline">
             Nosana dashboard
           </a>{" "}
           then restart.
@@ -253,7 +259,7 @@ function DeploymentsTab() {
 
 // ── Deploy tab ───────────────────────────────────────────────────────────────
 
-function DeployTab() {
+function DeployTab({ preselectedMarket }: { preselectedMarket: string | null }) {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loadingMarkets, setLoadingMarkets] = useState(true);
   const [marketsErr, setMarketsErr] = useState("");
@@ -276,7 +282,12 @@ function DeployTab() {
       try {
         const data = await apiFetch<Market[]>("/api/nosana/markets");
         setMarkets(data);
-        if (data.length > 0) setMarket(data[0].address);
+        // Use the GPU picked on the Markets tab when it's still in the list;
+        // otherwise fall back to the first market.
+        const chosen = preselectedMarket && data.some(m => m.address === preselectedMarket)
+          ? preselectedMarket
+          : data[0]?.address;
+        if (chosen) setMarket(chosen);
       } catch (e: any) {
         setMarketsErr(e.message ?? "Failed to load markets");
       } finally {
@@ -430,7 +441,7 @@ function DeployTab() {
               >
                 {markets.map(m => (
                   <option key={m.address} value={m.address}>
-                    {m.name} — {m.gpu} {m.vram}GB · ${m.price_per_hour_usd.toFixed(3)}/hr [{m.type}]
+                    {m.name}{m.vram != null ? ` · ${m.vram}GB` : ""} · {fmtNos(m.price_nos_per_hour)} NOS/hr [{m.type}]
                   </option>
                 ))}
               </select>
@@ -442,12 +453,12 @@ function DeployTab() {
             const reps = Number(replicas) || 1;
             const estimatedCost = strategy === "INFINITE"
               ? null
-              : selectedMarket.price_per_hour_usd * (mins / 60) * reps;
+              : selectedMarket.price_nos_per_hour * (mins / 60) * reps;
             return (
               <div className="rounded-xl bg-white/[0.04] px-3 py-2 flex flex-col gap-1.5 text-xs text-[#A7A79A]">
                 <div className="flex items-center gap-3">
                   <span>GPU: <span className="text-[#F2F0E8] font-medium">{selectedMarket.gpu}</span></span>
-                  <span>VRAM: <span className="text-[#F2F0E8] font-medium">{selectedMarket.vram}GB</span></span>
+                  <span>VRAM: <span className="text-[#F2F0E8] font-medium">{fmtVram(selectedMarket.vram)}</span></span>
                   <span className={`ml-auto rounded-full px-2 py-0.5 font-medium ${selectedMarket.type === "PREMIUM" ? "text-yellow-400 bg-yellow-400/10" : "text-[#8FAE82] bg-[#8FAE82]/10"}`}>
                     {selectedMarket.type}
                   </span>
@@ -482,11 +493,11 @@ function DeployTab() {
 
 // ── Markets tab ──────────────────────────────────────────────────────────────
 
-function MarketsTab() {
+function MarketsTab({ onSelectMarket }: { onSelectMarket: (address: string) => void }) {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [filter, setFilter] = useState<"ALL" | "PREMIUM" | "COMMUNITY">("ALL");
+  const [filter, setFilter] = useState<"ALL" | "PREMIUM" | "COMMUNITY" | "OTHER">("ALL");
 
   useEffect(() => {
     (async () => {
@@ -508,7 +519,7 @@ function MarketsTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex gap-2">
-        {(["ALL", "PREMIUM", "COMMUNITY"] as const).map(f => (
+        {(["ALL", "PREMIUM", "COMMUNITY", "OTHER"] as const).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -522,13 +533,18 @@ function MarketsTab() {
       {shown.length === 0 && <p className="text-sm text-[#A7A79A] text-center py-6">No markets found.</p>}
 
       {shown.map(m => (
-        <div key={m.address} className="rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4">
+        <button
+          type="button"
+          key={m.address}
+          onClick={() => onSelectMarket(m.address)}
+          className="w-full text-left rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 transition-colors hover:border-[#3A3B37] active:bg-white/[0.04]"
+        >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-[#F2F0E8]">{m.name}</p>
               <p className="text-xs text-[#A7A79A] mt-0.5 truncate">{m.address}</p>
             </div>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${m.type === "PREMIUM" ? "text-yellow-400 bg-yellow-400/10" : "text-[#8FAE82] bg-[#8FAE82]/10"}`}>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${m.type === "PREMIUM" ? "text-yellow-400 bg-yellow-400/10" : m.type === "COMMUNITY" ? "text-[#8FAE82] bg-[#8FAE82]/10" : "text-[#A7A79A] bg-white/[0.06]"}`}>
               {m.type}
             </span>
           </div>
@@ -539,14 +555,15 @@ function MarketsTab() {
             </div>
             <div className="rounded-xl bg-white/[0.04] px-3 py-2 text-center">
               <p className="text-[#A7A79A]">VRAM</p>
-              <p className="font-semibold text-[#F2F0E8] mt-0.5">{m.vram}GB</p>
+              <p className="font-semibold text-[#F2F0E8] mt-0.5">{fmtVram(m.vram)}</p>
             </div>
             <div className="rounded-xl bg-white/[0.04] px-3 py-2 text-center">
               <p className="text-[#A7A79A]">Price</p>
-              <p className="font-semibold text-[#F2F0E8] mt-0.5">${m.price_per_hour_usd.toFixed(3)}/hr</p>
+              <p className="font-semibold text-[#F2F0E8] mt-0.5">{fmtNos(m.price_nos_per_hour)} NOS/hr</p>
             </div>
           </div>
-        </div>
+          <p className="mt-3 text-right text-xs font-medium text-[#8FAE82]">Deploy on this GPU →</p>
+        </button>
       ))}
     </div>
   );
@@ -596,21 +613,21 @@ function CreditsTab() {
       <div className="rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-5">
         <p className="text-xs text-[#A7A79A] mb-1">Available credits</p>
         <p className="text-3xl font-bold text-[#F2F0E8]">
-          {available.toFixed(4)}
+          {fmtNos(available, 4)}
           <span className="text-base font-normal text-[#A7A79A] ml-1">NOS</span>
         </p>
         <div className="mt-4 grid grid-cols-3 gap-2 text-xs text-center">
           <div className="rounded-xl bg-white/[0.04] p-2">
             <p className="text-[#A7A79A]">Assigned</p>
-            <p className="font-semibold text-[#F2F0E8] mt-0.5">{credits.assignedCredits.toFixed(2)}</p>
+            <p className="font-semibold text-[#F2F0E8] mt-0.5">{fmtNos(credits.assignedCredits, 2)}</p>
           </div>
           <div className="rounded-xl bg-white/[0.04] p-2">
             <p className="text-[#A7A79A]">Reserved</p>
-            <p className="font-semibold text-[#F2F0E8] mt-0.5">{credits.reservedCredits.toFixed(2)}</p>
+            <p className="font-semibold text-[#F2F0E8] mt-0.5">{fmtNos(credits.reservedCredits, 2)}</p>
           </div>
           <div className="rounded-xl bg-white/[0.04] p-2">
             <p className="text-[#A7A79A]">Settled</p>
-            <p className="font-semibold text-[#F2F0E8] mt-0.5">{credits.settledCredits.toFixed(2)}</p>
+            <p className="font-semibold text-[#F2F0E8] mt-0.5">{fmtNos(credits.settledCredits, 2)}</p>
           </div>
         </div>
       </div>
@@ -626,7 +643,7 @@ function CreditsTab() {
                   <p className="text-xs text-[#F2F0E8]">{tx.description ?? tx.deployment_id ?? "Usage"}</p>
                   <p className="text-xs text-[#A7A79A] mt-0.5">{fmtDate(tx.date)}</p>
                 </div>
-                <p className="text-sm font-semibold text-red-400">-{tx.amount.toFixed(4)}</p>
+                <p className="text-sm font-semibold text-red-400">-${fmtNos(tx.amount, 4)}</p>
               </div>
             ))}
           </div>
@@ -664,6 +681,13 @@ const TABS: { key: Tab; label: string }[] = [
 
 export function NosanaSection() {
   const [tab, setTab] = useState<Tab>("deployments");
+  // GPU chosen by tapping a card on the Markets tab; read by the Deploy tab when it opens.
+  const [preselectedMarket, setPreselectedMarket] = useState<string | null>(null);
+
+  const selectMarket = (address: string) => {
+    setPreselectedMarket(address);
+    setTab("deploy");
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -677,7 +701,7 @@ export function NosanaSection() {
           </div>
         </div>
         <p className="text-xs text-[#A7A79A] leading-relaxed">
-          Deploy containerized AI workloads on a decentralized network of GPU hosts. Pay with NOS credits — no on-chain signing needed. Markets range from community GPUs to premium NVIDIA cards.
+          Deploy containerized AI workloads on a decentralized network of GPU hosts. Pay from a prepaid credit balance — no on-chain signing needed. Markets range from community GPUs to premium NVIDIA cards.
         </p>
       </div>
 
@@ -696,8 +720,8 @@ export function NosanaSection() {
 
       {/* Content */}
       {tab === "deployments" && <DeploymentsTab />}
-      {tab === "deploy"      && <DeployTab />}
-      {tab === "markets"     && <MarketsTab />}
+      {tab === "deploy"      && <DeployTab preselectedMarket={preselectedMarket} />}
+      {tab === "markets"     && <MarketsTab onSelectMarket={selectMarket} />}
       {tab === "credits"     && <CreditsTab />}
     </div>
   );
