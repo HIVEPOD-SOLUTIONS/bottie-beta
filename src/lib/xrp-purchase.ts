@@ -113,6 +113,7 @@ function usdToAtomicUsdc(usd: number, decimals: number): string {
 // product. The authoritative check is isAmountTooLowError() below, matched
 // against NEAR Intents' actual live response.
 // Exported so callers (e.g. the AI tool's own description) can reference the
+
 // live value directly instead of hardcoding a copy that could drift out of
 // sync with this one.
 export const MIN_XRP_BRIDGE_USD = 3.2;
