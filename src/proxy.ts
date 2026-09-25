@@ -138,8 +138,6 @@ function buildCSP(): string {
       "https://api.lifi.dev",
       "https://li.fi",
       "https://*.li.fi",
-      "https://velvet.capital",
-      "https://api.velvet.capital",
       "https://api.bitrefill.com",
       "https://generativelanguage.googleapis.com",
       "https://api.nanopay.me",

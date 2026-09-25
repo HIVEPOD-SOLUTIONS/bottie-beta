@@ -4,11 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useChatSheet } from "@/contexts/chat-context";
 import { useInvestments, type InvestmentPosition } from "@/hooks/use-investments";
-import { VelvetTradingSection } from "./velvet-trading-section";
-import { FlashTradeSection } from "./flash-trade-section";
-import { FlashExtrasSection } from "./flash-extras-section";
 import { GrailSection } from "./grail-section";
-import { RoasterSection } from "./roaster-section";
 import { NosanaSection } from "./nosana-section";
 import { DomaSection } from "./doma-section";
 import { XStocksSection } from "./xstocks-section";
@@ -86,36 +82,9 @@ function XStocksBanner({ onOpen }: { onOpen: () => void }) {
 
 // ── Crypto platform list + detail sheet ──────────────────────────────────────
 
-type CryptoPlatform = "flash-trade" | "flash-extras" | "velvet" | "grail" | "roaster" | "nosana" | "doma" | "dydx";
+type CryptoPlatform = "grail" | "nosana" | "doma" | "dydx";
 
 const CRYPTO_PLATFORMS = [
-  {
-    id: "flash-trade" as CryptoPlatform,
-    icon: "⚡",
-    name: "Flash Trade",
-    tag: "Perpetuals",
-    description: "Up to 100× leverage on SOL, BTC, ETH and more — Solana mainnet",
-    badge: "Solana",
-    badgeColor: "text-purple-400 bg-purple-400/10",
-  },
-  {
-    id: "flash-extras" as CryptoPlatform,
-    icon: "🔄",
-    name: "Flash Swap & Earn",
-    tag: "DeFi",
-    description: "Swap tokens, provide FLP/sFLP liquidity, stake FLASH, collect rebates",
-    badge: "Solana",
-    badgeColor: "text-purple-400 bg-purple-400/10",
-  },
-  {
-    id: "velvet" as CryptoPlatform,
-    icon: "🏦",
-    name: "Velvet Vaults",
-    tag: "On-chain Vaults",
-    description: "Automated on-chain vaults — deposit, withdraw and rebalance on Base",
-    badge: "Base",
-    badgeColor: "text-blue-400 bg-blue-400/10",
-  },
   {
     id: "grail" as CryptoPlatform,
     icon: "✦",
@@ -124,15 +93,6 @@ const CRYPTO_PLATFORMS = [
     description: "Buy, sell, and redeem physical gold on Solana via $GOLD tokens",
     badge: "Solana",
     badgeColor: "text-yellow-400 bg-yellow-400/10",
-  },
-  {
-    id: "roaster" as CryptoPlatform,
-    icon: "🎤",
-    name: "Roaster",
-    tag: "AI Rap Battles",
-    description: "Back a side in AI rap battles — AI Jury picks the winner, you split the pool",
-    badge: "Solana",
-    badgeColor: "text-purple-400 bg-purple-400/10",
   },
   {
     id: "nosana" as CryptoPlatform,
@@ -224,11 +184,7 @@ function CryptoList() {
             </div>
             {/* Scrollable content — padded so chat bar doesn't overlap */}
             <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
-              {open === "flash-trade"  && <FlashTradeSection />}
-              {open === "flash-extras" && <FlashExtrasSection />}
-              {open === "velvet"       && <VelvetTradingSection />}
               {open === "grail"        && <GrailSection />}
-              {open === "roaster"     && <RoasterSection />}
               {open === "nosana"      && <NosanaSection />}
               {open === "doma"        && <DomaSection />}
               {open === "dydx"        && <DydxSection />}

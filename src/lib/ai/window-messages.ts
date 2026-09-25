@@ -24,46 +24,8 @@ const ACTION_TOOLS = new Set([
   "create_onramp_order",
   "create_offramp_order",
   "add_offramp_bank_account",
-  // Velvet write ops
-  "deposit_velvet_portfolio",
-  "withdraw_velvet_portfolio",
-  "rebalance_velvet_portfolio",
-  "update_velvet_weights",
-  "remove_velvet_token",
-  "velvet_borrow",
-  "propose_velvet_fee",
-  "update_velvet_fee",
-  "manage_velvet_whitelist",
-  "manage_velvet_collateral",
-  // Flash write ops
-  "flash_open_position",
-  "flash_close_position",
-  "flash_increase_position",
-  "flash_add_collateral",
-  "flash_remove_collateral",
-  "flash_place_limit_order",
-  "flash_place_trigger_order",
-  "flash_cancel_order",
-  "flash_cancel_all_triggers",
-  "flash_swap",
-  "flash_add_liquidity",
-  "flash_remove_liquidity",
-  "flash_add_compounding",
-  "flash_remove_compounding",
-  "flash_stake_flash",
-  "flash_unstake_flash",
-  "flash_withdraw_flash",
-  "flash_deposit_to_vault",
-  "flash_withdraw_from_vault",
-  "flash_create_session",
-  "flash_revoke_session",
-  "flash_create_referral",
   // Grail (gold trading)
   "grail_cancel_redemption",
-  // Roaster
-  "roaster_create_battle",
-  "roaster_back_side",
-  "roaster_create_rap",
   // Fuze write ops
   "fuze_create_user",
   "fuze_accept_tnc",
@@ -97,19 +59,12 @@ const ACTION_TOOLS = new Set([
   "review_offramp_bank_account",
   "banking_payout_trade",
   "solana_transfer_usdc",
-  // Velvet vault prefs
-  "set_vault_pref",
-  "remove_vault_pref",
   // Bills management
   "update_bill",
   "delete_bill",
   // Goals
   "create_goal",
   "delete_goal",
-  // Velvet additional write ops
-  "update_velvet_settings",
-  "claim_velvet_removed_tokens",
-  "manage_velvet_vault_list",
   // Grail submit ops (execute signed tx on-chain)
   "grail_create_redemption",
   "grail_submit_buy",
@@ -168,16 +123,6 @@ const ACTION_TOOLS = new Set([
   "fuze_create_remittance_payout_to_beneficiary",
   "fuze_update_edd",
   "fuze_upsert_kyc",
-  // Flash additional write ops
-  "flash_migrate_to_sflp",
-  "flash_migrate_to_flp",
-  "flash_collect_revenue",
-  "flash_collect_rebate",
-  "flash_collect_flp_reward",
-  "flash_collect_stake_reward",
-  "flash_cancel_unstake",
-  "flash_edit_limit_order",
-  "flash_edit_trigger_order",
   // Fuze additional write ops
   "fuze_delete_counterparty",
   "fuze_cancel_order",
@@ -313,173 +258,10 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         ? `Added offramp bank account (id: ${String((parsed as any).id).slice(0, 12)}…)`
         : `Failed to add bank account`;
       break;
-    case "deposit_velvet_portfolio":
-      line = (parsed as any)?.txData
-        ? `Prepared Velvet deposit into portfolio ${input.portfolio_address ?? "?"} (awaiting signature)`
-        : `Failed to prepare Velvet deposit`;
-      break;
-    case "withdraw_velvet_portfolio":
-      line = (parsed as any)?.txData
-        ? `Prepared Velvet withdrawal from portfolio ${input.portfolio_address ?? "?"} (awaiting signature)`
-        : `Failed to prepare Velvet withdrawal`;
-      break;
-    case "rebalance_velvet_portfolio":
-    case "update_velvet_weights":
-      line = (parsed as any)?.txData
-        ? `Prepared Velvet rebalance for portfolio ${input.rebalancing_address ?? "?"} (awaiting signature)`
-        : `Failed to prepare Velvet rebalance`;
-      break;
-    case "remove_velvet_token":
-      line = (parsed as any)?.txData
-        ? `Prepared Velvet token removal from portfolio ${input.portfolio_address ?? "?"} (awaiting signature)`
-        : `Failed to prepare Velvet token removal`;
-      break;
-    case "velvet_borrow":
-      line = (parsed as any)?.txData
-        ? `Prepared Velvet borrow against portfolio ${input.rebalancing_address ?? "?"} (awaiting signature)`
-        : `Failed to prepare Velvet borrow`;
-      break;
-    case "propose_velvet_fee":
-      line = (parsed as any)?.txData
-        ? `Proposed Velvet fee change (${input.fee_type}: ${input.new_fee_bps} bps) — 28-day timelock starts`
-        : `Failed to propose Velvet fee change`;
-      break;
-    case "update_velvet_fee":
-      line = (parsed as any)?.txData
-        ? `${input.action === "cancel" ? "Cancelled" : "Applied"} Velvet fee change`
-        : `Failed to update Velvet fee`;
-      break;
-    case "manage_velvet_whitelist":
-      line = (parsed as any)?.txData
-        ? `${input.action === "add" ? "Whitelisted" : "Removed"} wallet(s) on Velvet`
-        : `Failed to update Velvet whitelist`;
-      break;
-    case "manage_velvet_collateral":
-      line = (parsed as any)?.txData
-        ? `${input.action === "enable" ? "Enabled" : "Disabled"} collateral for Velvet portfolio ${input.rebalancing_address ?? "?"}`
-        : `Failed to update Velvet collateral`;
-      break;
-    case "flash_open_position":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash position open — ${input.market} ${input.side} ${input.collateralUsd} USD × ${input.leverage}× (awaiting signature)`
-        : `Failed to queue Flash position open`;
-      break;
-    case "flash_close_position":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash position close — ${input.closePercent ?? 100}% of ${input.marketId ?? "position"} (awaiting signature)`
-        : `Failed to queue Flash position close`;
-      break;
-    case "flash_increase_position":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash position increase — ${input.marketId ?? "?"} +${input.collateralUsd} USD collateral`
-        : `Failed to queue Flash position increase`;
-      break;
-    case "flash_add_collateral":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash add collateral — ${input.marketId ?? "?"} +${input.collateralUsd} USD`
-        : `Failed to queue Flash add collateral`;
-      break;
-    case "flash_remove_collateral":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash remove collateral — ${input.marketId ?? "?"} −${input.collateralUsd} USD`
-        : `Failed to queue Flash remove collateral`;
-      break;
-    case "flash_place_limit_order":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash limit order — ${input.market} ${input.side} @ ${input.limitPrice}`
-        : `Failed to queue Flash limit order`;
-      break;
-    case "flash_place_trigger_order":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash trigger order — ${input.triggerAbove ? "TP" : "SL"} @ ${input.triggerPrice} (${input.sizePercent}%)`
-        : `Failed to queue Flash trigger order`;
-      break;
-    case "flash_cancel_order":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash order cancel for ${input.orderId ?? "?"}`
-        : `Failed to queue Flash order cancel`;
-      break;
-    case "flash_cancel_all_triggers":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash cancel-all-triggers for market ${input.marketId ?? "?"}`
-        : `Failed to queue Flash cancel-all-triggers`;
-      break;
-    case "flash_swap":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash swap — ${input.inAmount} ${input.inSymbol} → ${input.outSymbol}`
-        : `Failed to queue Flash swap`;
-      break;
-    case "flash_add_liquidity":
-    case "flash_add_compounding":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash liquidity deposit — ${input.inAmount} ${input.inSymbol}`
-        : `Failed to queue Flash liquidity deposit`;
-      break;
-    case "flash_remove_liquidity":
-    case "flash_remove_compounding":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash liquidity removal — ${input.lpAmount ?? input.amount} LP tokens`
-        : `Failed to queue Flash liquidity removal`;
-      break;
-    case "flash_stake_flash":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash FLASH stake — ${input.amount} FLASH`
-        : `Failed to queue Flash stake`;
-      break;
-    case "flash_unstake_flash":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash FLASH unstake — ${input.amount} FLASH (cooldown starts)`
-        : `Failed to queue Flash unstake`;
-      break;
-    case "flash_withdraw_flash":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash FLASH withdrawal (requestId: ${input.withdrawRequestId ?? "?"})`
-        : `Failed to queue Flash withdrawal`;
-      break;
-    case "flash_deposit_to_vault":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash vault deposit — ${input.amount} ${input.symbol}`
-        : `Failed to queue Flash vault deposit`;
-      break;
-    case "flash_withdraw_from_vault":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash vault withdrawal — ${input.amount} ${input.symbol}`
-        : `Failed to queue Flash vault withdrawal`;
-      break;
-    case "flash_create_session":
-      line = (parsed as any)?.pendingFlashSession
-        ? `Queued Flash session creation (24h session key, no per-trade popups)`
-        : `Failed to create Flash session`;
-      break;
-    case "flash_revoke_session":
-      line = (parsed as any)?.pendingFlashRevoke
-        ? `Queued Flash session revocation`
-        : `Flash session already inactive or revocation failed`;
-      break;
-    case "flash_create_referral":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash referral link to ${input.referrer ?? "?"}`
-        : `Failed to queue Flash referral`;
-      break;
     case "grail_cancel_redemption":
       line = (parsed as any)?.status === "cancelled"
         ? `Cancelled Grail gold redemption ${input.redemption_id ?? "?"}`
         : `Failed to cancel Grail redemption ${input.redemption_id ?? "?"}`;
-      break;
-    case "roaster_create_battle":
-      line = (parsed as any)?.battle_id
-        ? `Created Roaster battle "${input.topic ?? "?"}" (id: ${String((parsed as any).battle_id).slice(0, 12)}…) — signing card rendered`
-        : `Failed to create Roaster battle`;
-      break;
-    case "roaster_back_side":
-      line = (parsed as any)?.pendingRoasterBack
-        ? `Queued Roaster backing — $${(parsed as any).amount_usdc ?? input.amount_usdc} USDC on Side ${(parsed as any).side === 0 ? "A" : "B"} (signing card rendered)`
-        : `Failed to queue Roaster backing`;
-      break;
-    case "roaster_create_rap":
-      line = (parsed as any)?.rap_id
-        ? `Created Roaster rap (id: ${String((parsed as any).rap_id).slice(0, 12)}…) — AI generating track`
-        : `Failed to create Roaster rap`;
       break;
     case "fuze_create_user":
       line = (parsed as any)?.userId ?? (parsed as any)?.data?.userId
@@ -627,16 +409,6 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         ? `Built USDC transfer tx of ${input.amountUsdc} USDC from ${(input.from as string)?.slice(0, 8) ?? "?"} (awaiting user signature)`
         : `Failed to build Solana USDC transfer`;
       break;
-    case "set_vault_pref":
-      line = (parsed as any)?.ok
-        ? `${input.status === "added" ? "Pinned" : "Hidden"} Velvet vault ${input.portfolioAddress ?? "?"} on dashboard`
-        : `Failed to set vault preference`;
-      break;
-    case "remove_vault_pref":
-      line = (parsed as any)?.ok
-        ? `Reset dashboard preference for Velvet vault ${input.portfolioAddress ?? "?"}`
-        : `Failed to remove vault preference`;
-      break;
     case "update_bill":
       line = (parsed as any)?.bill?.id
         ? `Updated bill ${input.billId ?? "?"}${input.status ? ` → status: ${input.status}` : ""}${input.autopay !== undefined ? ` autopay: ${input.autopay}` : ""}`
@@ -648,21 +420,6 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         : `Failed to delete bill`;
       break;
     // Goals
-    case "update_velvet_settings":
-      line = (parsed as any)?.txData
-        ? `Updated Velvet vault settings (${input.setting ?? "?"}) for portfolio ${input.portfolio_address ?? "?"}`
-        : `Failed to update Velvet settings`;
-      break;
-    case "claim_velvet_removed_tokens":
-      line = (parsed as any)?.txData
-        ? `Claimed removed tokens from Velvet portfolio ${input.portfolio_address ?? "?"}`
-        : `Failed to claim Velvet removed tokens`;
-      break;
-    case "manage_velvet_vault_list":
-      line = !(parsed as any)?.error
-        ? `${input.action === "add_vault" ? "Pinned" : input.action === "remove_vault" ? "Unpinned" : input.action === "hide_vault" ? "Hidden" : "Un-hidden"} Velvet vault ${String(input.address ?? "?").slice(0, 10)}… in watchlist`
-        : `Failed to update Velvet vault watchlist`;
-      break;
     case "grail_create_redemption":
       line = (parsed as any)?.redemption_id
         ? `Created GRAIL gold redemption request — ${input.denomination_id ?? "?"} in ${input.city ?? "?"} (id: ${(parsed as any).redemption_id})`
@@ -930,52 +687,6 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
       line = (parsed as any)?.success !== false
         ? `Upserted Fuze KYC for user ${input.orgUserId ?? "?"}`
         : `Failed to upsert Fuze KYC`;
-      break;
-    // Flash additional write ops
-    case "flash_migrate_to_sflp":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued migration of ${input.flpAmount} FLP → sFLP (auto-compounding)`
-        : `Failed to queue FLP→sFLP migration`;
-      break;
-    case "flash_migrate_to_flp":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued migration of ${input.sflpAmount} sFLP → staked FLP`
-        : `Failed to queue sFLP→FLP migration`;
-      break;
-    case "flash_collect_revenue":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash revenue collection in ${input.revenueTokenSymbol ?? "USDC"}`
-        : `Failed to queue Flash revenue collection`;
-      break;
-    case "flash_collect_rebate":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash rebate collection`
-        : `Failed to queue Flash rebate collection`;
-      break;
-    case "flash_collect_flp_reward":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued FLP staking reward collection`
-        : `Failed to queue FLP reward collection`;
-      break;
-    case "flash_collect_stake_reward":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued FLASH staking reward collection`
-        : `Failed to queue FLASH stake reward collection`;
-      break;
-    case "flash_cancel_unstake":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued Flash unstake cancellation`
-        : `Failed to queue Flash unstake cancellation`;
-      break;
-    case "flash_edit_limit_order":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued limit order edit — market ${input.marketId}, new price $${input.newLimitPrice}`
-        : `Failed to queue limit order edit`;
-      break;
-    case "flash_edit_trigger_order":
-      line = (parsed as any)?.pendingFlashTx
-        ? `Queued trigger order edit — market ${input.marketId}, new trigger $${input.newTriggerPrice}`
-        : `Failed to queue trigger order edit`;
       break;
     // Fuze additional write ops
     case "fuze_delete_counterparty":

@@ -5,7 +5,7 @@
  * (base58-encoded 64-byte secret key — same format as Phantom's "export private key").
  * It is completely separate from the user's Privy Solana wallet.
  *
- * All operations run on Solana mainnet using the same RPC as Flash Trade.
+ * All operations run on Solana mainnet using the shared Solana RPC (FLASH_SOLANA_RPC, name is historical).
  *
  * Gate catalogue (defined in getSolPayKit() pricing option):
  *   "charge"  — fixed $0.000001 USDC/call  (MPP) — protocol minimum
