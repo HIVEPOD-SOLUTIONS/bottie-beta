@@ -9,7 +9,9 @@
     "build:android": "node scripts/build-android.mjs",
     "cap:sync": "yarn build:android && npx cap sync android",
     "cap:open": "npx cap open android",
-    "cap:dev": "cross-env CAPACITOR_DEV=1 npx cap sync android && npx cap open android"
+    "cap:dev": "cross-env CAPACITOR_DEV=1 npx cap sync android && npx cap open android",
+    "test:cmc": "npx tsx --test tests/cmc.test.ts",
+    "cmc:verify": "npx tsx --env-file=.env scripts/verify-cmc.mts"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.110",

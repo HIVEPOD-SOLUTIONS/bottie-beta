@@ -965,7 +965,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     }),
 
     doma_get_name_activities: tool({
-      description: "Fetch Doma activity history for a tokenized domain name, such as tokenization, transfers, bridging, listings, offers, or lifecycle events.",
+      description: "Fetch the lifecycle history of a tokenized domain NAME: tokenized, claimed, renewed, detokenized, and claim requested/approved/rejected. Marketplace events (listings, offers, purchases, transfers) belong to the token — use doma_get_token_activities for those.",
       inputSchema: z.object({
         name: z.string().describe("Full domain, e.g. example.com"),
         skip: z.number().int().optional(),
@@ -980,7 +980,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     }),
 
     doma_get_token_activities: tool({
-      description: "Fetch Doma activity history for a specific domain ownership tokenId.",
+      description: "Fetch marketplace and ownership history for a specific domain ownership tokenId: minted, transferred, listed, offer received, listing/offer cancelled, purchased, fractionalized, bought out. Each event has a __typename and type, tx hash, and (for listings/offers/purchases) seller, buyer and payment; a listing's optional restricted buyer is `restrictedBuyer`.",
       inputSchema: z.object({
         tokenId: z.string(),
         skip: z.number().int().optional(),
@@ -1177,9 +1177,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     }),
 
     doma_get_offers: tool({
-      description: "Browse active Doma marketplace offers, optionally for a tokenId.",
+      description: "List active Doma marketplace offers on ONE token. A tokenId is required — Doma cannot list offers across all tokens; get the tokenId from doma_get_name or doma_get_tokens first.",
       inputSchema: z.object({
-        tokenId: z.string().optional(),
+        tokenId: z.string().describe("Doma ownership token ID"),
         take: z.number().int().optional(),
       }),
       execute: async (args) => {
@@ -1191,12 +1191,94 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     }),
 
     doma_get_name_statistics: tool({
-      description: "Get Doma marketplace statistics for a tokenId such as floor price, highest offer, and sales data.",
+      description: "Get Doma offer statistics for a tokenId: the highest active offer (price, currency, who offered), the number of active offers, and how many offers arrived in the last 3 days. It does NOT include a floor price or last-sale price — use doma_get_listings for listing prices.",
       inputSchema: z.object({ tokenId: z.string() }),
       execute: async ({ tokenId }) => {
         try {
           const { getDomaNameStatistics } = await import("@/lib/doma");
           return await getDomaNameStatistics(tokenId);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    doma_check_availability: tool({
+      description: "Check whether a domain name can be registered through Doma, across TLDs, with the price in USD. Pass the bare name (e.g. \"bluvfi\") to see every TLD or a full domain (\"bluvfi.com\"). Read-only.",
+      inputSchema: z.object({
+        name: z.string().describe("Domain label or full domain"),
+        take: z.number().int().min(1).max(50).optional(),
+      }),
+      execute: async ({ name, take }) => {
+        try {
+          const { checkDomaAvailability } = await import("@/lib/doma");
+          return await checkDomaAvailability(name, take);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    doma_get_pricing: tool({
+      description: "Get registrar pricing for specific domains: register price, renewal price, allowed years, and why a domain is unavailable. Use operation RENEWAL for renewal quotes. Read-only.",
+      inputSchema: z.object({
+        domains: z.array(z.string()).min(1).max(20),
+        operation: z.enum(["REGISTRATION", "RENEWAL", "TRANSFER"]).optional(),
+        couponCode: z.string().optional(),
+      }),
+      execute: async (args) => {
+        try {
+          const { getDomaPricing } = await import("@/lib/doma");
+          return await getDomaPricing(args);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    doma_create_order: tool({
+      description: "Create a Doma order to register or renew domains. It charges nothing by itself — it returns a signed payment voucher and the on-chain steps (approve + pay on Doma chain, in USDC.e) that the user must sign in their own EVM wallet. ONLY call after the user has explicitly confirmed the exact domains, years and total price (quote them first with doma_get_pricing). Registration also needs a registrantHandle from doma_upload_registrant_contacts / doma_upload_verified_registrant_contacts; renewals do not.",
+      inputSchema: z.object({
+        domains: z.array(z.object({
+          domain: z.string(),
+          type: z.enum(["REGISTRATION", "RENEWAL"]).optional(),
+          years: z.number().int().min(1).max(10).optional(),
+        })).min(1).max(20),
+        registrantHandle: z.string().optional().describe("Required for REGISTRATION"),
+        buyer: z.string().optional().describe("EVM wallet that will pay; defaults to the user's EVM wallet"),
+        couponCode: z.string().optional(),
+      }),
+      execute: async ({ domains, registrantHandle, buyer, couponCode }) => {
+        try {
+          const buyerAddress = buyer ?? walletAddress;
+          if (!buyerAddress) return { error: "No EVM wallet available — ask the user for the wallet address that will pay." };
+          if (domains.some((d) => (d.type ?? "REGISTRATION") === "REGISTRATION") && !registrantHandle) {
+            return { error: "Registration needs a registrantHandle — collect the registrant's contact details and run the email verification + contacts upload first." };
+          }
+          const { createDomaOrder, prepareDomaOrderPayment } = await import("@/lib/doma");
+          const order: any = await createDomaOrder({ buyerAddress, domains, registrantHandle, couponCode });
+          if (order?.__typename === "CreateOrderValidationError") {
+            return { created: false, errors: order.errors, note: "No order was created. Tell the user which domains failed and why." };
+          }
+          return { created: true, order: { orderId: order.orderId, totalPayment: order.totalPayment, status: order.status, items: order.items, voucherExpiresAt: order.voucherExpiresAt }, payment: prepareDomaOrderPayment(order) };
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    doma_get_order: tool({
+      description: "Check the status of a Doma registration/renewal order (VOUCHER_SIGNED = awaiting payment, PAID, COMPLETED, PARTIALLY_COMPLETED, FAILED) with per-domain status and any failure reason. Read-only.",
+      inputSchema: z.object({ orderId: z.string() }),
+      execute: async ({ orderId }) => {
+        try {
+          const { getDomaOrder } = await import("@/lib/doma");
+          return await getDomaOrder(orderId);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    doma_list_orders: tool({
+      description: "List a wallet's Doma registration/renewal orders. Defaults to the user's EVM wallet.",
+      inputSchema: z.object({ buyer: z.string().optional() }),
+      execute: async ({ buyer }) => {
+        try {
+          const address = buyer ?? walletAddress;
+          if (!address) return { error: "No EVM wallet address available." };
+          const { listDomaOrders } = await import("@/lib/doma");
+          return await listDomaOrders(address);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
