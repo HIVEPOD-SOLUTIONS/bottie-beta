@@ -62,7 +62,6 @@ const PARTNERS: Partner[] = [
   // Bills
   { name: "Bitrefill", domain: "bitrefill.com", category: "Bills" },
   // DeFi / Trading
-  { name: "dYdX", domain: "dydx.exchange", category: "DeFi" },
   { name: "0x Protocol", domain: "0x.org", category: "DeFi" },
   {
     name: "Doma Protocol", domain: "doma.xyz", category: "DeFi",
