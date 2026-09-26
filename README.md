@@ -144,15 +144,27 @@ Bluvfi already has an AI chat agent with wallet, payment, and history tools (abo
 
 ### What the API made possible, and where it got in the way
 
-The API itself is straightforward to build against — clear docs, one auth header, predictable pagination. What we ran into integrating it into a typed, tested codebase:
+**What it made possible.** The model's own knowledge of prices is months stale, so without a live source the agent either refuses or states an invented number. With five CMC endpoints behind five tools, the chat agent answers "what's XRP doing?", "what's pumping?", "is the market up?", and "what's 250 XRP in naira?" from live data, cites CoinMarketCap and an `asOf` time, and the dashboard shows a live ticker fed by the same server-side cache layer (in-flight de-duplication and a short TTL keep credit usage low). It also lets the agent do something no static knowledge can: value the user's actual XRP balance in their own currency.
 
-- **`quote` is shaped differently across API versions.** `/v3/cryptocurrency/quotes/latest` and `/v3/cryptocurrency/listings/latest` return `quote` as an **array** of `{ symbol: "USD", price, ... }`; `/v1/cryptocurrency/trending/latest` and `/v2/tools/price-conversion` return it as an **object keyed by currency** (`{ USD: { price, ... } }`). Both are documented, but nothing on the endpoint reference calls out that the shape itself differs between v1/v2 and v3 — we only caught it by writing parser tests against real examples from each doc page.
-- **`/v3/cryptocurrency/quotes/latest`'s own docs example renders the response as a bare top-level array**, not wrapped in `{ data: [...] }` the way every other endpoint's example (and v3's own `listings/latest`) is shown. A parser written against the general "everything is `{ data, status }`" pattern silently drops this endpoint's response.
-- **`error_code` changes type between API versions** — a string (`"0"`, `"500"`) on v3 endpoints, an integer (`0`, `1006`) on v1/v2. A client that checks `status.error_code === 0` to confirm success works for v1/v2 and silently misreads every v3 response.
-- **A request to an unrecognized path still returns HTTP 200** with an error status body, rather than a 404 — so any code that treats `res.ok` as success needs to also inspect `status.error_code` on every call, not just the ones that came back non-200.
-- **Plan-gating and rate-limiting look identical to a generic error.** `/v1/cryptocurrency/trending/latest` on a plan that doesn't include it returns the same `{ status: { error_code, error_message } }` shape as a malformed request — telling "your plan doesn't support this" apart from "you sent bad params" means reading `error_message` text, since there's no distinct machine-readable code for plan-gating.
+**Where it got in the way.** Everything below was confirmed against the live API with a Startup-tier key on 2026-09-26; `npm run cmc:verify` reproduces items 1, 2 and 4 (it prints each response's `error_code`).
 
-None of this is a blocker — CMC's data is exactly as advertised once you build around the above — but a "response shape by endpoint version" note on the API reference page would have saved the trial-and-error.
+1. **A ticker symbol matches many coins, not one.** `/v3/cryptocurrency/quotes/latest?symbol=BTC` returned **13 coins** — the real Bitcoin (rank 1) plus look-alikes such as "Satoshi Pumpomoto" and "Boost Trump Campaign", most with no rank and no price — in no rank order. A client that takes the first or the only result can quote an impostor's price as Bitcoin's. We pick the best-ranked coin per symbol (`pickBestPerSymbol`). A documented `id`/`slug` recommendation, or a rank-ordered response, would make this much harder to get wrong.
+2. **`market_cap_min` (and other filters) run *after* sort and limit.** `listings/latest?limit=5&sort=percent_change_24h&sort_dir=desc&market_cap_min=50000000` returns **0 rows**, because the five biggest 24h movers are all micro-caps that the filter then removes; with `limit=200` it returns 9. The intuitive "top gainers above $50M" query is therefore impossible in one call. We fetch the top 500 by market cap (2 credits, cached) and rank locally instead. Applying the filter before the limit, or noting the order in the docs, would fix it.
+3. **`quote` has two shapes.** `/v3/cryptocurrency/quotes/latest` and `/v3/cryptocurrency/listings/latest` return `quote` as an **array** of `{ symbol: "USD", price, … }`; `/v1/cryptocurrency/trending/latest`, `/v1/global-metrics/quotes/latest` and `/v2/tools/price-conversion` return an **object keyed by currency**. Both are documented per endpoint, but it's easy to write a parser for one and silently get nothing from the other.
+4. **`error_code` changes type between versions:** a string (`"0"`) on v3, an integer (`0`) on v1/v2. A check like `status.error_code === 0` passes on v1/v2 and misreads every v3 success as an error.
+5. **The docs example for `quotes/latest` doesn't match the live response.** The endpoint reference renders a bare top-level array; the live API returns `{ data, status }` like every other endpoint. A parser written from the docs example alone drops the response.
+6. **`/v2/tools/price-conversion` also returns every coin sharing the symbol** (23 matches for DOGE), but lists the canonical coin **first** — we checked 12 of 12 major tickers. We rely on that ordering; it isn't documented.
+
+None of this blocks anything — the data is exactly as advertised once you build around it — but items 1 and 2 are traps that produce plausible-looking wrong answers, which is the worst kind for an agent that repeats what it's given.
+
+### Verify it yourself
+
+```bash
+npm run test:cmc     # 20 offline tests: every documented response shape, symbol de-duplication, top-movers ranking
+npm run cmc:verify   # real calls to all five endpoints (needs COINMARKETCAP_API_KEY in .env); prints request + response
+```
+
+`cmc:verify` never prints the key; it's sent only in the `X-CMC_PRO_API_KEY` header. The key lives in `.env` (git-ignored) and, for deployment, the host's environment variables — it is not in the repository.
 
 ---
 

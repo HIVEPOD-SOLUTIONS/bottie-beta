@@ -52,19 +52,25 @@ async function domaGraphql<T>(query: string, variables?: Record<string, unknown>
   return json.data as T;
 }
 
+// GraphQL field sets, checked against Doma's live schema (introspection). Earlier versions
+// asked for fields that don't exist — tokenId/claimStatus/ownerAddress on NameModel,
+// address on CurrencyModel, status on offers — so those calls failed against the real API.
+const CURRENCY = `currency { name symbol decimals usdExchangeRate }`;
+
 const NAME_FIELDS = `
   items {
     name
-    tokenId
-    tokenAddress
-    claimStatus
     expiresAt
-    networkId
-    ownerAddress
+    tokenizedAt
+    eoi
+    isFractionalized
+    activeOffersCount
+    claimedBy
     registrar { name ianaId }
-    chain { name networkId }
+    ownershipToken { tokenId tokenAddress ownerAddress networkId expiresAt }
   }
   totalCount
+  hasNextPage
 `;
 
 const LISTING_FIELDS = `
@@ -79,27 +85,59 @@ const LISTING_FIELDS = `
     orderbook
     expiresAt
     createdAt
-    currency { symbol name decimals address }
+    ${CURRENCY}
     chain { name networkId }
     registrar { name ianaId }
   }
   totalCount
+  hasNextPage
 `;
 
 const OFFER_FIELDS = `
   items {
     id
     externalId
+    name
     tokenId
+    tokenAddress
     price
     offererAddress
     orderbook
-    status
     expiresAt
     createdAt
-    currency { symbol name decimals address }
+    ${CURRENCY}
+    chain { name networkId }
   }
   totalCount
+  hasNextPage
+`;
+
+// Activities are GraphQL UNIONs, so every member needs its own inline fragment.
+// `buyer` is nullable on a listing (a listing may be restricted to one buyer) but non-null on offers
+// and purchases, and GraphQL refuses to merge fields with different nullability — so a listing's
+// optional buyer comes back as `restrictedBuyer`.
+const NAME_ACTIVITY_FIELDS = `
+  __typename
+  ... on NameTokenizedActivity { id type txHash sld tld createdAt networkId }
+  ... on NameDetokenizedActivity { id type txHash sld tld createdAt networkId }
+  ... on NameRenewedActivity { id type txHash sld tld createdAt expiresAt }
+  ... on NameClaimedActivity { id type txHash sld tld createdAt claimedBy }
+  ... on NameClaimRequestedActivity { id type txHash sld tld createdAt }
+  ... on NameClaimApprovedActivity { id type txHash sld tld createdAt }
+  ... on NameClaimRejectedActivity { id type txHash sld tld createdAt }
+`;
+
+const TOKEN_ACTIVITY_FIELDS = `
+  __typename
+  ... on TokenMintedActivity { id type networkId txHash finalized tokenId name createdAt owner }
+  ... on TokenTransferredActivity { id type networkId txHash finalized tokenId name createdAt transferredTo transferredFrom }
+  ... on TokenListedActivity { id type networkId txHash finalized tokenId name createdAt orderId startsAt expiresAt seller restrictedBuyer: buyer orderbook payment { price tokenAddress currencySymbol decimals usdValue } }
+  ... on TokenOfferReceivedActivity { id type networkId txHash finalized tokenId name createdAt orderId expiresAt seller buyer orderbook payment { price tokenAddress currencySymbol decimals usdValue } }
+  ... on TokenListingCancelledActivity { id type networkId txHash finalized tokenId name createdAt orderId reason orderbook }
+  ... on TokenOfferCancelledActivity { id type networkId txHash finalized tokenId name createdAt orderId reason orderbook }
+  ... on TokenPurchasedActivity { id type networkId txHash finalized tokenId name createdAt orderId purchasedAt seller buyer orderbook payment { price tokenAddress currencySymbol decimals usdValue } }
+  ... on TokenFractionalizedActivity { id type networkId txHash finalized tokenId name createdAt }
+  ... on TokenBoughtOutActivity { id type networkId txHash finalized tokenId name createdAt buyoutPrice }
 `;
 
 const DOMA_NETWORKS = {
@@ -398,14 +436,18 @@ export function getDomaName(name: string) {
     `query Name($name: String!) {
       name(name: $name) {
         name
-        tokenId
-        tokenAddress
-        claimStatus
         expiresAt
-        networkId
-        ownerAddress
+        tokenizedAt
+        detokenizedAt
+        eoi
+        transferLock
+        claimedBy
+        isFractionalized
+        activeOffersCount
         registrar { name ianaId }
-        chain { name networkId }
+        nameservers { ldhName }
+        ownershipToken { tokenId tokenAddress ownerAddress networkId expiresAt explorerUrl }
+        tokens { tokenId tokenAddress ownerAddress networkId type expiresAt }
       }
     }`,
     { name },
@@ -432,21 +474,16 @@ export function getDomaTokens(name: string, skip = 0, take = 20) {
 
 export function getDomaNameActivities(params: {
   name: string;
-  type?: "TOKENIZED" | "CLAIMED" | "RENEWED" | "DETOKENIZED";
+  type?: "TOKENIZED" | "CLAIMED" | "RENEWED" | "DETOKENIZED" | "CLAIM_REQUESTED" | "CLAIM_APPROVED" | "CLAIM_REJECTED";
   skip?: number;
   take?: number;
   sortOrder?: "ASC" | "DESC";
 }) {
   return domaGraphql<unknown>(
-    `query NameActivities($name: String!, $skip: Float, $take: Float, $type: NameActivityType, $sortOrder: SortOrderType) {
+    `query NameActivities($name: String!, $skip: Int, $take: Int, $type: NameActivityType, $sortOrder: SortOrderType) {
       nameActivities(name: $name, skip: $skip, take: $take, type: $type, sortOrder: $sortOrder) {
         items {
-          type
-          txHash
-          sld
-          tld
-          createdAt
-          networkId
+          ${NAME_ACTIVITY_FIELDS}
         }
         totalCount
       }
@@ -473,7 +510,9 @@ export function getDomaToken(tokenId: string) {
         startsAt
         expiresAt
         explorerUrl
-        activities { type networkId txHash finalized tokenId createdAt }
+        activities {
+          ${TOKEN_ACTIVITY_FIELDS}
+        }
       }
     }`,
     { tokenId },
@@ -482,28 +521,24 @@ export function getDomaToken(tokenId: string) {
 
 export function getDomaTokenActivities(params: {
   tokenId: string;
-  type?: "MINTED" | "TRANSFERRED" | "LISTED" | "OFFER_RECEIVED" | "LISTING_CANCELLED" | "OFFER_CANCELLED" | "PURCHASED";
+  type?: "MINTED" | "TRANSFERRED" | "LISTED" | "OFFER_RECEIVED" | "LISTING_CANCELLED" | "OFFER_CANCELLED" | "PURCHASED" | "FRACTIONALIZED" | "BOUGHT_OUT";
   skip?: number;
   take?: number;
   sortOrder?: "ASC" | "DESC";
 }) {
+  // The API filters by a LIST of types (`types`), not a single `type`.
   return domaGraphql<unknown>(
-    `query TokenActivities($tokenId: String!, $skip: Float, $take: Float, $type: TokenActivityType, $sortOrder: SortOrderType) {
-      tokenActivities(tokenId: $tokenId, skip: $skip, take: $take, type: $type, sortOrder: $sortOrder) {
+    `query TokenActivities($tokenId: String!, $skip: Int, $take: Int, $types: [TokenActivityType!], $sortOrder: SortOrderType) {
+      tokenActivities(tokenId: $tokenId, skip: $skip, take: $take, types: $types, sortOrder: $sortOrder) {
         items {
-          type
-          networkId
-          txHash
-          finalized
-          tokenId
-          createdAt
+          ${TOKEN_ACTIVITY_FIELDS}
         }
         totalCount
       }
     }`,
     {
       tokenId: params.tokenId,
-      type: params.type,
+      types: params.type ? [params.type] : undefined,
       skip: params.skip ?? 0,
       take: Math.min(params.take ?? 20, 100),
       sortOrder: params.sortOrder ?? "DESC",
@@ -512,14 +547,21 @@ export function getDomaTokenActivities(params: {
 }
 
 export function getDomaCommand(correlationId: string) {
+  // CommandModel has no `correlationId` field: the id you queried by comes back as
+  // serverCommandId / clientCommandId.
   return domaGraphql<unknown>(
     `query Command($correlationId: String!) {
       command(correlationId: $correlationId) {
-        correlationId
         type
         status
+        source
+        names
+        serverCommandId
+        clientCommandId
+        failureReason
         createdAt
         updatedAt
+        transactions { transactionId type hash status createdAt chain { name networkId } }
       }
     }`,
     { correlationId },
@@ -613,7 +655,7 @@ export function getDomaListings(params: {
   take?: number;
 }) {
   return domaGraphql<unknown>(
-    `query Listings($skip: Float, $take: Float, $sld: String, $tlds: [String!], $networkIds: [String!], $registrarIanaIds: [Int!]) {
+    `query Listings($skip: Int, $take: Int, $sld: String, $tlds: [String!], $networkIds: [String!], $registrarIanaIds: [Int!]) {
       listings(skip: $skip, take: $take, sld: $sld, tlds: $tlds, networkIds: $networkIds, registrarIanaIds: $registrarIanaIds) {
         ${LISTING_FIELDS}
       }
@@ -636,8 +678,12 @@ export function getDomaOffers(params: {
   skip?: number;
   take?: number;
 }) {
+  // Verified live: tokenId is REQUIRED (offeredBy alone, or no filter, is a bare 400). offeredBy only narrows within a token.
+  if (!params.tokenId) throw new Error("Doma offers can only be listed for one token — a tokenId is required (offeredBy just narrows the results).");
+  // The OfferStatus enum spells the catch-all "All" (not "ALL").
+  const status = params.status === "ALL" ? "All" : params.status ?? "ACTIVE";
   return domaGraphql<unknown>(
-    `query Offers($tokenId: String, $offeredBy: [AddressCAIP10!], $status: OfferStatus, $skip: Float, $take: Float) {
+    `query Offers($tokenId: String, $offeredBy: [AddressCAIP10!], $status: OfferStatus, $skip: Int, $take: Int) {
       offers(tokenId: $tokenId, offeredBy: $offeredBy, status: $status, skip: $skip, take: $take) {
         ${OFFER_FIELDS}
       }
@@ -645,7 +691,7 @@ export function getDomaOffers(params: {
     {
       tokenId: params.tokenId || undefined,
       offeredBy: params.offeredBy?.length ? params.offeredBy : undefined,
-      status: params.status ?? "ACTIVE",
+      status,
       skip: params.skip ?? 0,
       take: Math.min(params.take ?? 20, 100),
     },
@@ -653,15 +699,17 @@ export function getDomaOffers(params: {
 }
 
 export function getDomaNameStatistics(tokenId: string) {
+  // Lives under Query.statistics, not at the top level. It reports offer activity only —
+  // the schema has no floor price or last-sale price.
   return domaGraphql<unknown>(
     `query NameStatistics($tokenId: String!) {
-      nameStatistics(tokenId: $tokenId) {
-        tokenId
-        floorPrice
-        highestOffer
-        lastSalePrice
-        listingsCount
-        offersCount
+      statistics {
+        nameStatistics(tokenId: $tokenId) {
+          name
+          activeOffers
+          offersLast3Days
+          highestOffer { price orderbook expiresAt offererAddress ${CURRENCY} }
+        }
       }
     }`,
     { tokenId },
@@ -808,4 +856,151 @@ export function resetDomaEventCursor(params: { eventId: number; cursor?: string 
     `/v1/poll/reset/${encodeURIComponent(String(params.eventId))}${qs.size ? `?${qs}` : ""}`,
     { method: "POST" },
   );
+}
+
+// ── Domain registration & renewal (Doma's registrar flow) ───────────────────────────────
+// Checked live against the real API: availability and pricing are read-only calls; an order
+// needs a registrantHandle (from the contacts upload above) for REGISTRATION, and a payment
+// network + token. The only registrar Doma currently exposes is Interstellar (IANA 3784).
+
+export const DOMA_DEFAULT_REGISTRAR_IANA_ID = 3784;
+const DOMA_PAYMENT_NETWORK_ID = "eip155:97477";
+/** USDC.e on Doma mainnet — from the orderbook currencies endpoint. */
+const DOMA_USDC_E = "0x31EEf89D5215C305304a2fA5376a1f1b6C5dc477";
+
+export function checkDomaAvailability(name: string, take = 20) {
+  return domaGraphql<unknown>(
+    `query Availability($name: String!, $take: Int) {
+      availableDomains(name: $name, take: $take) {
+        totalCount
+        items { fullName tld status price eoi }
+      }
+    }`,
+    { name, take },
+  );
+}
+
+export function getDomaPricing(params: {
+  domains: string[];
+  operation?: "REGISTRATION" | "RENEWAL" | "TRANSFER";
+  couponCode?: string;
+}) {
+  return domaGraphql<unknown>(
+    `query Pricing($domains: [String!]!, $operation: QuoteOperation, $couponCode: String) {
+      domainPricing(domains: $domains, operation: $operation, couponCode: $couponCode) {
+        fullName status unavailableReason
+        registrars { registrarIanaId registrarName available minYears maxYears registerPrice renewalPrice discount }
+      }
+    }`,
+    { ...params, operation: params.operation ?? "REGISTRATION" },
+  );
+}
+
+const ORDER_ITEM_FIELDS = `sld tld type paymentAmount years status failureCode failureMessage failureReason`;
+
+/**
+ * Creates an order and returns the signed payment voucher. Nothing is charged until the
+ * buyer pays on Doma chain. Registrations need `registrantHandle` from the contacts upload.
+ */
+export async function createDomaOrder(params: {
+  buyerAddress: string;
+  domains: Array<{ domain: string; type?: "REGISTRATION" | "RENEWAL"; years?: number }>;
+  registrantHandle?: string;
+  registrarIanaId?: number;
+  couponCode?: string;
+}) {
+  const data = await domaGraphql<{ createOrder: Record<string, unknown> }>(
+    `mutation CreateOrder($input: CreateOrderInput!) {
+      createOrder(input: $input) {
+        __typename
+        ... on CreateOrderSuccess {
+          orderId totalPayment status voucher signature paymentContractAddress voucherExpiresAt
+          items { ${ORDER_ITEM_FIELDS} }
+        }
+        ... on CreateOrderValidationError { errors { domain reason } }
+      }
+    }`,
+    {
+      input: {
+        buyer: params.buyerAddress.startsWith("eip155:")
+          ? params.buyerAddress
+          : `${DOMA_PAYMENT_NETWORK_ID}:${params.buyerAddress}`,
+        registrarIanaId: params.registrarIanaId ?? DOMA_DEFAULT_REGISTRAR_IANA_ID,
+        selectedPaymentNetworkId: DOMA_PAYMENT_NETWORK_ID,
+        selectedPaymentTokenAddress: DOMA_USDC_E,
+        registrantHandle: params.registrantHandle,
+        couponCode: params.couponCode,
+        domains: params.domains.map((d) => ({ domain: d.domain, type: d.type ?? "REGISTRATION", years: d.years ?? 1 })),
+      },
+    },
+  );
+  return data.createOrder;
+}
+
+export function getDomaOrder(orderId: string) {
+  return domaGraphql<unknown>(
+    `query Order($orderId: String!) {
+      order(orderId: $orderId) {
+        orderId networkId status buyer payer paymentToken totalPayment registrarIanaId domainCount
+        refundAmount txHash failureCode failureMessage failureReason paymentContractAddress voucherExpiresAt
+        createdAt updatedAt
+        items { ${ORDER_ITEM_FIELDS} }
+      }
+    }`,
+    { orderId },
+  );
+}
+
+export function listDomaOrders(buyerAddress: string) {
+  const buyer = buyerAddress.startsWith("eip155:") ? buyerAddress : `${DOMA_PAYMENT_NETWORK_ID}:${buyerAddress}`;
+  return domaGraphql<unknown>(
+    `query Orders($buyers: [AddressCAIP10!]!) {
+      orders(buyers: $buyers) {
+        orderId status totalPayment domainCount txHash createdAt failureMessage
+        items { sld tld type years status }
+      }
+    }`,
+    { buyers: [buyer] },
+  );
+}
+
+/**
+ * Turns a created order into the on-chain steps the buyer must sign: an optional ERC-20
+ * approve, then `pay(voucher, signature)` on Doma's payment contract. This app has no signer
+ * for Doma chain, so these are handed to the user's own wallet rather than sent from here.
+ */
+export function prepareDomaOrderPayment(order: {
+  voucher: string;
+  signature: string;
+  paymentContractAddress?: string | null;
+  totalPayment: string;
+}) {
+  let voucher: Record<string, unknown>;
+  try {
+    voucher = JSON.parse(order.voucher);
+  } catch {
+    voucher = {};
+  }
+  const token = String(voucher.token ?? DOMA_USDC_E);
+  const native = /^0x0{40}$/i.test(token);
+  return {
+    network: { id: DOMA_PAYMENT_NETWORK_ID, chainId: 97477 },
+    payTo: order.paymentContractAddress ?? null,
+    token: native ? "native" : token,
+    amount: String(voucher.amount ?? order.totalPayment),
+    steps: [
+      ...(native
+        ? []
+        : [{ step: 1, action: "approve", contract: token, signature: "approve(address spender, uint256 amount)", args: { spender: order.paymentContractAddress, amount: String(voucher.amount ?? order.totalPayment) } }]),
+      {
+        step: native ? 1 : 2,
+        action: "pay",
+        contract: order.paymentContractAddress,
+        signature: "pay((address buyer,address token,uint256 amount,uint256 voucherExpiration,string paymentId,string orderId) voucher, bytes signature)",
+        args: { voucher, signature: order.signature },
+        ...(native ? { value: String(voucher.amount ?? order.totalPayment) } : {}),
+      },
+    ],
+    note: "Voucher is time-limited — pay before voucherExpiresAt or create a new order.",
+  };
 }

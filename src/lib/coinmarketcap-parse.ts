@@ -190,6 +190,9 @@ export function parseGlobalMetrics(json: unknown, currency = "USD"): GlobalMetri
 
 /** /v2/tools/price-conversion. `price` per currency is the converted total for the whole `amount`. */
 export function parseConversion(json: unknown, targets: readonly string[]): Conversion | null {
+  // /v2/tools/price-conversion returns an ARRAY of every coin sharing the symbol, but lists the
+  // canonical coin first — verified live for 12/12 major tickers (DOGE has 23 matches and is still
+  // first). Unlike the quotes endpoint, taking [0] is therefore safe here.
   const coin = flattenCoins(rootData(json))[0];
   if (!coin) return null;
   const amount = num(coin.amount);
@@ -203,4 +206,36 @@ export function parseConversion(json: unknown, targets: readonly string[]): Conv
     if (price !== null) results[t.toUpperCase()] = price;
   }
   return Object.keys(results).length ? { symbol, name: str(coin.name), amount, results } : null;
+}
+
+/**
+ * One coin per ticker symbol.
+ *
+ * /v3/cryptocurrency/quotes/latest?symbol=BTC returns EVERY listed coin that uses the
+ * ticker "BTC" — about eight of them, most worthless look-alikes — not just the real
+ * one, and not in rank order. Left as is, a lookup can quote an impostor's price as
+ * Bitcoin's. Pick the best-ranked entry per symbol (CMC rank 1 = biggest); coins
+ * with no rank lose to any ranked coin, and ties fall back to market cap.
+ *
+ * Returned in the order the symbols were asked for.
+ */
+export function pickBestPerSymbol(coins: readonly CoinQuote[], order: readonly string[] = []): CoinQuote[] {
+  const rankOf = (c: CoinQuote) => (typeof c.rank === "number" && c.rank > 0 ? c.rank : Number.POSITIVE_INFINITY);
+  const better = (a: CoinQuote, b: CoinQuote) => {
+    const ra = rankOf(a), rb = rankOf(b);
+    if (ra !== rb) return ra < rb;
+    return (a.marketCap ?? 0) > (b.marketCap ?? 0);
+  };
+  const best = new Map<string, CoinQuote>();
+  for (const c of coins) {
+    const key = c.symbol.toUpperCase();
+    const cur = best.get(key);
+    if (!cur || better(c, cur)) best.set(key, c);
+  }
+  const out: CoinQuote[] = [];
+  for (const sym of order) {
+    const c = best.get(sym.toUpperCase());
+    if (c) { out.push(c); best.delete(sym.toUpperCase()); }
+  }
+  return [...out, ...best.values()];
 }

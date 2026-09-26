@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { cmcGetCached, CmcApiError, describeCmcError } from "@/lib/coinmarketcap";
-import { parseCoins, parseConversion, parseGlobalMetrics, type CoinQuote } from "@/lib/coinmarketcap-parse";
+import { parseCoins, parseConversion, parseGlobalMetrics, pickBestPerSymbol, type CoinQuote } from "@/lib/coinmarketcap-parse";
 
 /**
  * Live market-data tools for the AI agent, backed by the CoinMarketCap Pro API.
@@ -63,7 +63,7 @@ export function createCmcTools() {
         "from CoinMarketCap. ALWAYS call this for any question about what a coin costs, is worth, or is doing — never answer a price " +
         "from memory, it is out of date. Pass ticker symbols such as BTC, ETH, SOL, XRP, DOGE (max 10). " +
         "Prices default to USD; set `convert` for another currency (e.g. NGN, EUR). " +
-        "If a ticker is ambiguous CoinMarketCap picks the highest-market-cap coin with that symbol — mention this if the user might mean another. " +
+        "Many tickers are shared by unrelated look-alike coins; the result is always the best-ranked coin with that symbol (e.g. the real Bitcoin for BTC) — mention this if the user might mean a different coin. " +
         "Report the price with its `asOf` time and say it comes from CoinMarketCap.",
       inputSchema: z.object({
         symbols: z.array(SYMBOL).min(1).max(10).describe("Ticker symbols, e.g. ['BTC','ETH']"),
@@ -78,7 +78,8 @@ export function createCmcTools() {
             convert: currency,
             skip_invalid: "true",
           });
-          const coins = parseCoins(body, currency);
+          // One coin per requested symbol, best-ranked first: the endpoint returns every look-alike too.
+          const coins = pickBestPerSymbol(parseCoins(body, currency), wanted);
           if (coins.length === 0) return { error: `No prices found for ${wanted.join(", ")}. Check the ticker symbols.` };
           const found = new Set(coins.map((c) => c.symbol.toUpperCase()));
           const notFound = wanted.filter((s) => !found.has(s));
@@ -150,17 +151,32 @@ export function createCmcTools() {
       execute: async ({ direction, timeframe, limit, minMarketCapUsd }) => {
         const dir = direction ?? "gainers";
         const tf = timeframe ?? "24h";
+        const floor = minMarketCapUsd ?? 50_000_000;
+        const want = limit ?? 5;
         try {
+          // Deliberately NOT sort=percent_change + market_cap_min: CMC applies the filter AFTER
+          // the sort and limit, so that combination returns zero rows for limit=5 (the five
+          // biggest % movers are always micro-caps) and only ~9 for limit=200. Instead pull the
+          // top 500 coins by market cap (2 credits, cached) and rank the movers ourselves.
           const { body, fetchedAt } = await cmcGetCached("/v3/cryptocurrency/listings/latest", {
-            limit: limit ?? 5,
-            sort: `percent_change_${tf}`,
-            sort_dir: dir === "gainers" ? "desc" : "asc",
-            market_cap_min: minMarketCapUsd ?? 50_000_000,
+            limit: 500,
+            sort: "market_cap",
+            sort_dir: "desc",
             convert: "USD",
           });
-          const coins = parseCoins(body, "USD").map(compact);
-          if (coins.length === 0) return { error: "No coins matched. Try lowering the minimum market cap." };
-          return { source: SOURCE, currency: "USD", asOf: asOf(fetchedAt), direction: dir, timeframe: tf, movers: coins };
+          const change = (c: CoinQuote) => (tf === "1h" ? c.change1h : tf === "7d" ? c.change7d : c.change24h);
+          const ranked = parseCoins(body, "USD")
+            .filter((c) => (c.marketCap ?? 0) >= floor && change(c) !== null)
+            .sort((x, y) => (dir === "gainers" ? change(y)! - change(x)! : change(x)! - change(y)!))
+            .slice(0, want)
+            .map(compact);
+          if (ranked.length === 0) {
+            return { error: "No coins matched. Try lowering the minimum market cap (only the top 500 coins by market cap are scanned)." };
+          }
+          return {
+            source: SOURCE, currency: "USD", asOf: asOf(fetchedAt), direction: dir, timeframe: tf,
+            scanned: "top 500 coins by market cap", minMarketCapUsd: floor, movers: ranked,
+          };
         } catch (err) {
           return fail(err);
         }
