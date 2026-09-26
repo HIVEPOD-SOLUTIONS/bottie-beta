@@ -8,7 +8,6 @@ import { GrailSection } from "./grail-section";
 import { NosanaSection } from "./nosana-section";
 import { DomaSection } from "./doma-section";
 import { XStocksSection } from "./xstocks-section";
-import { DydxSection } from "./dydx-section";
 
 const MARKET_TABS = [
   { key: "all",    label: "All"            },
@@ -82,7 +81,7 @@ function XStocksBanner({ onOpen }: { onOpen: () => void }) {
 
 // ── Crypto platform list + detail sheet ──────────────────────────────────────
 
-type CryptoPlatform = "grail" | "nosana" | "doma" | "dydx";
+type CryptoPlatform = "grail" | "nosana" | "doma";
 
 const CRYPTO_PLATFORMS = [
   {
@@ -111,15 +110,6 @@ const CRYPTO_PLATFORMS = [
     description: "Search, analyze, and prepare trades for tokenized internet domains",
     badge: "Doma",
     badgeColor: "text-cyan-400 bg-cyan-400/10",
-  },
-  {
-    id: "dydx" as CryptoPlatform,
-    icon: "⚡",
-    name: "dYdX Chain",
-    tag: "Perpetuals",
-    description: "Up to 100× leverage on BTC, ETH, SOL and 100+ markets — Cosmos appchain, no gas fees",
-    badge: "Cosmos",
-    badgeColor: "text-purple-400 bg-purple-400/10",
   },
 ];
 
@@ -187,7 +177,6 @@ function CryptoList() {
               {open === "grail"        && <GrailSection />}
               {open === "nosana"      && <NosanaSection />}
               {open === "doma"        && <DomaSection />}
-              {open === "dydx"        && <DydxSection />}
             </div>
           </div>
         </div>,
