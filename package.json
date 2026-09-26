@@ -70,6 +70,9 @@
     "tailwindcss": "^4.2.0",
     "typescript": "^5.7.0"
   },
+  "resolutions": {
+    "viem": "^2.47.1"
+  },
   "overrides": {
     "wagmi": "~2.19.5",
     "@solana-program/token": "^0.15.0",
