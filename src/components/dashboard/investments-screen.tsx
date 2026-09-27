@@ -8,7 +8,6 @@ import { GrailSection } from "./grail-section";
 import { NosanaSection } from "./nosana-section";
 import { DomaSection } from "./doma-section";
 import { XStocksSection } from "./xstocks-section";
-import { BaseStocksSection } from "./base-stocks-section";
 
 const MARKET_TABS = [
   { key: "all",    label: "All"            },
@@ -71,34 +70,6 @@ function XStocksBanner({ onOpen }: { onOpen: () => void }) {
         </div>
         <p className="truncate text-xs text-[#A7A79A] mt-0.5">
           AAPL, TSLA, NVDA and 70+ tokenized real-world stocks on-chain — xChange RFQ, proof of reserves, oracles
-        </p>
-      </div>
-      <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    </button>
-  );
-}
-
-// ── Base Tokenized Stocks platform card (shown in Stocks tab) ─────────────────
-
-function BaseStocksBanner({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button
-      onClick={onOpen}
-      className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-left hover:border-[#3A3B37] transition-colors w-full"
-    >
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#0052FF]/15 text-lg font-bold text-[#0052FF]">
-        B
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-semibold text-[#F2F0E8]">Base Tokenized Stocks</p>
-          <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">Reference data</span>
-          <span className="rounded-full px-2 py-0.5 text-xs font-medium text-[#0052FF] bg-[#0052FF]/10">Coinbase</span>
-        </div>
-        <p className="truncate text-xs text-[#A7A79A] mt-0.5">
-          Coinbase-issued tokenized stocks on Base — NAV price, multiplier, supply. Public API, no key, no trading yet
         </p>
       </div>
       <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -214,7 +185,6 @@ export function InvestmentsScreen() {
   const [viewTab, setViewTab] = useState<"portfolio" | "market">("portfolio");
   const [marketFilter, setMarketFilter] = useState<string>("all");
   const [xstocksOpen, setXstocksOpen] = useState(false);
-  const [baseStocksOpen, setBaseStocksOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-4">
@@ -319,8 +289,12 @@ export function InvestmentsScreen() {
 
           {/* xStocks is hidden from the UI for now — user request. XStocksBanner, the sheet
               below and XStocksSection are left in place so it's a one-line change to restore. */}
-          {(marketFilter === "stock" || marketFilter === "all") && (
-            <BaseStocksBanner onOpen={() => setBaseStocksOpen(true)} />
+          {(marketFilter === "stock") && (
+            <div className="py-12 text-center">
+              <p className="text-4xl">📈</p>
+              <p className="mt-2 font-semibold text-[#F2F0E8]">Stocks coming soon</p>
+              <p className="mt-1 text-sm text-[#A7A79A]">Tokenized real-world stocks will appear here</p>
+            </div>
           )}
 
           {(marketFilter === "ipo") && (
@@ -366,33 +340,6 @@ export function InvestmentsScreen() {
             </div>
             <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
               <XStocksSection />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {baseStocksOpen && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[70] flex flex-col">
-          <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={() => setBaseStocksOpen(false)} />
-          <div className="bg-[#141513] rounded-t-3xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[#2A2B27] shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0052FF]/15 text-sm font-bold text-[#0052FF]">B</div>
-                <div>
-                  <p className="font-semibold text-[#F2F0E8] text-sm">Base Tokenized Stocks</p>
-                  <p className="text-xs text-[#A7A79A]">Coinbase-issued, on Base</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setBaseStocksOpen(false)}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.06] text-[#A7A79A] hover:text-white transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
-              <BaseStocksSection />
             </div>
           </div>
         </div>,
