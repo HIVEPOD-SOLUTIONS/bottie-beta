@@ -5761,6 +5761,249 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
       },
     }),
 
+    // ── GetEquity (Managed model — private markets: equity, SAFE, debt, fixed interest) ──
+
+    getequity_list_tokens: tool({
+      description: "List active GetEquity tokens (equity, SAFE, debt, fixed-interest raises). Read-only, shared market data. Only page/limit are accepted (verified live) — filter by investment_type client-side on the results, or use getequity_list_raising_tokens for open raises only.",
+      inputSchema: z.object({
+        page: z.number().int().optional(),
+        limit: z.number().int().optional(),
+      }),
+      execute: async (args) => {
+        try { const { listTokens } = await import("@/lib/getequity"); return await listTokens(args); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_list_raising_tokens: tool({
+      description: "List GetEquity tokens currently in an open fundraising round. Read-only.",
+      inputSchema: z.object({ page: z.number().int().optional(), limit: z.number().int().optional() }),
+      execute: async (args) => {
+        try { const { listRaisingTokens } = await import("@/lib/getequity"); return await listRaisingTokens(args); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_search_tokens: tool({
+      description: "Search GetEquity tokens by name or symbol, with filters. Read-only. Verified live: name, symbol, page, limit, exited and completed_raise are accepted — investment_type is not (filter that client-side on the results).",
+      inputSchema: z.object({
+        name: z.string().optional(),
+        symbol: z.string().optional(),
+        page: z.number().int().optional(),
+        limit: z.number().int().optional(),
+        exited: z.boolean().optional(),
+        completed_raise: z.boolean().optional(),
+      }),
+      execute: async (args) => {
+        try { const { searchTokens } = await import("@/lib/getequity"); return await searchTokens(args); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_token: tool({
+      description: "Get full details for one GetEquity token by its id — price, fees, min/max trade, raise status. Read-only.",
+      inputSchema: z.object({ tokenId: z.string() }),
+      execute: async ({ tokenId }) => {
+        try { const { getToken } = await import("@/lib/getequity"); return await getToken(tokenId); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_asset: tool({
+      description: "Get details of the underlying asset/company behind a GetEquity token. Read-only.",
+      inputSchema: z.object({ assetId: z.string() }),
+      execute: async ({ assetId }) => {
+        try { const { getAsset } = await import("@/lib/getequity"); return await getAsset(assetId); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_token_historicals: tool({
+      description: "Historical daily OHLCV price/volume data for a GetEquity token. Read-only. Verified: this route currently 404s in the sandbox for every token tried — if it errors, tell the user price history isn't available right now rather than that this specific token has none.",
+      inputSchema: z.object({ tokenId: z.string(), from: z.string().optional(), to: z.string().optional() }),
+      execute: async ({ tokenId, ...params }) => {
+        try { const { getTokenHistoricals } = await import("@/lib/getequity"); return await getTokenHistoricals(tokenId, params); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_offering_book: tool({
+      description: "Aggregate demand, cover ratio and the demand ladder for a live GetEquity offering — show this before the user bids. Read-only.",
+      inputSchema: z.object({ tokenId: z.string(), tranche: z.string().optional().describe("Tranche key, for a combined offering only") }),
+      execute: async ({ tokenId, tranche }) => {
+        try { const { getOfferingBook } = await import("@/lib/getequity"); return await getOfferingBook(tokenId, { tranche }); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_transaction: tool({
+      description: "Look up a GetEquity transaction/payment by its reference (tx_ref) to see if it actually went through. Only 'settled: true' is final — 'paid: true, settled: false' means still processing. Read-only.",
+      inputSchema: z.object({ reference: z.string(), transactionId: z.string().optional() }),
+      execute: async ({ reference, transactionId }) => {
+        try { const { getTransaction } = await import("@/lib/getequity"); return await getTransaction(reference, transactionId); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_find_member: tool({
+      description: "Look up an existing GetEquity member by email — always call this before getequity_create_member, since an existing account is linked rather than duplicated.",
+      inputSchema: z.object({ email: z.string() }),
+      execute: async ({ email }) => {
+        try { const { getMemberByEmail } = await import("@/lib/getequity"); return await getMemberByEmail(email); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_create_member: tool({
+      description: "Provisions a REAL, KYC-approved GetEquity brokerage-style account in this person's name (their own credentials, wallet, balances) and enrols it in Bluvfi's syndicate. ONLY call with details the user actually typed in this conversation for themselves — never invent or guess a date of birth, address, or any other field to fill the form. All eleven fields (fname, lname, email, phone, password, dob, sex, homeAddress, city, state, country) are required by GetEquity; sending anything else is rejected. Call getequity_find_member first to avoid asking for details on an account that already exists. Ask the user to confirm they want a GetEquity account opened before calling this.",
+      inputSchema: z.object({
+        fname: z.string(), lname: z.string(), email: z.string(), phone: z.string(),
+        password: z.string().max(30), dob: z.string().describe("YYYY-MM-DD"),
+        sex: z.string(), homeAddress: z.string(), city: z.string(), state: z.string(), country: z.string(),
+      }),
+      execute: async (args) => {
+        try { const { createMember } = await import("@/lib/getequity"); return await createMember(args); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_member_balance: tool({
+      description: "Get a GetEquity member's cash wallet balance across all currencies.",
+      inputSchema: z.object({ memberId: z.string() }),
+      execute: async ({ memberId }) => {
+        try { const { getMemberBalance } = await import("@/lib/getequity"); return await getMemberBalance(memberId); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_member_token_balance: tool({
+      description: "Get a GetEquity member's holdings across every token/security they own, with current value.",
+      inputSchema: z.object({ memberId: z.string() }),
+      execute: async ({ memberId }) => {
+        try { const { getMemberTokenBalance } = await import("@/lib/getequity"); return await getMemberTokenBalance(memberId); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_member_orders: tool({
+      description: "Get a GetEquity member's buy/sell order history.",
+      inputSchema: z.object({ memberId: z.string(), page: z.number().int().optional(), limit: z.number().int().optional() }),
+      execute: async ({ memberId, ...params }) => {
+        try { const { getMemberOrders } = await import("@/lib/getequity"); return await getMemberOrders(memberId, params); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_member_transactions: tool({
+      description: "Get a GetEquity member's full transaction history (funding, trades, payouts).",
+      inputSchema: z.object({ memberId: z.string(), page: z.number().int().optional(), limit: z.number().int().optional() }),
+      execute: async ({ memberId, ...params }) => {
+        try { const { getMemberTransactions } = await import("@/lib/getequity"); return await getMemberTransactions(memberId, params); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_fund_invest_quote: tool({
+      description: "Preview the fees and total charge for a fund-and-invest, without initiating any payment. Always call this and show the user the total before getequity_fund_invest.",
+      inputSchema: z.object({ memberId: z.string(), tokenId: z.string(), investmentAmount: z.number(), currency: z.string() }),
+      execute: async ({ memberId, tokenId, ...body }) => {
+        try { const { getFundInvestQuote } = await import("@/lib/getequity"); return await getFundInvestQuote(memberId, tokenId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_fund_invest: tool({
+      description: "Initiates a fund-and-invest: creates a payment link (card) or virtual account (bank transfer) that the member uses to fund their wallet and invest in one flow. This call charges nothing by itself — the member completes the payment themselves. ONLY call after quoting fees with getequity_get_fund_invest_quote and getting the user's explicit go-ahead on the exact amount, token and total charge.",
+      inputSchema: z.object({
+        memberId: z.string(), tokenId: z.string(),
+        investmentAmount: z.number(), currency: z.string(),
+        paymentMethod: z.enum(["card", "bank_transfer"]),
+        redirectUrl: z.string().optional().describe("Required for card, not needed for bank_transfer"),
+      }),
+      execute: async ({ memberId, tokenId, ...body }) => {
+        try { const { fundInvest } = await import("@/lib/getequity"); return await fundInvest(memberId, tokenId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_buy_token: tool({
+      description: "Places a secondary-market buy order for a member, escrowed against their EXISTING wallet balance (check getequity_get_member_balance first — this does not fund the wallet). ONLY call after the user has explicitly confirmed the exact token, amount and currency.",
+      inputSchema: z.object({ memberId: z.string(), tokenId: z.string(), amount: z.number(), currency: z.string() }),
+      execute: async ({ memberId, tokenId, ...body }) => {
+        try { const { buyTokenAsMember } = await import("@/lib/getequity"); return await buyTokenAsMember(memberId, tokenId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_sell_token: tool({
+      description: "Places a secondary-market sell order for tokens a member already holds. ONLY call after the user has explicitly confirmed the exact token, amount and currency.",
+      inputSchema: z.object({ memberId: z.string(), tokenId: z.string(), amount: z.number(), currency: z.string() }),
+      execute: async ({ memberId, tokenId, ...body }) => {
+        try { const { sellTokenAsMember } = await import("@/lib/getequity"); return await sellTokenAsMember(memberId, tokenId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_commit_to_offering: tool({
+      description: "Places a bid on a member's behalf into a live GetEquity offering. Cash is held on the member's own wallet until allotment. Check getequity_get_offering_book first for the demand ladder, and whether a tranche is required. ONLY call after the user has explicitly confirmed the exact amount and price/rate.",
+      inputSchema: z.object({
+        memberId: z.string(), tokenId: z.string(), amount: z.number(),
+        bid_price: z.number().optional().describe("Price-based offerings only — mutually exclusive with bid_rate"),
+        bid_rate: z.number().optional().describe("Debt/fixed-interest offerings only — mutually exclusive with bid_price"),
+        tranche: z.string().optional().describe("Required on a combined offering, refused on every other type"),
+      }),
+      execute: async ({ memberId, tokenId, ...body }) => {
+        try { const { commitToOfferingAsMember } = await import("@/lib/getequity"); return await commitToOfferingAsMember(memberId, tokenId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_cancel_member_order: tool({
+      description: "Cancels an open GetEquity order for a member and reverses any escrowed funds. Confirm which order with the user first.",
+      inputSchema: z.object({ memberId: z.string(), orderId: z.string() }),
+      execute: async ({ memberId, orderId }) => {
+        try { const { cancelMemberOrder } = await import("@/lib/getequity"); return await cancelMemberOrder(memberId, orderId); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_fund_member_wallet: tool({
+      description: "Funds a member's GetEquity cash wallet only — no token purchase (use getequity_fund_invest to fund-and-buy in one step). Returns a payment link or virtual account; the member pays it themselves. ONLY call after the user confirms the exact amount and currency.",
+      inputSchema: z.object({
+        memberId: z.string(), amount: z.number(),
+        currency: z.enum(["NGN", "USD", "KES", "GHS", "ZAR", "GBP", "EUR"]),
+        paymentMethod: z.enum(["card", "bank_transfer", "ussd", "mobilemoney"]).optional(),
+        redirectUrl: z.string().optional().describe("Required unless paymentMethod is bank_transfer"),
+      }),
+      execute: async ({ memberId, ...body }) => {
+        try { const { fundMemberWallet } = await import("@/lib/getequity"); return await fundMemberWallet(memberId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_withdraw_member_wallet: tool({
+      description: "Debits a member's GetEquity wallet to a bank account (created Pending — still needs approval before disbursement). ONLY call after the user has explicitly confirmed the exact amount, bank name, account name and account number — this sends their money to a bank account, so a wrong digit is expensive to undo.",
+      inputSchema: z.object({
+        memberId: z.string(), amount: z.number(),
+        bank_name: z.string().describe("Full bank name matched against Flutterwave's list, e.g. 'Guaranty Trust Bank' not 'GTBank'"),
+        account_name: z.string(), account_number: z.string(),
+        currency: z.enum(["NGN", "KES", "GHS", "ZAR", "UGX", "TZS"]),
+      }),
+      execute: async ({ memberId, ...body }) => {
+        try { const { withdrawMemberWallet } = await import("@/lib/getequity"); return await withdrawMemberWallet(memberId, body as any); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    getequity_get_config: tool({
+      description: "Check whether GetEquity is configured (env, whether a secret key is set) before attempting any getequity_* call.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try { const { getGetEquityConfig } = await import("@/lib/getequity"); return getGetEquityConfig(); }
+        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
     // ─── Banking Providers ────────────────────────────────────────────────────
 
     get_banking_providers: tool({
