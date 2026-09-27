@@ -5761,6 +5761,54 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
       },
     }),
 
+    // ── Base Tokenized Stocks (Coinbase-issued, public API, no key) ────────────
+
+    base_stocks_list: tool({
+      description: "List Coinbase-issued tokenized stocks on Base: symbol, name, contract address, ISIN, total supply, multiplier, and the latest Chainlink NAV/reference price. Public, read-only, no API key. This is reference data only — it does NOT confirm trading availability or the user's eligibility (Coinbase restricts these tokens to persons outside the US in eligible jurisdictions), and it is not a live bid/ask.",
+      inputSchema: z.object({
+        query: z.string().optional().describe("Filter by symbol or company name substring, e.g. \"AAPL\" or \"Apple\""),
+      }),
+      execute: async ({ query }) => {
+        try {
+          const { listBaseStocks } = await import("@/lib/base-stocks");
+          return await listBaseStocks(query);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    base_stocks_get: tool({
+      description: "Get one Base tokenized stock by ticker symbol or contract address: NAV/reference price (with its staleness), multiplier, total supply, and how many underlying shares that supply represents (total_supply × multiplier). Public, read-only, no API key.",
+      inputSchema: z.object({ symbolOrAddress: z.string().describe("Ticker symbol (e.g. AAPL) or the ERC-20 contract address on Base") }),
+      execute: async ({ symbolOrAddress }) => {
+        try {
+          const { getBaseStock } = await import("@/lib/base-stocks");
+          return await getBaseStock(symbolOrAddress);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    base_stocks_chains: tool({
+      description: "List which chains Coinbase's tokenized-stocks protocol contracts are deployed on. Public, read-only, no API key.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try {
+          const { getBaseStocksChains } = await import("@/lib/base-stocks");
+          return await getBaseStocksChains();
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
+    base_stocks_total_supply: tool({
+      description: "Get a Base tokenized-stock token's total supply, normalized by its decimals, by contract address. Public, read-only, no API key. Multiply by the token's multiplier (from base_stocks_get) to get the underlying share count.",
+      inputSchema: z.object({ contractAddress: z.string().describe("ERC-20 contract address on Base") }),
+      execute: async ({ contractAddress }) => {
+        try {
+          const { getBaseStockTotalSupply } = await import("@/lib/base-stocks");
+          return await getBaseStockTotalSupply(contractAddress);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
     // ─── Banking Providers ────────────────────────────────────────────────────
 
     get_banking_providers: tool({
