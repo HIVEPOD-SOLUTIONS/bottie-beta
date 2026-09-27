@@ -83,16 +83,9 @@ function XStocksBanner({ onOpen }: { onOpen: () => void }) {
 
 type CryptoPlatform = "grail" | "nosana" | "doma";
 
+// Oro Gold (Grail) is hidden from the UI for now — user request. The type, sheet branch and
+// GrailSection component are left in place so it's a one-line change to bring it back.
 const CRYPTO_PLATFORMS = [
-  {
-    id: "grail" as CryptoPlatform,
-    icon: "✦",
-    name: "Oro Gold",
-    tag: "Physical Gold",
-    description: "Buy, sell, and redeem physical gold on Solana via $GOLD tokens",
-    badge: "Solana",
-    badgeColor: "text-yellow-400 bg-yellow-400/10",
-  },
   {
     id: "nosana" as CryptoPlatform,
     icon: "⚙️",
@@ -294,8 +287,14 @@ export function InvestmentsScreen() {
             ))}
           </div>
 
-          {(marketFilter === "stock" || marketFilter === "all") && (
-            <XStocksBanner onOpen={() => setXstocksOpen(true)} />
+          {/* xStocks is hidden from the UI for now — user request. XStocksBanner, the sheet
+              below and XStocksSection are left in place so it's a one-line change to restore. */}
+          {(marketFilter === "stock") && (
+            <div className="py-12 text-center">
+              <p className="text-4xl">📈</p>
+              <p className="mt-2 font-semibold text-[#F2F0E8]">Stocks coming soon</p>
+              <p className="mt-1 text-sm text-[#A7A79A]">Tokenized real-world stocks will appear here</p>
+            </div>
           )}
 
           {(marketFilter === "ipo") && (
