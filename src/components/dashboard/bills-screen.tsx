@@ -1240,8 +1240,8 @@ function CheckoutSheet({
         if (!res.ok || inv.error) {
           consecutiveErrors++;
           console.warn("[pollInvoice] poll error:", inv.error ?? res.status, "| id:", id, "| hasToken:", !!accessToken, "| streak:", consecutiveErrors);
-          // After 10 consecutive failures (~100 s) bail out rather than spinning forever.
-          if (consecutiveErrors >= 10) {
+          // After 24 consecutive failures (~4 min) bail out rather than spinning forever.
+          if (consecutiveErrors >= 24) {
             clearTimeout(timeoutId);
             if (deliveryDeadlineId) clearTimeout(deliveryDeadlineId);
             clearInterval(pollRef.current!);

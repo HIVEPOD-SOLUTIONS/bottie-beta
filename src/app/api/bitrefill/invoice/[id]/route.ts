@@ -77,6 +77,33 @@ export async function GET(
 
     return NextResponse.json({ ...invoice, code });
   } catch (err: unknown) {
+    // MCP failed — try DB again for ANY row status (non-terminal included).
+    // If the webhook already fired and updated the DB to "complete" we can
+    // return 200 so the poll continues without counting this as an error.
+    // If the DB also has nothing we fall through to the 502.
+    try {
+      const [row] = await db
+        .select()
+        .from(bitrefillOrders)
+        .where(eq(bitrefillOrders.invoiceId, id))
+        .limit(1);
+      if (row) {
+        return NextResponse.json({
+          invoice_id:        row.invoiceId,
+          status:            row.status,
+          invoice_status:    row.status,
+          code:              row.redemptionCode ?? null,
+          esim_install_link: row.esimInstallLink ?? null,
+          orders:            row.redemptionCode
+            ? [{ order_id: "", status: row.status, redemption_info: { redemption_available: row.status === "complete", code: row.redemptionCode } }]
+            : row.esimInstallLink
+              ? [{ order_id: "", status: row.status, esim_install_link: row.esimInstallLink }]
+              : [],
+          _source: "db_fallback",
+        });
+      }
+    } catch { /* ignore — return 502 below */ }
+
     const message = err instanceof Error ? err.message : "Invoice fetch failed";
     console.error("[/api/bitrefill/invoice/[id]]", message);
     return NextResponse.json({ error: message }, { status: 502 });
