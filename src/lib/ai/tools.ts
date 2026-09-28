@@ -42,6 +42,25 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     if (chain === "solana" && solanaAddress) return solanaAddress;
     return walletAddress ?? "";
   }
+
+  // Resolves the caller's own GetEquity member id from the local cache. Deliberately takes no
+  // parameter — every member-scoped tool below always acts on the LOGGED-IN user's own member,
+  // with no way for the model (or a prompt-injection attempt) to redirect a call at someone
+  // else's account. There is no cross-user path in this integration.
+  async function resolveGetEquityMemberId(): Promise<string> {
+    if (!userId) throw new Error("Not authenticated");
+    const { getCachedGetEquityMemberId } = await import("@/lib/getequity-members");
+    const cached = await getCachedGetEquityMemberId(userId);
+    if (!cached) {
+      throw new Error(
+        "This user has no GetEquity account yet. Call getequity_create_member first — collect their " +
+        "full name, phone, date of birth, sex and home address (address, city, state, country) in the " +
+        "conversation if you don't already have them, then retry.",
+      );
+    }
+    return cached;
+  }
+
   return {
     // ── Live market data (CoinMarketCap) — see lib/ai/cmc-tools.ts ────────────
     ...createCmcTools(),
@@ -835,8 +854,8 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     get_investments: tool({
       description:
-        "List the SAMPLE investment catalog (stocks, pre-IPO companies, ETFs). These prices are frozen illustrative numbers, NOT live market data, and none of these assets can be bought in Bluvfi yet. " +
-        "For real prices of tokenized stocks use xstocks_list_assets / xstocks_get_asset_price_data.",
+        "List the SAMPLE investment catalog (stocks, ETFs, and illustrative pre-IPO-style company entries). These prices are frozen illustrative numbers, NOT live market data, and none of these SAMPLE assets can be bought in Bluvfi yet. " +
+        "For real prices of tokenized stocks use xstocks_list_assets / xstocks_get_asset_price_data. For REAL pre-IPO / private-market investing (not sample data) use the getequity_* tools instead — that's a genuine, working integration.",
       inputSchema: z.object({
         type: z
           .enum(["stock", "ipo", "etf", "all"])
@@ -864,8 +883,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     buy_investment: tool({
       description:
-        "NOT AVAILABLE. Buying stocks, ETFs and pre-IPO shares is not supported in Bluvfi yet — the catalog behind it is sample data with frozen prices, so this tool never starts a payment. " +
-        "Call it only to get the standard explanation to relay to the user; do NOT tell the user a purchase is pending or that a Confirm card will appear.",
+        "NOT AVAILABLE. Buying stocks or ETFs from the SAMPLE catalog is not supported in Bluvfi — that catalog is sample data with frozen prices, so this tool never starts a payment. " +
+        "This does NOT apply to pre-IPO / private-market investing — that's real via getequity_* tools; never call this tool for a pre-IPO request, use getequity_create_member / getequity_get_fund_invest_quote / getequity_fund_invest instead. " +
+        "Call this only to get the standard explanation to relay to the user for a stock/ETF request; do NOT tell the user a purchase is pending or that a Confirm card will appear.",
       inputSchema: z.object({
         symbol: z.string().max(16).describe("Ticker the user asked to buy, e.g. AAPL, TSLA, SPY"),
         shares: z.string().max(32).optional().describe("Quantity the user asked for"),
@@ -873,15 +893,16 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       }),
       execute: async ({ symbol }) => ({
         error:
-          `Buying ${symbol.toUpperCase()} isn't available in Bluvfi yet — stock, ETF and pre-IPO purchases are coming soon, and no payment was started. ` +
-          "Tokenized stocks can be browsed under Invest → Stocks (xStocks), but trading them isn't enabled yet either.",
+          `Buying ${symbol.toUpperCase()} isn't available in Bluvfi yet — stock and ETF purchases are coming soon, and no payment was started. ` +
+          "Tokenized-stock prices/info can still be discussed via the xstocks_* tools, though trading isn't enabled yet either. " +
+          "If the user actually meant pre-IPO / private-market investing, that IS available for real — use the getequity_* tools instead of this one.",
       }),
     }),
 
     get_market_prices: tool({
       description:
-        "Get the SAMPLE catalog prices for stocks, ETFs and pre-IPO companies. These are frozen illustrative numbers, NOT live market data — never present them as current prices. " +
-        "For real tokenized-stock prices use xstocks_get_asset_price_data; for crypto use get_crypto_prices.",
+        "Get the SAMPLE catalog prices for stocks, ETFs and illustrative pre-IPO-style entries. These are frozen illustrative numbers, NOT live market data — never present them as current prices. " +
+        "For real tokenized-stock prices use xstocks_get_asset_price_data; for crypto use get_crypto_prices; for real pre-IPO/private-market token prices use getequity_list_tokens / getequity_get_token instead.",
       inputSchema: z.object({
         type: z
           .enum(["stock", "ipo", "etf", "all"])
@@ -3087,23 +3108,29 @@ Returns: { redemption_id, status, estimated_delivery } — success means physica
     // ── Nosana GPU Cloud ───────────────────────────────────────────────────────
 
     nosana_list_deployments: tool({
-      description: `List all Nosana GPU deployments for this account. Returns id, name, status (DRAFT/STARTING/RUNNING/STOPPING/STOPPED/ARCHIVED/ERROR/INSUFFICIENT_FUNDS), market, replicas, timeout, endpoint (public URL, if it exposes a port), created_at. Use when the user asks to see their GPU deployments or workloads.`,
+      description: `List the LOGGED-IN USER's OWN Nosana GPU deployments (Nosana's account is shared across all Bluvfi users, so this filters to ones this user created). Returns id, name, status (DRAFT/STARTING/RUNNING/STOPPING/STOPPED/ARCHIVED/ERROR/INSUFFICIENT_FUNDS), market, replicas, timeout, endpoint (public URL, if it exposes a port), created_at. Use when the user asks to see their GPU deployments or workloads.`,
       inputSchema: z.object({}),
       execute: async () => {
         try {
+          if (!userId) return { error: "Not authenticated" };
           const { listDeployments } = await import("@/lib/nosana");
-          return await listDeployments();
+          const { filterToOwnedDeployments } = await import("@/lib/nosana-deployments");
+          const { deployments } = await listDeployments();
+          return { deployments: await filterToOwnedDeployments(userId, deployments) };
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     nosana_get_deployment: tool({
-      description: `Get detailed info for a single Nosana deployment by ID. Use when the user asks about a specific deployment, wants to check its status or endpoint, or after creating/starting/stopping one.`,
+      description: `Get detailed info for a single Nosana deployment by ID — only works for a deployment the LOGGED-IN USER created themselves. Use when the user asks about a specific deployment, wants to check its status or endpoint, or after creating/starting/stopping one.`,
       inputSchema: z.object({
         id: z.string().describe("Deployment ID"),
       }),
       execute: async ({ id }) => {
         try {
+          if (!userId) return { error: "Not authenticated" };
+          const { assertOwnsNosanaDeployment } = await import("@/lib/nosana-deployments");
+          await assertOwnsNosanaDeployment(userId, id);
           const { getDeployment } = await import("@/lib/nosana");
           return await getDeployment(id);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
@@ -3149,7 +3176,9 @@ IMPORTANT: Confirm the Docker image, market, and estimated cost with the user be
       }),
       execute: async ({ name, image, market, cmd, expose_port, strategy, timeout, replicas, env }) => {
         try {
+          if (!userId) return { error: "Not authenticated" };
           const { buildJobDefinition, createDeployment, startDeployment } = await import("@/lib/nosana");
+          const { recordNosanaDeployment } = await import("@/lib/nosana-deployments");
           const job_definition = buildJobDefinition({ image, command: cmd, expose_port, env });
           const dep = await createDeployment({
             name,
@@ -3159,18 +3188,22 @@ IMPORTANT: Confirm the Docker image, market, and estimated cost with the user be
             strategy: strategy ?? "SIMPLE",
             job_definition,
           });
+          await recordNosanaDeployment(userId, dep.id);
           return await startDeployment(dep.id);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     nosana_start_deployment: tool({
-      description: `Start or restart a Nosana deployment that is in DRAFT or STOPPED state. Transitions it to STARTING → RUNNING. Use when the user wants to restart a stopped deployment or launch a draft one. Do NOT use for new deployments — use nosana_create_deployment instead.`,
+      description: `Start or restart a Nosana deployment that is in DRAFT or STOPPED state — only works for a deployment the LOGGED-IN USER created themselves. Transitions it to STARTING → RUNNING. Use when the user wants to restart a stopped deployment or launch a draft one. Do NOT use for new deployments — use nosana_create_deployment instead.`,
       inputSchema: z.object({
         id: z.string().describe("Deployment ID to start/restart"),
       }),
       execute: async ({ id }) => {
         try {
+          if (!userId) return { error: "Not authenticated" };
+          const { assertOwnsNosanaDeployment } = await import("@/lib/nosana-deployments");
+          await assertOwnsNosanaDeployment(userId, id);
           const { startDeployment } = await import("@/lib/nosana");
           return await startDeployment(id);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
@@ -3207,12 +3240,15 @@ IMPORTANT: Confirm the Docker image, market, and estimated cost with the user be
     }),
 
     nosana_stop_deployment: tool({
-      description: `Stop a running Nosana deployment. Transitions RUNNING → STOPPING → STOPPED. The deployment can be restarted later with nosana_start_deployment. Use when the user wants to pause or stop a GPU workload.`,
+      description: `Stop a running Nosana deployment — only works for a deployment the LOGGED-IN USER created themselves. Transitions RUNNING → STOPPING → STOPPED. The deployment can be restarted later with nosana_start_deployment. Use when the user wants to pause or stop a GPU workload.`,
       inputSchema: z.object({
         id: z.string().describe("Deployment ID to stop"),
       }),
       execute: async ({ id }) => {
         try {
+          if (!userId) return { error: "Not authenticated" };
+          const { assertOwnsNosanaDeployment } = await import("@/lib/nosana-deployments");
+          await assertOwnsNosanaDeployment(userId, id);
           const { stopDeployment } = await import("@/lib/nosana");
           return await stopDeployment(id);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
@@ -3220,13 +3256,16 @@ IMPORTANT: Confirm the Docker image, market, and estimated cost with the user be
     }),
 
     nosana_archive_deployment: tool({
-      description: `Archive a Nosana deployment (DRAFT/STOPPED/ERROR only). Permanent — cannot be restarted after archiving. Use when the user wants to permanently delete/retire a deployment.
+      description: `Archive a Nosana deployment (DRAFT/STOPPED/ERROR only) — only works for a deployment the LOGGED-IN USER created themselves. Permanent — cannot be restarted after archiving. Use when the user wants to permanently delete/retire a deployment.
 IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
       inputSchema: z.object({
         id: z.string().describe("Deployment ID to archive"),
       }),
       execute: async ({ id }) => {
         try {
+          if (!userId) return { error: "Not authenticated" };
+          const { assertOwnsNosanaDeployment } = await import("@/lib/nosana-deployments");
+          await assertOwnsNosanaDeployment(userId, id);
           const { archiveDeployment } = await import("@/lib/nosana");
           return await archiveDeployment(id);
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
@@ -5845,153 +5884,183 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
       },
     }),
 
-    getequity_find_member: tool({
-      description: "Look up an existing GetEquity member by email — always call this before getequity_create_member, since an existing account is linked rather than duplicated.",
-      inputSchema: z.object({ email: z.string() }),
-      execute: async ({ email }) => {
-        try { const { getMemberByEmail } = await import("@/lib/getequity"); return await getMemberByEmail(email); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
-      },
-    }),
-
     getequity_create_member: tool({
-      description: "Provisions a REAL, KYC-approved GetEquity brokerage-style account in this person's name (their own credentials, wallet, balances) and enrols it in Bluvfi's syndicate. ONLY call with details the user actually typed in this conversation for themselves — never invent or guess a date of birth, address, or any other field to fill the form. All eleven fields (fname, lname, email, phone, password, dob, sex, homeAddress, city, state, country) are required by GetEquity; sending anything else is rejected. Call getequity_find_member first to avoid asking for details on an account that already exists. Ask the user to confirm they want a GetEquity account opened before calling this.",
+      description: "Ensures the logged-in user has a real GetEquity account, creating one if they don't yet. Idempotent — safe to call even if they might already have one: an existing account (locally cached, or found on GetEquity by this email) is reused, never duplicated. Opens a REAL, KYC-approved brokerage-style account in their name — collect every field from what the user actually typed in this conversation for themselves; never invent or guess a date of birth, address, or any other field. Passwords are handled automatically — do not ask the user for one. Ask the user to confirm they want an investing account opened before calling this.",
       inputSchema: z.object({
         fname: z.string(), lname: z.string(), email: z.string(), phone: z.string(),
-        password: z.string().max(30), dob: z.string().describe("YYYY-MM-DD"),
+        dob: z.string().describe("YYYY-MM-DD"),
         sex: z.string(), homeAddress: z.string(), city: z.string(), state: z.string(), country: z.string(),
       }),
-      execute: async (args) => {
-        try { const { createMember } = await import("@/lib/getequity"); return await createMember(args); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      execute: async (profile) => {
+        try {
+          if (!userId) return { error: "Not authenticated" };
+          const { ensureGetEquityMember } = await import("@/lib/getequity-members");
+          return await ensureGetEquityMember(userId, profile);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_get_member_balance: tool({
-      description: "Get a GetEquity member's cash wallet balance across all currencies.",
-      inputSchema: z.object({ memberId: z.string() }),
-      execute: async ({ memberId }) => {
-        try { const { getMemberBalance } = await import("@/lib/getequity"); return await getMemberBalance(memberId); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Get the logged-in user's GetEquity cash wallet balance across all currencies.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { getMemberBalance } = await import("@/lib/getequity");
+          return await getMemberBalance(id);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_get_member_token_balance: tool({
-      description: "Get a GetEquity member's holdings across every token/security they own, with current value.",
-      inputSchema: z.object({ memberId: z.string() }),
-      execute: async ({ memberId }) => {
-        try { const { getMemberTokenBalance } = await import("@/lib/getequity"); return await getMemberTokenBalance(memberId); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Get the logged-in user's holdings across every GetEquity token/security they own, with current value.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { getMemberTokenBalance } = await import("@/lib/getequity");
+          return await getMemberTokenBalance(id);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_get_member_orders: tool({
-      description: "Get a GetEquity member's buy/sell order history.",
-      inputSchema: z.object({ memberId: z.string(), page: z.number().int().optional(), limit: z.number().int().optional() }),
-      execute: async ({ memberId, ...params }) => {
-        try { const { getMemberOrders } = await import("@/lib/getequity"); return await getMemberOrders(memberId, params); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Get the logged-in user's GetEquity buy/sell order history.",
+      inputSchema: z.object({ page: z.number().int().optional(), limit: z.number().int().optional() }),
+      execute: async (params) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { getMemberOrders } = await import("@/lib/getequity");
+          return await getMemberOrders(id, params);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_get_member_transactions: tool({
-      description: "Get a GetEquity member's full transaction history (funding, trades, payouts).",
-      inputSchema: z.object({ memberId: z.string(), page: z.number().int().optional(), limit: z.number().int().optional() }),
-      execute: async ({ memberId, ...params }) => {
-        try { const { getMemberTransactions } = await import("@/lib/getequity"); return await getMemberTransactions(memberId, params); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Get the logged-in user's full GetEquity transaction history (funding, trades, payouts).",
+      inputSchema: z.object({ page: z.number().int().optional(), limit: z.number().int().optional() }),
+      execute: async (params) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { getMemberTransactions } = await import("@/lib/getequity");
+          return await getMemberTransactions(id, params);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_get_fund_invest_quote: tool({
       description: "Preview the fees and total charge for a fund-and-invest, without initiating any payment. Always call this and show the user the total before getequity_fund_invest.",
-      inputSchema: z.object({ memberId: z.string(), tokenId: z.string(), investmentAmount: z.number(), currency: z.string() }),
-      execute: async ({ memberId, tokenId, ...body }) => {
-        try { const { getFundInvestQuote } = await import("@/lib/getequity"); return await getFundInvestQuote(memberId, tokenId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      inputSchema: z.object({ tokenId: z.string(), investmentAmount: z.number(), currency: z.string() }),
+      execute: async ({ tokenId, ...body }) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { getFundInvestQuote } = await import("@/lib/getequity");
+          return await getFundInvestQuote(id, tokenId, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_fund_invest: tool({
       description: "Initiates a fund-and-invest: creates a payment link (card) or virtual account (bank transfer) that the member uses to fund their wallet and invest in one flow. This call charges nothing by itself — the member completes the payment themselves. ONLY call after quoting fees with getequity_get_fund_invest_quote and getting the user's explicit go-ahead on the exact amount, token and total charge.",
       inputSchema: z.object({
-        memberId: z.string(), tokenId: z.string(),
+        tokenId: z.string(),
         investmentAmount: z.number(), currency: z.string(),
         paymentMethod: z.enum(["card", "bank_transfer"]),
         redirectUrl: z.string().optional().describe("Required for card, not needed for bank_transfer"),
       }),
-      execute: async ({ memberId, tokenId, ...body }) => {
-        try { const { fundInvest } = await import("@/lib/getequity"); return await fundInvest(memberId, tokenId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      execute: async ({ tokenId, ...body }) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { fundInvest } = await import("@/lib/getequity");
+          return await fundInvest(id, tokenId, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_buy_token: tool({
-      description: "Places a secondary-market buy order for a member, escrowed against their EXISTING wallet balance (check getequity_get_member_balance first — this does not fund the wallet). ONLY call after the user has explicitly confirmed the exact token, amount and currency.",
-      inputSchema: z.object({ memberId: z.string(), tokenId: z.string(), amount: z.number(), currency: z.string() }),
-      execute: async ({ memberId, tokenId, ...body }) => {
-        try { const { buyTokenAsMember } = await import("@/lib/getequity"); return await buyTokenAsMember(memberId, tokenId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Places a secondary-market buy order for the logged-in user, escrowed against their EXISTING wallet balance (check getequity_get_member_balance first — this does not fund the wallet). ONLY call after the user has explicitly confirmed the exact token, amount and currency.",
+      inputSchema: z.object({ tokenId: z.string(), amount: z.number(), currency: z.string() }),
+      execute: async ({ tokenId, ...body }) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { buyTokenAsMember } = await import("@/lib/getequity");
+          return await buyTokenAsMember(id, tokenId, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_sell_token: tool({
-      description: "Places a secondary-market sell order for tokens a member already holds. ONLY call after the user has explicitly confirmed the exact token, amount and currency.",
-      inputSchema: z.object({ memberId: z.string(), tokenId: z.string(), amount: z.number(), currency: z.string() }),
-      execute: async ({ memberId, tokenId, ...body }) => {
-        try { const { sellTokenAsMember } = await import("@/lib/getequity"); return await sellTokenAsMember(memberId, tokenId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Places a secondary-market sell order for tokens the logged-in user already holds. ONLY call after the user has explicitly confirmed the exact token, amount and currency.",
+      inputSchema: z.object({ tokenId: z.string(), amount: z.number(), currency: z.string() }),
+      execute: async ({ tokenId, ...body }) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { sellTokenAsMember } = await import("@/lib/getequity");
+          return await sellTokenAsMember(id, tokenId, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_commit_to_offering: tool({
-      description: "Places a bid on a member's behalf into a live GetEquity offering. Cash is held on the member's own wallet until allotment. Check getequity_get_offering_book first for the demand ladder, and whether a tranche is required. ONLY call after the user has explicitly confirmed the exact amount and price/rate.",
+      description: "Places a bid on the logged-in user's behalf into a live GetEquity offering. Cash is held on their own wallet until allotment. Check getequity_get_offering_book first for the demand ladder, and whether a tranche is required. ONLY call after the user has explicitly confirmed the exact amount and price/rate.",
       inputSchema: z.object({
-        memberId: z.string(), tokenId: z.string(), amount: z.number(),
+        tokenId: z.string(), amount: z.number(),
         bid_price: z.number().optional().describe("Price-based offerings only — mutually exclusive with bid_rate"),
         bid_rate: z.number().optional().describe("Debt/fixed-interest offerings only — mutually exclusive with bid_price"),
         tranche: z.string().optional().describe("Required on a combined offering, refused on every other type"),
       }),
-      execute: async ({ memberId, tokenId, ...body }) => {
-        try { const { commitToOfferingAsMember } = await import("@/lib/getequity"); return await commitToOfferingAsMember(memberId, tokenId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      execute: async ({ tokenId, ...body }) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { commitToOfferingAsMember } = await import("@/lib/getequity");
+          return await commitToOfferingAsMember(id, tokenId, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_cancel_member_order: tool({
-      description: "Cancels an open GetEquity order for a member and reverses any escrowed funds. Confirm which order with the user first.",
-      inputSchema: z.object({ memberId: z.string(), orderId: z.string() }),
-      execute: async ({ memberId, orderId }) => {
-        try { const { cancelMemberOrder } = await import("@/lib/getequity"); return await cancelMemberOrder(memberId, orderId); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      description: "Cancels an open GetEquity order for the logged-in user and reverses any escrowed funds. Confirm which order with the user first.",
+      inputSchema: z.object({ orderId: z.string() }),
+      execute: async ({ orderId }) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { cancelMemberOrder } = await import("@/lib/getequity");
+          return await cancelMemberOrder(id, orderId);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_fund_member_wallet: tool({
-      description: "Funds a member's GetEquity cash wallet only — no token purchase (use getequity_fund_invest to fund-and-buy in one step). Returns a payment link or virtual account; the member pays it themselves. ONLY call after the user confirms the exact amount and currency.",
+      description: "Funds the logged-in user's GetEquity cash wallet only — no token purchase (use getequity_fund_invest to fund-and-buy in one step). Returns a payment link or virtual account; the member pays it themselves. ONLY call after the user confirms the exact amount and currency.",
       inputSchema: z.object({
-        memberId: z.string(), amount: z.number(),
+        amount: z.number(),
         currency: z.enum(["NGN", "USD", "KES", "GHS", "ZAR", "GBP", "EUR"]),
         paymentMethod: z.enum(["card", "bank_transfer", "ussd", "mobilemoney"]).optional(),
         redirectUrl: z.string().optional().describe("Required unless paymentMethod is bank_transfer"),
       }),
-      execute: async ({ memberId, ...body }) => {
-        try { const { fundMemberWallet } = await import("@/lib/getequity"); return await fundMemberWallet(memberId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      execute: async (body) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { fundMemberWallet } = await import("@/lib/getequity");
+          return await fundMemberWallet(id, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 
     getequity_withdraw_member_wallet: tool({
-      description: "Debits a member's GetEquity wallet to a bank account (created Pending — still needs approval before disbursement). ONLY call after the user has explicitly confirmed the exact amount, bank name, account name and account number — this sends their money to a bank account, so a wrong digit is expensive to undo.",
+      description: "Debits the logged-in user's GetEquity wallet to a bank account (created Pending — still needs approval before disbursement). ONLY call after the user has explicitly confirmed the exact amount, bank name, account name and account number — this sends their money to a bank account, so a wrong digit is expensive to undo.",
       inputSchema: z.object({
-        memberId: z.string(), amount: z.number(),
+        amount: z.number(),
         bank_name: z.string().describe("Full bank name matched against Flutterwave's list, e.g. 'Guaranty Trust Bank' not 'GTBank'"),
         account_name: z.string(), account_number: z.string(),
         currency: z.enum(["NGN", "KES", "GHS", "ZAR", "UGX", "TZS"]),
       }),
-      execute: async ({ memberId, ...body }) => {
-        try { const { withdrawMemberWallet } = await import("@/lib/getequity"); return await withdrawMemberWallet(memberId, body as any); }
-        catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      execute: async (body) => {
+        try {
+          const id = await resolveGetEquityMemberId();
+          const { withdrawMemberWallet } = await import("@/lib/getequity");
+          return await withdrawMemberWallet(id, body as any);
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
 

@@ -29,6 +29,20 @@
       "when": 1788335378022,
       "tag": "0003_tired_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790578367476,
+      "tag": "0004_getequity_members",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790582079972,
+      "tag": "0005_nosana_deployments",
+      "breakpoints": true
     }
   ]
 }

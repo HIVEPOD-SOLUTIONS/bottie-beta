@@ -1,12 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as ge from "@/lib/getequity";
 import { verifyAuth } from "@/lib/auth";
+import { ensureGetEquityMember, getCachedGetEquityMemberId } from "@/lib/getequity-members";
 
+/**
+ * Every member-scoped op below is strictly scoped to the calling user's own GetEquity account.
+ * There is no `memberId` accepted from the request body — accepting a client-supplied id would
+ * let any authenticated Bluvfi user read or act on ANY other member's cash and holdings (the
+ * organisation secret key authorizes every member, so nothing else stops that). The member id
+ * always comes from this user's own row in getequity_members, never from the request.
+ */
 export async function POST(req: NextRequest) {
+  let userId: string;
   try {
-    await verifyAuth();
+    userId = (await verifyAuth()).userId;
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  async function myMemberId(): Promise<string> {
+    const cached = await getCachedGetEquityMemberId(userId);
+    if (!cached) throw new Error("No GetEquity account yet for this user — use Create member first.");
+    return cached;
   }
 
   try {
@@ -16,7 +31,7 @@ export async function POST(req: NextRequest) {
     let result: unknown;
 
     switch (op) {
-      // ── Market data ──────────────────────────────────────────────────────────
+      // ── Market data (shared, not user-specific) ─────────────────────────────
       case "listTokens":
         result = await ge.listTokens(params as any);
         break;
@@ -42,57 +57,52 @@ export async function POST(req: NextRequest) {
         result = await ge.getTransaction(params.reference as string, params.transactionId as string | undefined);
         break;
 
-      // ── Members: provisioning ───────────────────────────────────────────────
+      // ── My account ───────────────────────────────────────────────────────────
+      // Idempotent — creates this user's member if they don't have one yet (password is
+      // generated and discarded automatically), or returns their existing one.
       case "createMember":
-        result = await ge.createMember(params as any);
+      case "ensureMember":
+        result = await ensureGetEquityMember(userId, params as any);
         break;
-      case "getMembers":
-        result = await ge.getMembers();
-        break;
-      case "getMemberByEmail":
-        result = await ge.getMemberByEmail(params.email as string);
-        break;
-
-      // ── Members: reporting ───────────────────────────────────────────────────
       case "getMemberBalance":
-        result = await ge.getMemberBalance(params.memberId as string);
+        result = await ge.getMemberBalance(await myMemberId());
         break;
       case "getMemberTokenBalance":
-        result = await ge.getMemberTokenBalance(params.memberId as string);
+        result = await ge.getMemberTokenBalance(await myMemberId());
         break;
       case "getMemberOrders":
-        result = await ge.getMemberOrders(params.memberId as string, params as any);
+        result = await ge.getMemberOrders(await myMemberId(), params as any);
         break;
       case "getMemberTransactions":
-        result = await ge.getMemberTransactions(params.memberId as string, params as any);
+        result = await ge.getMemberTransactions(await myMemberId(), params as any);
         break;
 
-      // ── Members: investing (moves real money) ───────────────────────────────
+      // ── My investing (moves real money) ─────────────────────────────────────
       case "buyTokenAsMember":
-        result = await ge.buyTokenAsMember(params.memberId as string, params.tokenId as string, params as any);
+        result = await ge.buyTokenAsMember(await myMemberId(), params.tokenId as string, params as any);
         break;
       case "sellTokenAsMember":
-        result = await ge.sellTokenAsMember(params.memberId as string, params.tokenId as string, params as any);
+        result = await ge.sellTokenAsMember(await myMemberId(), params.tokenId as string, params as any);
         break;
       case "getFundInvestQuote":
-        result = await ge.getFundInvestQuote(params.memberId as string, params.tokenId as string, params as any);
+        result = await ge.getFundInvestQuote(await myMemberId(), params.tokenId as string, params as any);
         break;
       case "fundInvest":
-        result = await ge.fundInvest(params.memberId as string, params.tokenId as string, params as any);
+        result = await ge.fundInvest(await myMemberId(), params.tokenId as string, params as any);
         break;
       case "commitToOfferingAsMember":
-        result = await ge.commitToOfferingAsMember(params.memberId as string, params.tokenId as string, params as any);
+        result = await ge.commitToOfferingAsMember(await myMemberId(), params.tokenId as string, params as any);
         break;
       case "cancelMemberOrder":
-        result = await ge.cancelMemberOrder(params.memberId as string, params.orderId as string);
+        result = await ge.cancelMemberOrder(await myMemberId(), params.orderId as string);
         break;
 
-      // ── Members: funding & withdrawals (moves real money) ────────────────────
+      // ── My funding & withdrawals (moves real money) ──────────────────────────
       case "fundMemberWallet":
-        result = await ge.fundMemberWallet(params.memberId as string, params as any);
+        result = await ge.fundMemberWallet(await myMemberId(), params as any);
         break;
       case "withdrawMemberWallet":
-        result = await ge.withdrawMemberWallet(params.memberId as string, params as any);
+        result = await ge.withdrawMemberWallet(await myMemberId(), params as any);
         break;
 
       case "getConfig":

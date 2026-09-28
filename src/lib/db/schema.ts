@@ -192,6 +192,42 @@ export const weeklyInsights = pgTable("weekly_insights", {
   index("weekly_insights_user_created_idx").on(table.userId, table.createdAt),
 ]);
 
+/**
+ * getequity_members — one row per (Bluvfi userId), mapping to the real GetEquity member
+ * account created on their behalf. Created lazily on first GetEquity interaction that needs a
+ * member id (see ensureGetEquityMember in src/lib/getequity-members.ts). This is a cache of
+ * that mapping only — GetEquity is the ledger of record for the member's cash and holdings.
+ */
+export const getequityMembers = pgTable("getequity_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  memberId: text("member_id").notNull(),
+  email: text("email").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("getequity_members_user_idx").on(table.userId),
+]);
+
+/**
+ * nosana_deployments — ownership record: which Bluvfi user created which Nosana deployment.
+ *
+ * Nosana itself has no per-user concept at all — the whole app shares one NOSANA_API_KEY /
+ * prepaid-credit account, so every deployment lives in the same account with nothing in
+ * Nosana's own API distinguishing whose is whose. Without this table, any logged-in Bluvfi user
+ * could see, start, stop or archive any other user's deployment. This table is the only thing
+ * enforcing that a user can only act on deployments they themselves created — see
+ * src/lib/nosana-deployments.ts.
+ */
+export const nosanaDeployments = pgTable("nosana_deployments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  deploymentId: text("deployment_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("nosana_deployments_deployment_idx").on(table.deploymentId),
+  index("nosana_deployments_user_idx").on(table.userId),
+]);
+
 export const balanceSnapshots = pgTable("balance_snapshots", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").notNull(),
