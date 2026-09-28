@@ -1556,7 +1556,7 @@ function CheckoutSheet({
         body: JSON.stringify({
           productId:      product.id,
           // MCP uses package_value (e.g. "50"), not full package_id
-          packageId:      selectedPkg ? pkgDisplayValue(selectedPkg) : undefined,
+          packageId:      isFixed && selectedPkg ? pkgDisplayValue(selectedPkg) : undefined,
           customValue:    !isFixed ? customValue : undefined,
           paymentMethod,
           recipientEmail: recipientEmail.trim(),

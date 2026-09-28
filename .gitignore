@@ -25,3 +25,5 @@ next-env.d.ts
 # Claude
 CLAUDE.md
 .claude/
+*.json
+bluvfi-revenuecart*.json
