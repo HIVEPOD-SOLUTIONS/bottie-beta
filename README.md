@@ -121,21 +121,29 @@ await arcKit.bridge({
 
 *Submitted to [Build with CMC: API Hackathon](https://dorahacks.io/hackathon/coinmarketcap-api-202609/detail) — track: **AI Agents and Automation**.*
 
+**New for this hackathon:** Bluvfi existed before the event, but the whole CoinMarketCap integration was built during it (first commit `fdbe2d8`, 2026-09-21): every file listed in this section, the five agent tools, the dashboard ticker, the tests and the verify script.
+
+- Live app: https://bluvfi.xyz
+- Demo video: https://x.com/bluvfi/status/2097352616275517776
+- X post: https://x.com/Jwafo_tweet/status/2104919554572853710
+- Submission write-up with a real request and response: [docs/cmc-hackathon-submission.md](docs/cmc-hackathon-submission.md)
+
 Bluvfi already has an AI chat agent with wallet, payment, and history tools (above). This integration gives that agent — and the dashboard — live market data instead of guessing or working from stale training data: a price ticker on the dashboard, and five agent tools so users can ask the AI things like "what's XRP doing today", "what are the top gainers right now", or "what's 250 XRP worth in NGN".
 
 ### Endpoints used
 
 | Endpoint | Used for | Files |
 |----------|----------|-------|
-| `GET /v3/cryptocurrency/quotes/latest` | Dashboard price ticker (BTC/ETH/SOL/XRP) + `get_crypto_prices` tool | [`src/lib/coinmarketcap.ts`](src/lib/coinmarketcap.ts), [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
-| `GET /v3/cryptocurrency/listings/latest` | `get_top_movers` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+| `GET /v1/cryptocurrency/quotes/latest` | Dashboard price ticker (BTC/ETH/SOL/XRP, by CMC id) | [`src/lib/coinmarketcap.ts`](src/lib/coinmarketcap.ts) |
+| `GET /v3/cryptocurrency/quotes/latest` | `get_crypto_prices` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
+| `GET /v3/cryptocurrency/listings/latest` | `get_top_movers` + `get_crypto_market_overview` tools | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
 | `GET /v1/global-metrics/quotes/latest` | `get_crypto_market_overview` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
 | `GET /v1/cryptocurrency/trending/latest` | `get_trending_crypto` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
 | `GET /v2/tools/price-conversion` | `convert_crypto` tool | [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) |
 
 ### Architecture
 
-- [`src/lib/coinmarketcap.ts`](src/lib/coinmarketcap.ts) — the only place that talks to CMC. Authenticates with the `X-CMC_PRO_API_KEY` header (never a query param), wraps every call with an 8s timeout, and normalizes errors — including the "200 OK with an error body" case CMC returns for some failures (see feedback below). A server-side cache (15 min default TTL, configurable via `COINMARKETCAP_CACHE_TTL_SECONDS`) with in-flight de-duplication means the dashboard ticker's 30s poll and repeated AI tool calls don't multiply API credit usage; errors are never cached, so a bad response doesn't get stuck.
+- [`src/lib/coinmarketcap.ts`](src/lib/coinmarketcap.ts) — the only place that talks to CMC. Authenticates with the `X-CMC_PRO_API_KEY` header (never a query param), wraps every call with an 8s timeout, and normalizes errors — including the "200 OK with an error body" case CMC returns for some failures (see feedback below). A server-side cache (60s default TTL, 15s minimum, configurable via `COINMARKETCAP_CACHE_TTL_SECONDS`) with in-flight de-duplication means the dashboard ticker's 30s poll and repeated AI tool calls don't multiply API credit usage; errors are never cached, so a bad response doesn't get stuck.
 - [`src/lib/coinmarketcap-parse.ts`](src/lib/coinmarketcap-parse.ts) — pure parsers, tested against fixtures taken verbatim from CMC's own docs examples, that tolerate the shape differences between endpoint versions (see feedback below) so a docs update or an undocumented edge case fails closed (empty result) instead of throwing.
 - [`src/lib/ai/cmc-tools.ts`](src/lib/ai/cmc-tools.ts) — the five Vercel AI SDK tools listed in the table above, wired into the agent in [`src/lib/ai/tools.ts`](src/lib/ai/tools.ts). Every result carries `source: "CoinMarketCap"` and an `asOf` timestamp so the agent (per its [system prompt](src/lib/ai/system-prompt.ts)) always cites where a number came from instead of presenting it as its own knowledge.
 - [`src/app/api/prices/route.ts`](src/app/api/prices/route.ts) — authenticated, rate-limited (60/min, see [`src/proxy.ts`](src/proxy.ts)) route the dashboard polls.

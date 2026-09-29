@@ -2,6 +2,8 @@
 
 Bluvfi is an AI financial assistant for Web3 workers: pay bills, invest in stocks and pre-IPO deals, and stake idle balances for yield — all gasless with USDC. CoinMarketCap powers the live price ticker on the dashboard and the AI agent's market-data tools.
 
+**New for this hackathon:** Bluvfi existed before the event, but the CoinMarketCap integration was built during it (first commit `fdbe2d8`, 2026-09-21). The full API feedback list, with live-verified examples, is in the [README](../README.md#coinmarketcap-api-integration).
+
 ## Links
 
 - **Repository:** https://github.com/HIVEPOD-SOLUTIONS/bottie-beta
