@@ -7,6 +7,7 @@ const ACTION_TOOLS = new Set([
   // Bills & investments
   "buy_bitrefill_product",
   "poll_bitrefill_order",
+  "buy_cryptorefills_product",
   "fund_xrp_purchase_from_wallet",
   "recover_xrp_order",
   "buy_investment",
@@ -799,6 +800,24 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         : errCode === "spend_limit_exceeded"
           ? `x402 payment blocked — offer exceeds $${input.max_amount_usdc ?? 0.002} cap: ${input.url}`
           : `x402 payment failed on ${netLabel} for: ${input.url}`;
+      break;
+    }
+    case "buy_cryptorefills_product": {
+      const p = parsed as any;
+      if (p?.pendingCryptorefillsPayment) {
+        const via = p.payWith === "other"
+          ? `${p.partnerOrder?.coin} on ${p.partnerOrder?.network} (deposit address)`
+          : `USDC on ${p.payWith === "solana" || p.rail === "solana" ? "Solana" : "Base"}`;
+        line = p.paid
+          ? `Cryptorefills order ${p.orderId} for ${p.productName} — ${p.payWith === "other" ? "awaiting deposit" : "paid"} via ${via}`
+          : p.paid === false
+            ? `Cryptorefills purchase not completed for ${p.productName}: ${p.error ?? "unknown error"}`
+            : `Cryptorefills payment card shown for ${p.productName} — $${p.priceUsd} via ${via} → ${p.recipient}`;
+      } else if (p?.paid) {
+        line = `Cryptorefills order ${p.orderId} paid — status ${p.status ?? "processing"}`;
+      } else {
+        line = `Cryptorefills purchase not completed for ${input.brand ?? "product"}: ${p?.error ?? "unknown error"}`;
+      }
       break;
     }
     default:

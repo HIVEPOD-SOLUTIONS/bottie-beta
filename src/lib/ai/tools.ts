@@ -10,6 +10,7 @@ import { getWalletRequest, recheckWalletRequest, transferBetweenWallets, friendl
 import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 import { createCmcTools } from "@/lib/ai/cmc-tools";
+import { createCryptorefillsTools } from "@/lib/ai/cryptorefills-tools";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -64,6 +65,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
   return {
     // ── Live market data (CoinMarketCap) — see lib/ai/cmc-tools.ts ────────────
     ...createCmcTools(),
+
+    // ── Cryptorefills (USDC on Base, x402) — see lib/ai/cryptorefills-tools.ts ─
+    ...createCryptorefillsTools(userId),
 
     // ── UI actions ────────────────────────────────────────────────────────────
 

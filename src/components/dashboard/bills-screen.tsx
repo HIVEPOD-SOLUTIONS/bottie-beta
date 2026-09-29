@@ -18,6 +18,8 @@ import { refreshXrpBalance, useXrpBalance } from "@/hooks/use-xrp-balance";
 import { showInterstitial, prepareInterstitialAd } from "@/hooks/use-admob";
 import { parsePhoneNumberWithError, isValidPhoneNumber, AsYouType, getCountryCallingCode } from "libphonenumber-js";
 import { QRCodeSVG } from "qrcode.react";
+import { COUNTRIES, CountrySelector, getCountry, type CountryEntry } from "./bills-countries";
+import { CryptorefillsDetail } from "./cryptorefills-section";
 
 // Alias types to keep internal names readable
 type BitrefillProduct = MCPProduct & {
@@ -35,47 +37,6 @@ type BitrefillInvoice = MCPInvoice & {
   /** From get-invoice-by-id: "not_delivered" | "delivered" */
   orders_delivery_status?: string;
 };
-
-// ── Country catalog ────────────────────────────────────────────────────────────
-
-type CountryEntry = { code: string; name: string; flag: string; currency: string; lang: string };
-
-const COUNTRIES: CountryEntry[] = [
-  { code: "US", name: "United States",   flag: "🇺🇸", currency: "USD", lang: "en" },
-  { code: "GB", name: "United Kingdom",  flag: "🇬🇧", currency: "GBP", lang: "en" },
-  { code: "NG", name: "Nigeria",         flag: "🇳🇬", currency: "NGN", lang: "en" },
-  { code: "CA", name: "Canada",          flag: "🇨🇦", currency: "CAD", lang: "en" },
-  { code: "AU", name: "Australia",       flag: "🇦🇺", currency: "AUD", lang: "en" },
-  { code: "IN", name: "India",           flag: "🇮🇳", currency: "INR", lang: "en" },
-  { code: "DE", name: "Germany",         flag: "🇩🇪", currency: "EUR", lang: "de" },
-  { code: "FR", name: "France",          flag: "🇫🇷", currency: "EUR", lang: "fr" },
-  { code: "ES", name: "Spain",           flag: "🇪🇸", currency: "EUR", lang: "es" },
-  { code: "IT", name: "Italy",           flag: "🇮🇹", currency: "EUR", lang: "it" },
-  { code: "NL", name: "Netherlands",     flag: "🇳🇱", currency: "EUR", lang: "nl" },
-  { code: "SE", name: "Sweden",          flag: "🇸🇪", currency: "SEK", lang: "sv" },
-  { code: "BR", name: "Brazil",          flag: "🇧🇷", currency: "BRL", lang: "pt" },
-  { code: "MX", name: "Mexico",          flag: "🇲🇽", currency: "MXN", lang: "es" },
-  { code: "AR", name: "Argentina",       flag: "🇦🇷", currency: "ARS", lang: "es" },
-  { code: "CO", name: "Colombia",        flag: "🇨🇴", currency: "COP", lang: "es" },
-  { code: "ZA", name: "South Africa",    flag: "🇿🇦", currency: "ZAR", lang: "en" },
-  { code: "KE", name: "Kenya",           flag: "🇰🇪", currency: "KES", lang: "en" },
-  { code: "GH", name: "Ghana",           flag: "🇬🇭", currency: "GHS", lang: "en" },
-  { code: "EG", name: "Egypt",           flag: "🇪🇬", currency: "EGP", lang: "ar" },
-  { code: "AE", name: "UAE",             flag: "🇦🇪", currency: "AED", lang: "ar" },
-  { code: "SA", name: "Saudi Arabia",    flag: "🇸🇦", currency: "SAR", lang: "ar" },
-  { code: "SG", name: "Singapore",       flag: "🇸🇬", currency: "SGD", lang: "en" },
-  { code: "PH", name: "Philippines",     flag: "🇵🇭", currency: "PHP", lang: "en" },
-  { code: "ID", name: "Indonesia",       flag: "🇮🇩", currency: "IDR", lang: "id" },
-  { code: "JP", name: "Japan",           flag: "🇯🇵", currency: "JPY", lang: "ja" },
-  { code: "PK", name: "Pakistan",        flag: "🇵🇰", currency: "PKR", lang: "ur" },
-  { code: "BD", name: "Bangladesh",      flag: "🇧🇩", currency: "BDT", lang: "bn" },
-  { code: "PL", name: "Poland",          flag: "🇵🇱", currency: "PLN", lang: "pl" },
-  { code: "TR", name: "Turkey",          flag: "🇹🇷", currency: "TRY", lang: "tr" },
-];
-
-function getCountry(code: string): CountryEntry {
-  return COUNTRIES.find((c) => c.code === code) ?? COUNTRIES[0];
-}
 
 // ── Screen-level tabs ─────────────────────────────────────────────────────────
 
@@ -500,85 +461,6 @@ function hasFixedPackages(product: BitrefillProduct): boolean {
 
 // ── Country Selector ──────────────────────────────────────────────────────────
 
-function CountrySelector({
-  selected,
-  onChange,
-}: {
-  selected: CountryEntry;
-  onChange: (c: CountryEntry) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const filtered = search.trim()
-    ? COUNTRIES.filter((c) =>
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.code.toLowerCase().includes(search.toLowerCase()),
-      )
-    : COUNTRIES;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => { setOpen((o) => !o); setSearch(""); }}
-        className="flex items-center gap-1.5 rounded-xl border border-[#2A2B27] bg-[#1B1C19] px-3 py-2 text-sm text-[#F2F0E8] hover:border-[#8FAE82]/40"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={`https://flagcdn.com/20x15/${selected.code.toLowerCase()}.png`}
-          alt={selected.name}
-          className="w-5 h-[15px] rounded-[2px] object-cover"
-        />
-        <span className="text-xs text-[#A7A79A]">{selected.currency}</span>
-        <span className="ml-0.5 text-[#A7A79A]">▾</span>
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-60 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] py-2 shadow-2xl">
-          <div className="px-3 pb-2">
-            <input
-              autoFocus
-              type="text"
-              placeholder="Search country…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border border-[#2A2B27] bg-[#141513] px-3 py-1.5 text-xs text-[#F2F0E8] placeholder-[#A7A79A] focus:outline-none"
-            />
-          </div>
-          <div className="max-h-56 overflow-y-auto">
-            {filtered.map((c) => (
-              <button
-                key={c.code}
-                onClick={() => { onChange(c); setOpen(false); }}
-                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-white/[0.04] ${
-                  c.code === selected.code ? "text-[#8FAE82]" : "text-[#F2F0E8]"
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`https://flagcdn.com/20x15/${c.code.toLowerCase()}.png`}
-                  alt={c.name}
-                  className="w-5 h-[15px] shrink-0 rounded-[2px] object-cover"
-                />
-                <span className="flex-1 truncate">{c.name}</span>
-                <span className="text-xs text-[#A7A79A]">{c.currency}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Product card ──────────────────────────────────────────────────────────────
 
@@ -3471,6 +3353,7 @@ export function BillsScreen() {
   const { getAccessToken } = usePrivy();
   const [viewTab, setViewTab] = useState<"bills" | "browse">("bills");
   const [bitrefillOpen, setBitrefillOpen] = useState(false);
+  const [cryptorefillsOpen, setCryptorefillsOpen] = useState(false);
 
   // Count completed purchases from DB — includes AI-initiated ones, not just UI purchases
   const { billPayments, loading: billsLoading } = usePaymentsContext();
@@ -3681,7 +3564,61 @@ export function BillsScreen() {
               <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
+
+          <button
+            onClick={() => setCryptorefillsOpen(true)}
+            className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-left transition-colors hover:border-[#3A3B37] active:bg-white/[0.04] w-full"
+          >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/cryptorefills-logo.png" alt="Cryptorefills" className="h-full w-full object-contain" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold text-[#F2F0E8]">Cryptorefills</p>
+                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">Digital Products</span>
+                <span className="rounded-full px-2 py-0.5 text-xs font-medium text-green-400 bg-green-400/10">USDC · No gas</span>
+              </div>
+              <p className="truncate text-xs text-[#A7A79A] mt-0.5">
+                Gift cards, mobile top-ups &amp; eSIMs — 10,000+ brands in 180 countries
+              </p>
+            </div>
+            <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
         </div>
+      )}
+
+      {/* Cryptorefills sheet */}
+      {cryptorefillsOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[70] flex flex-col">
+          <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={() => setCryptorefillsOpen(false)} />
+          <div className="bg-[#141513] rounded-t-3xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[#2A2B27] shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-xl overflow-hidden shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/cryptorefills-logo.png" alt="Cryptorefills" className="h-full w-full object-contain" />
+                </div>
+                <div>
+                <p className="font-semibold text-[#F2F0E8] text-sm">Cryptorefills</p>
+                <p className="text-xs text-[#A7A79A]">Digital Products</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCryptorefillsOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.06] text-[#A7A79A] hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
+              <CryptorefillsDetail />
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
 
       {/* Bitrefill detail sheet */}

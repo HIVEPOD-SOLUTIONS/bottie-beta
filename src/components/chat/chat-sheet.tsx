@@ -14,6 +14,7 @@ import { MessageBubble } from "./message-bubble";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { ToolResultCard } from "./tool-result-card";
+import { CryptorefillsPaymentCard } from "./cryptorefills-payment-card";
 
 function OpenFundWalletTrigger({ toolCallId }: { toolCallId: string }) {
   useEffect(() => {
@@ -934,6 +935,21 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                       ) {
                         return (
                           <BitrefillPaymentCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult as any}
+                          />
+                        );
+                      }
+
+                      // Cryptorefills payment — the card runs the whole x402 checkout itself
+                      if (
+                        tp.state === "output-available" &&
+                        (tp.output as any)?.pendingCryptorefillsPayment === true
+                      ) {
+                        return (
+                          <CryptorefillsPaymentCard
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
