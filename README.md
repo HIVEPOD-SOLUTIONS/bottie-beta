@@ -422,8 +422,8 @@ cp .env.example .env
 ### Setup
 
 ```bash
-git clone https://github.com/Afoxcute/bluvfiAI.git
-cd bluvfiAI
+git clone https://github.com/HIVEPOD-SOLUTIONS/bottie-beta.git
+cd bottie-beta
 npm install --legacy-peer-deps
 ```
 
