@@ -43,6 +43,13 @@
       "when": 1790582079972,
       "tag": "0005_nosana_deployments",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790710025530,
+      "tag": "0006_stocks",
+      "breakpoints": true
     }
   ]
 }

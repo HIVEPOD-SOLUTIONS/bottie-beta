@@ -242,3 +242,62 @@ export const balanceSnapshots = pgTable("balance_snapshots", {
 }, (table) => [
   index("balance_snapshots_user_created_idx").on(table.userId, table.createdAt),
 ]);
+
+/**
+ * Stocks (Backpack Exchange) — Bluvfi trades from ONE Backpack account for all
+ * users, so these tables are the source of truth for who owns what.
+ *
+ * stock_balances: per-user holdings. asset "USDC" is stock cash; anything
+ *   else is shares (e.g. "AAPL.US"). Changed only by single-statement SQL in
+ *   lib/stocks-ledger.ts that also writes the ledger row, so the two can't
+ *   drift and concurrent trades can't overspend (conditional UPDATE).
+ * stock_ledger: append-only history. (kind, ref) is unique, so a deposit tx or
+ *   fill can never be credited twice.
+ * stock_orders: one row per RFQ/order sent to Backpack, with the cash reserved for it.
+ */
+export const stockBalances = pgTable("stock_balances", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  asset: text("asset").notNull(),
+  amount: numeric("amount", { precision: 38, scale: 12 }).notNull().default("0"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("stock_balances_user_asset_idx").on(table.userId, table.asset),
+]);
+
+export const stockLedger = pgTable("stock_ledger", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  kind: text("kind").notNull(),     // deposit | reserve | release | buy | sell | withdraw | withdraw_refund
+  ref: text("ref").notNull(),       // tx hash, order id, withdrawal id…
+  asset: text("asset").notNull(),
+  amount: numeric("amount", { precision: 38, scale: 12 }).notNull(), // signed delta
+  meta: text("meta"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("stock_ledger_kind_ref_asset_idx").on(table.kind, table.ref, table.asset),
+  index("stock_ledger_user_created_idx").on(table.userId, table.createdAt),
+]);
+
+export const stockOrders = pgTable("stock_orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  venue: text("venue").notNull(),               // "rfq" | "spot"
+  externalId: text("external_id"),              // Backpack rfqId / orderId
+  symbol: text("symbol").notNull(),             // AAPL.US_USDC_RFQ or MU.US_USDC
+  asset: text("asset").notNull(),               // AAPL.US
+  side: text("side").notNull(),                 // "buy" | "sell"
+  quantity: numeric("quantity", { precision: 38, scale: 12 }).notNull(),
+  limitPrice: numeric("limit_price", { precision: 38, scale: 12 }).notNull(),
+  reservedUsdc: numeric("reserved_usdc", { precision: 38, scale: 12 }).notNull().default("0"),
+  status: text("status").notNull().default("pending"), // pending | filled | cancelled | expired | failed
+  fillQuantity: numeric("fill_quantity", { precision: 38, scale: 12 }),
+  fillQuoteQuantity: numeric("fill_quote_quantity", { precision: 38, scale: 12 }),
+  fillPrice: numeric("fill_price", { precision: 38, scale: 12 }),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("stock_orders_user_created_idx").on(table.userId, table.createdAt),
+  index("stock_orders_status_idx").on(table.status),
+]);

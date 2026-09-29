@@ -59,6 +59,24 @@ function getPrivyClient() {
   return privy;
 }
 
+/**
+ * The user's own wallet addresses, straight from Privy (not from the client).
+ * Used to prove an on-chain payment came from this user before crediting it.
+ */
+export async function getUserWalletAddresses(userId: string): Promise<{ evm: string[]; solana: string[] }> {
+  const user = await getPrivyClient().getUserById(userId);
+  const evm: string[] = [];
+  const solana: string[] = [];
+  for (const a of user.linkedAccounts) {
+    if (a.type === "wallet" || a.type === "smart_wallet") {
+      const acct = a as { address: string; chainType?: string };
+      if (acct.chainType === "solana") solana.push(acct.address);
+      else evm.push(acct.address.toLowerCase());
+    }
+  }
+  return { evm, solana };
+}
+
 export async function verifyAuth(): Promise<{ userId: string }> {
   // 1. Try Authorization: Bearer header first (explicit token from client)
   let token: string | undefined;

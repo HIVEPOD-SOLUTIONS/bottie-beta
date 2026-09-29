@@ -9,6 +9,7 @@ import { NosanaSection } from "./nosana-section";
 import { DomaSection } from "./doma-section";
 import { XStocksSection } from "./xstocks-section";
 import { GetEquitySection } from "./getequity-section";
+import { StocksSection } from "./stocks-section";
 
 const MARKET_TABS = [
   { key: "all",    label: "All"            },
@@ -71,6 +72,35 @@ function XStocksBanner({ onOpen }: { onOpen: () => void }) {
         </div>
         <p className="truncate text-xs text-[#A7A79A] mt-0.5">
           AAPL, TSLA, NVDA and 70+ tokenized real-world stocks on-chain — xChange RFQ, proof of reserves, oracles
+        </p>
+      </div>
+      <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </button>
+  );
+}
+
+// ── Backpack stocks & ETFs card (shown in All, Stocks and ETFs tabs) ──────────
+
+function BackpackBanner({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      onClick={onOpen}
+      className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-left hover:border-[#3A3B37] transition-colors w-full"
+    >
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#E33E3F]/10 overflow-hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/backpack-logo.png" alt="Backpack" className="h-8 w-8" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="font-semibold text-[#F2F0E8]">Backpack</p>
+          <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">US Stocks & ETFs</span>
+          <span className="rounded-full px-2 py-0.5 text-xs font-medium text-green-400 bg-green-400/10">USDC</span>
+        </div>
+        <p className="truncate text-xs text-[#A7A79A] mt-0.5">
+          1,100+ stocks and ETFs — AAPL, NVDA, TSLA, SPY — fractional shares, trades nearly 24/5
         </p>
       </div>
       <svg className="shrink-0 text-[#A7A79A]" width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -215,6 +245,7 @@ export function InvestmentsScreen() {
   const [marketFilter, setMarketFilter] = useState<string>("all");
   const [xstocksOpen, setXstocksOpen] = useState(false);
   const [getEquityOpen, setGetEquityOpen] = useState(false);
+  const [backpackOpen, setBackpackOpen] = useState<"stock" | "etf" | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -319,24 +350,12 @@ export function InvestmentsScreen() {
 
           {/* xStocks is hidden from the UI for now — user request. XStocksBanner, the sheet
               below and XStocksSection are left in place so it's a one-line change to restore. */}
-          {(marketFilter === "stock") && (
-            <div className="py-12 text-center">
-              <p className="text-4xl">📈</p>
-              <p className="mt-2 font-semibold text-[#F2F0E8]">Stocks coming soon</p>
-              <p className="mt-1 text-sm text-[#A7A79A]">Tokenized real-world stocks will appear here</p>
-            </div>
+          {(marketFilter === "all" || marketFilter === "stock" || marketFilter === "etf") && (
+            <BackpackBanner onOpen={() => setBackpackOpen(marketFilter === "etf" ? "etf" : "stock")} />
           )}
 
           {(marketFilter === "ipo" || marketFilter === "all") && (
             <GetEquityBanner onOpen={() => setGetEquityOpen(true)} />
-          )}
-
-          {(marketFilter === "etf") && (
-            <div className="py-12 text-center">
-              <p className="text-4xl">📊</p>
-              <p className="mt-2 font-semibold text-[#F2F0E8]">ETFs coming soon</p>
-              <p className="mt-1 text-sm text-[#A7A79A]">Index and thematic ETFs will appear here</p>
-            </div>
           )}
 
           {(marketFilter === "crypto" || marketFilter === "all") && (
@@ -366,6 +385,49 @@ export function InvestmentsScreen() {
             </div>
             <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
               <XStocksSection />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {backpackOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[70] flex flex-col">
+          <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={() => setBackpackOpen(null)} />
+          <div className="bg-[#141513] rounded-t-3xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[#2A2B27] shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E33E3F]/10">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/backpack-logo.png" alt="Backpack" className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="font-semibold text-[#F2F0E8] text-sm">Backpack</p>
+                  <p className="text-xs text-[#A7A79A]">US Stocks & ETFs</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setBackpackOpen(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.06] text-[#A7A79A] hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 pb-[calc(max(env(safe-area-inset-bottom),24px)+72px)]">
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                {(["stock", "etf"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setBackpackOpen(k)}
+                    className={`rounded-full py-2 text-sm font-medium transition-colors ${
+                      backpackOpen === k ? "bg-[#F2F0E8] text-[#141513]" : "bg-white/[0.06] text-[#A7A79A]"
+                    }`}
+                  >
+                    {k === "stock" ? "Stocks" : "ETFs"}
+                  </button>
+                ))}
+              </div>
+              <StocksSection key={backpackOpen} kind={backpackOpen} />
             </div>
           </div>
         </div>,
