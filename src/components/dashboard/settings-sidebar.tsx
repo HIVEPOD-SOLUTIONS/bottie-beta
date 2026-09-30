@@ -11,6 +11,9 @@ import { getUserFirstName } from "@/lib/user-display-name";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
 import { useXrpBalance } from "@/hooks/use-xrp-balance";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
+import { isCapacitorApp } from "@/hooks/use-admob";
+import { hasEntitlement } from "@/lib/revenuecat";
+import { PaywallSheet } from "@/components/paywall/paywall-sheet";
 
 interface SettingsSidebarProps {
   open: boolean;
@@ -121,6 +124,15 @@ export function SettingsSidebar({
     // refire this on every render; only open/wallet changes should trigger it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, xrplWalletRequestId]);
+
+  const isMobile = isCapacitorApp();
+  const [isPremium, setIsPremium] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open || !isMobile) return;
+    hasEntitlement("premium").then(setIsPremium).catch(() => {});
+  }, [open, isMobile]);
 
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
@@ -333,6 +345,25 @@ export function SettingsSidebar({
         </a>
       </div>
 
+      {/* Upgrade / Premium — mobile only */}
+      {isMobile && (
+        isPremium ? (
+          <div className="mb-3 flex items-center justify-center gap-2 rounded-xl border border-[#C9A84C]/30 bg-[#C9A84C]/10 px-4 py-3">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01L12 2z" fill="#C9A84C" />
+            </svg>
+            <span className="font-mono text-xs tracking-wide text-[#C9A84C]">Bluvfi Premium</span>
+          </div>
+        ) : (
+          <button
+            onClick={() => setPaywallOpen(true)}
+            className="mb-3 w-full rounded-xl border border-[#C9A84C]/40 bg-[#C9A84C]/10 px-4 py-3 font-mono text-xs tracking-wide text-[#C9A84C] transition-colors duration-200 hover:bg-[#C9A84C]/20"
+          >
+            ✦ Upgrade to Premium
+          </button>
+        )
+      )}
+
       {/* Logout */}
       <button
         onClick={() => logout()}
@@ -340,6 +371,13 @@ export function SettingsSidebar({
       >
         Log out
       </button>
+
+      <PaywallSheet
+        open={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        onPurchased={() => setIsPremium(true)}
+        featureName="Bluvfi Premium"
+      />
     </motion.div>
   );
 }

@@ -110,7 +110,7 @@ export function PaywallSheet({ open, onClose, onPurchased, featureName = "Premiu
               <p className="font-semibold text-[#F2F0E8]">{pkg.product.title}</p>
               <p className="mt-0.5 text-xs text-[#A7A79A]">{pkg.product.description}</p>
             </div>
-            <span className="ml-4 shrink-0 font-bold text-[#8FAE82]">{pkg.product.priceString}</span>
+            <span className="ml-4 shrink-0 whitespace-nowrap font-bold text-[#8FAE82]">{pkg.product.priceString}</span>
           </button>
         ))}
 

@@ -6,6 +6,7 @@ import { activities } from "@/lib/db/schema";
 import { VAULT_FRIENDLY_NAMES, TOKEN_DISPLAY_NAMES } from "@/lib/constants";
 import { geminiGenerateText } from "@/lib/gemini";
 import { checkNarrateLimit } from "@/lib/user-rate-limiter";
+import { isUserPremium } from "@/lib/revenuecat-server";
 
 export async function GET() {
   let userId: string;
@@ -17,7 +18,8 @@ export async function GET() {
   }
 
   // Per-user rate limit — each call invokes Gemini Flash.
-  const rateLimit = checkNarrateLimit(userId);
+  const isPremium = await isUserPremium(userId);
+  const rateLimit = checkNarrateLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: rateLimit.reason },

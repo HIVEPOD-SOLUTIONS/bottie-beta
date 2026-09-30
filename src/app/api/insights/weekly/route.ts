@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { payments, balanceSnapshots, weeklyInsights } from "@/lib/db/schema";
 import { geminiGenerateText } from "@/lib/gemini";
 import { checkInsightsLimit } from "@/lib/user-rate-limiter";
+import { isUserPremium } from "@/lib/revenuecat-server";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,8 @@ export async function POST() {
   }
 
   // Per-user rate limit — each POST hits Gemini with a large DB-backed prompt.
-  const rateLimit = checkInsightsLimit(userId);
+  const isPremium = await isUserPremium(userId);
+  const rateLimit = checkInsightsLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: rateLimit.reason },

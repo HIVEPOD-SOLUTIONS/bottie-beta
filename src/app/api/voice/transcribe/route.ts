@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { verifyAuth } from "@/lib/auth";
 import { checkVoiceLimit } from "@/lib/user-rate-limiter";
+import { isUserPremium } from "@/lib/revenuecat-server";
 
 export const maxDuration = 30;
 
@@ -13,7 +14,8 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const rateLimit = checkVoiceLimit(userId);
+  const isPremium = await isUserPremium(userId);
+  const rateLimit = checkVoiceLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: rateLimit.reason },

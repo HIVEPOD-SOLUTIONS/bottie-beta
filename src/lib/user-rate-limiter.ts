@@ -152,68 +152,76 @@ export function grantChatBonus(userId: string, bonus: number): void {
 
 /**
  * /api/chat — AI chat agent (LLM tokens, tool calls).
- * Burst: 20 messages/min — prevents rapid-fire scripting.
- * Daily: 200 messages/day — caps total LLM cost per user.
+ * Free:    burst 20/min · daily 200/day
+ * Premium: burst 30/min · daily 2000/day
  */
-export function checkChatLimit(userId: string): RateLimitResult {
+export function checkChatLimit(userId: string, isPremium = false): RateLimitResult {
   return enforce(
     userId,
     "chat",
-    20,
+    isPremium ? 30 : 20,
     60_000,
-    200,
+    isPremium ? 2000 : 200,
     "You're sending messages too fast. Please wait a moment before trying again.",
-    "You've reached your daily message limit (200). Your quota resets at midnight UTC.",
+    isPremium
+      ? "You've reached your daily message limit (2000). Your quota resets at midnight UTC."
+      : "You've reached your daily message limit (200). Upgrade to Bluvfi Premium for 10× more messages, or watch an ad for a bonus.",
   );
 }
 
 /**
  * /api/voice/transcribe — OpenAI Whisper (billed per audio-minute).
- * Burst: 5 transcriptions/min — each call can be minutes of audio.
- * Daily: 30 transcriptions/day — ~30 min of audio at typical clip length.
+ * Free:    burst 5/min  · daily 30/day
+ * Premium: burst 15/min · daily 200/day
  */
-export function checkVoiceLimit(userId: string): RateLimitResult {
+export function checkVoiceLimit(userId: string, isPremium = false): RateLimitResult {
   return enforce(
     userId,
     "voice",
-    5,
+    isPremium ? 15 : 5,
     60_000,
-    30,
+    isPremium ? 200 : 30,
     "You're transcribing too quickly. Please wait before sending another voice message.",
-    "You've reached your daily voice transcription limit (30). Your quota resets at midnight UTC.",
+    isPremium
+      ? "You've reached your daily voice transcription limit (200). Your quota resets at midnight UTC."
+      : "You've reached your daily voice transcription limit (30). Upgrade to Bluvfi Premium for more.",
   );
 }
 
 /**
  * /api/activity/narrate — Gemini Flash (short prompt, cheap per call).
- * Burst: 10/min — narration is fetched on page load; shouldn't be hammered.
- * Daily: 50/day — generous; this endpoint is read-only.
+ * Free:    burst 10/min · daily 50/day
+ * Premium: burst 20/min · daily 500/day
  */
-export function checkNarrateLimit(userId: string): RateLimitResult {
+export function checkNarrateLimit(userId: string, isPremium = false): RateLimitResult {
   return enforce(
     userId,
     "narrate",
-    10,
+    isPremium ? 20 : 10,
     60_000,
-    50,
+    isPremium ? 500 : 50,
     "Too many narration requests. Please wait a moment.",
-    "You've reached your daily activity narration limit (50). Your quota resets at midnight UTC.",
+    isPremium
+      ? "You've reached your daily activity narration limit (500). Your quota resets at midnight UTC."
+      : "You've reached your daily activity narration limit (50). Upgrade to Bluvfi Premium for more.",
   );
 }
 
 /**
  * /api/insights/weekly — Gemini Flash with a large DB-backed prompt.
- * Burst: 3/min — each call reads 100 DB rows and runs a full Gemini completion.
- * Daily: 10/day — the feature is designed to run once per week; 10/day is very generous.
+ * Free:    burst 3/min · daily 10/day
+ * Premium: burst 5/min · daily 100/day
  */
-export function checkInsightsLimit(userId: string): RateLimitResult {
+export function checkInsightsLimit(userId: string, isPremium = false): RateLimitResult {
   return enforce(
     userId,
     "insights",
-    3,
+    isPremium ? 5 : 3,
     60_000,
-    10,
+    isPremium ? 100 : 10,
     "Too many insight requests. Please wait before refreshing again.",
-    "You've reached your daily insights limit (10). Your quota resets at midnight UTC.",
+    isPremium
+      ? "You've reached your daily insights limit (100). Your quota resets at midnight UTC."
+      : "You've reached your daily insights limit (10). Upgrade to Bluvfi Premium for more.",
   );
 }

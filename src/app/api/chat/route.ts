@@ -5,6 +5,7 @@ import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { windowMessages, extractConversationRecap } from "@/lib/ai/window-messages";
 import { verifyAuth } from "@/lib/auth";
 import { checkChatLimit } from "@/lib/user-rate-limiter";
+import { isUserPremium } from "@/lib/revenuecat-server";
 import { db } from "@/lib/db";
 import { xrplSidebarWallets } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -102,7 +103,8 @@ export async function POST(req: Request) {
   // ── Per-user rate limiting (burst + daily) ──────────────────────────────
   // Checked after auth so we rate-limit by user identity, not just IP.
   // IP-based limits in proxy.ts are still the outer gate for unauthenticated abuse.
-  const rateLimit = checkChatLimit(userId);
+  const isPremium = await isUserPremium(userId);
+  const rateLimit = checkChatLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return Response.json(
       { error: rateLimit.reason },
