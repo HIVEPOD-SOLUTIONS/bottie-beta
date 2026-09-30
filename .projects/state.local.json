@@ -1,0 +1,52 @@
+{
+  "version": 4,
+  "project": {
+    "catalog": "prod",
+    "initializedAt": "2026-09-30T08:20:48.827Z",
+    "merchantDisplayName": null,
+    "merchantId": "acct_1ULIUmBguf1lSQ2L",
+    "projectId": "project_61VUgiHfwyorZxgvB16VUgSA4DSQMHTRtQCTM64Zk1sm",
+    "projectName": "bluvfi"
+  },
+  "providers": {
+    "amplitude": {
+      "accountRequestId": "facctrq_61VUgrMdSMaHVEz4r16VUgSA4DSQMHTRtQCTM64ZkU0W",
+      "configuration": {
+        "region": "us",
+        "marketing": false
+      },
+      "linkedAt": "2026-09-30T08:30:14.112Z",
+      "providerId": "prvdr_61UQYwVkrCANKYQdE5BLM",
+      "providerName": "Amplitude",
+      "redirectUrl": null,
+      "requestedAt": "2026-09-30T08:30:14.112Z",
+      "status": "complete"
+    }
+  },
+  "resources": {
+    "amplitude-analytics": {
+      "configuration": {},
+      "createdAt": "2026-09-30T08:30:28.375Z",
+      "lastRevealedAt": "2026-09-30T08:30:29.165Z",
+      "lastStatus": "complete",
+      "livemode": true,
+      "name": "amplitude-analytics",
+      "providerId": "prvdr_61UQYwVkrCANKYQdE5BLM",
+      "providerName": "Amplitude",
+      "resourceId": "fres_61VUgrcMDfCTTyLt616VUgSA4DSQMHTRtQCTM64ZkI7M",
+      "serviceId": "analytics"
+    },
+    "amplitude-plan": {
+      "configuration": {},
+      "createdAt": "2026-09-30T08:30:16.837Z",
+      "lastRevealedAt": "2026-09-30T08:30:17.525Z",
+      "lastStatus": "complete",
+      "livemode": true,
+      "name": "amplitude-plan",
+      "providerId": "prvdr_61UQYwVkrCANKYQdE5BLM",
+      "providerName": "Amplitude",
+      "resourceId": "fres_61VUgrQHe56WnEwkP16VUgSA4DSQMHTRtQCTM64ZkRFI",
+      "serviceId": "free"
+    }
+  }
+}
