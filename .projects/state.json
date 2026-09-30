@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "providers": {
+    "amplitude": {
+      "name": "Amplitude"
+    }
+  },
+  "resources": {
+    "amplitude-analytics": {
+      "livemode": true,
+      "name": "amplitude-analytics",
+      "providerName": "Amplitude",
+      "serviceId": "analytics"
+    },
+    "amplitude-plan": {
+      "livemode": true,
+      "name": "amplitude-plan",
+      "providerName": "Amplitude",
+      "serviceId": "free"
+    }
+  }
+}
