@@ -129,7 +129,7 @@
 
 "@capacitor/app@^8.1.1":
   version "8.1.1"
-  resolved "https://registry.npmjs.org/@capacitor/app/-/app-8.1.1.tgz"
+  resolved "https://registry.yarnpkg.com/@capacitor/app/-/app-8.1.1.tgz#af00649d0c7799ec83469b1c4ada921f9933a77e"
   integrity sha512-xM2ZTX5jK60tFtmjsmJv+Cdj1Qsb6NcavkqmdEnCPQBeya9oKhamZJxYOnQNj1ZvcJM7sWfG6BEtSLx42pisbA==
 
 "@capacitor/browser@^8.0.4":

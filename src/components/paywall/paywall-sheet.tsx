@@ -104,13 +104,13 @@ export function PaywallSheet({ open, onClose, onPurchased, featureName = "Premiu
             key={pkg.identifier}
             onClick={() => handlePurchase(pkg)}
             disabled={purchasing || restoring}
-            className="mb-3 flex w-full items-center justify-between rounded-2xl border border-[#8FAE82]/30 bg-[#8FAE82]/10 px-5 py-4 text-left transition-colors active:bg-[#8FAE82]/20 disabled:opacity-50"
+            className="mb-3 w-full rounded-2xl border border-[#8FAE82]/30 bg-[#8FAE82]/10 px-5 py-4 text-left transition-colors active:bg-[#8FAE82]/20 disabled:opacity-50"
           >
-            <div>
-              <p className="font-semibold text-[#F2F0E8]">{pkg.product.title}</p>
-              <p className="mt-0.5 text-xs text-[#A7A79A]">{pkg.product.description}</p>
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="min-w-0 font-semibold text-[#F2F0E8]">{pkg.product.title}</p>
+              <p className="shrink-0 whitespace-nowrap text-base font-bold text-[#8FAE82]">{pkg.product.priceString}</p>
             </div>
-            <span className="ml-4 shrink-0 whitespace-nowrap font-bold text-[#8FAE82]">{pkg.product.priceString}</span>
+            <p className="mt-1 text-xs text-[#A7A79A] [hyphens:none]">{pkg.product.description}</p>
           </button>
         ))}
 
