@@ -33,6 +33,7 @@ import { PriceTicker } from "@/components/dashboard/price-ticker";
 import { ASSET_PRICES } from "@/lib/demo-data";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
+import { isDemoMode, DEMO_EVM_ADDRESS, DEMO_SOL_ADDRESS, DEMO_FIRST_NAME } from "@/lib/demo-mode";
 
 type Tab = "bills" | "investments" | "payments" | "banking" | "chat";
 
@@ -52,9 +53,11 @@ function DashboardInner() {
   const [showFundSheet, setShowFundSheet] = useState(false);
   const { paidBillIds, portfolio } = useDemoState();
 
-  const { evmAddress, solanaAddress: solanaAddr, smartWalletAddress } = getPrivyEmbeddedWallets(user as any, wallets);
+  const isDemo = isDemoMode();
+  const { evmAddress, solanaAddress: privySolAddr, smartWalletAddress } = getPrivyEmbeddedWallets(user as any, wallets);
   // Prefer smart-wallet address; fall back to embedded wallet. Matches settings-sidebar.tsx.
-  const agentAddress = (smartWalletAddress ?? evmAddress) as `0x${string}` | undefined;
+  const agentAddress = (isDemo ? DEMO_EVM_ADDRESS : (smartWalletAddress ?? evmAddress)) as `0x${string}` | undefined;
+  const solanaAddr = isDemo ? DEMO_SOL_ADDRESS : privySolAddr;
 
   // All four stablecoin balances — drives sidebar rows, dashboard totals, and the banner
   const {
@@ -80,7 +83,7 @@ function DashboardInner() {
     && totalBalance < LOW_BALANCE_THRESHOLD_USD
     && (xrpBalance ?? 0) < 5;
   const balanceFormatted = `$${totalBalance.toFixed(2)}`;
-  const firstName = getUserFirstName(user);
+  const firstName = isDemo ? DEMO_FIRST_NAME : getUserFirstName(user);
   const greeting = getTimeBasedGreeting();
 
   const handleTabClick = (tab: Tab) => {

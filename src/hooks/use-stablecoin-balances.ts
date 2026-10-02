@@ -23,6 +23,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { EVM_BALANCE_CHAINS, SOLANA_BALANCE_CHAIN } from "@/hooks/use-unified-balance";
 import { AuthServiceUnavailableError, authFetch } from "@/lib/api-auth-fetch";
+import { isDemoMode, DEMO_EVM_USDC, DEMO_SOL_USDC } from "@/lib/demo-mode";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ?? "";
@@ -480,6 +481,9 @@ export function useStablecoinBalances(): StablecoinBalances {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh, ready, walletsReady, authenticated, userId, getAccessToken]);
 
+  if (isDemoMode()) {
+    return { evmUsdc: DEMO_EVM_USDC, evmUsdt: 0, solUsdc: DEMO_SOL_USDC, solUsdt: 0, isLoading: false };
+  }
   return { ...balances, isLoading };
 }
 
