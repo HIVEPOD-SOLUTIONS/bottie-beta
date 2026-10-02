@@ -69,7 +69,6 @@ export function SettingsSidebar({
   });
 
   const { evmAddress, solanaAddress, smartWalletAddress } = getPrivyEmbeddedWallets(user as any, wallets);
-  const displayEvmAddress = smartWalletAddress ?? evmAddress;
   const { evmUsdc, evmUsdt, solUsdc, solUsdt, isLoading: sbLoading } = useStablecoinBalances();
 
   // Persistent XRPL wallet — created lazily (idempotent) on first load, then cached.
@@ -137,6 +136,7 @@ export function SettingsSidebar({
   const email = user?.email?.address || user?.google?.email;
   const firstName = getUserFirstName(user) ?? "User";
   const initial = firstName.charAt(0).toUpperCase();
+  const displayEvmAddress = smartWalletAddress ?? evmAddress;
 
   return (
     <motion.div

@@ -3,7 +3,6 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isDemoMode } from "@/lib/demo-mode";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChatProvider, useChatSheet } from "@/contexts/chat-context";
 import { DemoStateProvider } from "@/contexts/demo-state-context";
@@ -22,20 +21,16 @@ import { initRevenueCat } from "@/lib/revenuecat";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user } = usePrivy();
   const router = useRouter();
-  // Read demo mode synchronously on first render (client-only) so there is no
-  // flash of the redirect before the effect fires.
-  const [demoMode] = useState(() => isDemoMode());
-
   useEffect(() => {
-    if (!ready || authenticated || demoMode) return;
+    if (!ready || authenticated) return;
     // Debounce to tolerate brief auth-state blips during mic/camera permission
     // dialogs on Android/iOS — the system pauses the WebView activity for a
     // moment, which can temporarily flip authenticated to false.
     const t = setTimeout(() => {
-      if (!authenticated && !isDemoMode()) router.push("/");
+      if (!authenticated) router.push("/");
     }, 800);
     return () => clearTimeout(t);
-  }, [ready, authenticated, demoMode, router]);
+  }, [ready, authenticated, router]);
 
   // Initialize RevenueCat once the user is authenticated on Android.
   useEffect(() => {
@@ -43,7 +38,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     initRevenueCat(user.id);
   }, [ready, authenticated, user?.id]);
 
-  if (!demoMode && !ready) {
+  if (!ready) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-cream-dark">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-sage border-t-transparent" />
@@ -51,7 +46,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!demoMode && !authenticated) return null;
+  if (!authenticated) return null;
 
   return (
     <DemoStateProvider>

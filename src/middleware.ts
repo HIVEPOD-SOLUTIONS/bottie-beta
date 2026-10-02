@@ -218,7 +218,10 @@ function addSecurityHeaders(response: NextResponse, isProd: boolean): NextRespon
 
 const ALLOWED_ORIGINS = new Set([
   "https://bluvfi.xyz",
+  "https://www.bluvfi.xyz",
   "https://localhost",      // Capacitor Android WebView
+  "capacitor://localhost",  // Capacitor older scheme
+  "http://localhost",       // Capacitor on some Android versions
   "http://localhost:3000",  // local Next.js dev server
   "http://10.0.2.2:3000",  // Android emulator → host
 ]);
@@ -232,7 +235,7 @@ const CORS_HEADERS = {
 
 // ── Main proxy ────────────────────────────────────────────────────────────────
 
-export function proxy(request: NextRequest): NextResponse {
+export function middleware(request: NextRequest): NextResponse {
   const isProd = process.env.NODE_ENV === "production";
   const origin  = request.headers.get("origin") ?? "";
   const allowed = ALLOWED_ORIGINS.has(origin);
