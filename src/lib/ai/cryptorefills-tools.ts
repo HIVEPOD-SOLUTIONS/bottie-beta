@@ -235,8 +235,34 @@ export function createCryptorefillsTools(userId?: string) {
             email,
             items: [{ beneficiary_account: beneficiary, product_id: productId, ...(item.is_range ? { product_value: productValue } : {}) }],
           };
+
+          // Optional extra for the mobile app: the same purchase as a deposit-address order in USDC on the same
+          // rail, which its card falls back to (paying from the wallet) if the gasless checkout is unavailable.
+          // Never blocks or alters the gasless flow; omitted when the partner API is off or lacks that method.
+          let fallbackPartnerOrder: CrPartnerRequest | undefined;
+          if (partnerConfigured()) {
+            try {
+              const wantNetwork = payWith === "solana" ? "solana" : "base";
+              const m = (await listPaymentMethods()).find((x) => x.coin.toUpperCase() === "USDC" && x.network.toLowerCase() === wantNetwork);
+              if (m) {
+                fallbackPartnerOrder = {
+                  email,
+                  brand_name: brand,
+                  country_code: country.toUpperCase(),
+                  denomination: item.is_range ? "range" : item.denomination ?? item.denomination_label ?? "",
+                  ...(item.is_range ? { product_value: productValue } : {}),
+                  beneficiary_account: beneficiary,
+                  coin: m.coin,
+                  network: m.network,
+                };
+              }
+            } catch {
+              /* the fallback is optional */
+            }
+          }
           return {
             ...common,
+            ...(fallbackPartnerOrder ? { fallbackPartnerOrder } : {}),
             payWith,
             rail: payWith,
             order,
