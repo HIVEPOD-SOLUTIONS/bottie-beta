@@ -16,6 +16,7 @@ import {
   RAIL_LABEL,
 } from "@/lib/cryptorefills-client";
 import { usePaymentsContext } from "@/contexts/payments-context";
+import { walletRailFor, sendFromWallet } from "@/lib/wallet-send";
 import { COUNTRIES, CountrySelector, getCountry, type CountryEntry } from "./bills-countries";
 import { kindOf, cardCategoryOf, type CrCardCategory } from "@/lib/cryptorefills-categories";
 import type { CrBrand, CrCatalogItem, CrDelivery, CrOrderStatus, CrPaymentMethod, CrPartnerOrder, CrRail } from "@/lib/cryptorefills";
@@ -646,6 +647,55 @@ function CryptorefillsCheckout({
 }
 
 /** Where and how much to send for a deposit-address order, with live status. */
+/**
+ * One-tap payment of a deposit-address order from the Bluvfi wallet, when it
+ * holds that coin on that network (see lib/wallet-send.ts). Remembers the
+ * send per order so a re-render or reopen can't pay twice.
+ */
+function PayFromWallet({ order }: { order: CrPartnerOrder }) {
+  const { sendTransaction } = usePrivy();
+  const { wallets } = useWallets();
+  const { wallets: solanaWallets } = useSolanaWallets();
+  const rail = order.coin && order.network ? walletRailFor(order.coin, order.network) : null;
+  const key = `cr_paid_${order.order_id}`;
+  const [sent, setSent] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(key); } catch { return null; }
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (!rail || order.memo || !order.wallet_address || !order.coin_amount) return null;
+
+  const pay = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const hash = await sendFromWallet({
+        rail, coin: order.coin!, to: order.wallet_address!, amount: order.coin_amount!, sendTransaction,
+        evmWallet: pickEvmWallet(wallets), solanaWallet: solanaWallets[0],
+      });
+      setSent(hash);
+      try { sessionStorage.setItem(key, hash); } catch { /* ignore */ }
+    } catch (e) {
+      const m = (e as Error)?.message ?? "Payment failed.";
+      setErr(/reject|denied|cancel/i.test(m) ? "Cancelled. Nothing was sent." : /insufficient|exceeds balance/i.test(m)
+        ? `Not enough ${order.coin} on ${order.network} in your wallet. Send it from another wallet using the address above.` : m.split("\n")[0]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return sent ? (
+    <p className="rounded-2xl bg-green-400/10 px-3 py-2.5 text-xs text-green-400">Sent from your wallet ✓ — waiting for Cryptorefills to confirm it.</p>
+  ) : (
+    <div>
+      <button onClick={pay} disabled={busy} className="w-full rounded-2xl bg-[#8FAE82] py-3 text-sm font-semibold text-[#141513] disabled:opacity-50">
+        {busy ? "Confirm in your wallet…" : `Pay ${order.coin_amount} ${order.coin} from my wallet`}
+      </button>
+      {err && <p className="mt-1.5 text-xs text-red-400">{err}</p>}
+    </div>
+  );
+}
+
 export function DepositPanel({ order, state }: { order: CrPartnerOrder; state: string }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (v: string) => {
@@ -678,6 +728,7 @@ export function DepositPanel({ order, state }: { order: CrPartnerOrder; state: s
           <p className="mt-1 font-mono text-sm text-[#F2F0E8]">{copied === order.memo ? "Copied" : order.memo}</p>
         </button>
       )}
+      {state === "awaiting_payment" && <PayFromWallet order={order} />}
       <div className="flex items-center gap-2 rounded-2xl bg-white/[0.04] px-3 py-2.5 text-xs text-[#A7A79A]">
         {state !== "review" && <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#8FAE82] border-t-transparent" />}
         <span>{status}</span>

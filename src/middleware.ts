@@ -113,6 +113,8 @@ function buildCSP(): string {
       "https://*.privy.systems",
       "https://privy.bluvfi.xyz", // custom auth domain — see script-src comment above
       "https://*.alchemy.com",
+      // Doma chain — balance checks + approve/pay for domain orders paid from chat
+      "https://rpc.doma.xyz",
       "https://eth-mainnet.g.alchemy.com",
       "https://polygon-mainnet.g.alchemy.com",
       "https://opt-mainnet.g.alchemy.com",

@@ -116,7 +116,8 @@ export function createCryptorefillsTools(userId?: string) {
     get_cryptorefills_payment_methods: tool({
       description:
         "List the coins and networks a user can pay Cryptorefills with besides gasless USDC (e.g. USDT on Tron, BTC, ETH, TON). " +
-        "These use a deposit address and the user pays the network fee. Call before buy_cryptorefills_product with payWith='other'.",
+        "These use a deposit address. If the user's Bluvfi wallet holds that coin, the card's \"Pay from my wallet\" sends it (network cost covered by Bluvfi where possible); " +
+        "otherwise they send it from another wallet and pay that network's fee. Call before buy_cryptorefills_product with payWith='other'.",
       inputSchema: z.object({
         coin: z.string().max(12).optional().describe("Filter to one coin, e.g. 'USDT'"),
       }),
@@ -225,7 +226,7 @@ export function createCryptorefillsTools(userId?: string) {
               partnerOrder,
               tip:
                 'PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm to get your payment address." Then STOP. ' +
-                `The card creates the order and shows the ${method.coin} (${method.network}) address and exact amount; the user sends it from any wallet and pays the network fee. ` +
+                `The card creates the order and shows the ${method.coin} (${method.network}) address and exact amount, plus a "Pay from my wallet" button when their Bluvfi wallet holds that coin; otherwise they send it from any wallet. "Pay from my wallet" covers the network cost where Bluvfi can; sending from another wallet costs them that network's fee. ` +
                 "When it reports back with {paid:true, orderId}, tell the user their order is waiting for payment (or delivered) and the code will be emailed.",
             };
           }

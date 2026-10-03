@@ -1,6 +1,7 @@
 import type { PrivyClientConfig } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { base, mainnet, polygon, arbitrum, optimism } from "viem/chains";
+import { domaChain } from "@/lib/doma-chain";
 
 export const privyConfig: PrivyClientConfig = {
   loginMethods: ["email", "passkey"],
@@ -28,5 +29,6 @@ export const privyConfig: PrivyClientConfig = {
   // All chains used for Bitrefill USDT/USDC payments.
   // Base is the default; Polygon, Arbitrum, Optimism, and Ethereum are added so
   // wallet_switchEthereumChain succeeds when the user pays on those networks.
-  supportedChains: [base, polygon, arbitrum, optimism, mainnet],
+  // Doma is for paying domain orders from the AI chat (see doma-payment-card.tsx).
+  supportedChains: [base, polygon, arbitrum, optimism, mainnet, domaChain],
 };

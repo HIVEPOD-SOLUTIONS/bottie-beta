@@ -11,6 +11,7 @@ import { MIN_XRP_BRIDGE_USD, markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 import { createCmcTools } from "@/lib/ai/cmc-tools";
 import { createCryptorefillsTools } from "@/lib/ai/cryptorefills-tools";
+import { createStocksTools } from "@/lib/ai/stocks-tools";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -35,6 +36,11 @@ function appBase() {
 
 const SAMPLE_CATALOG_NOTICE =
   "Sample data only: these prices are frozen illustrative numbers, not live market data, and these assets cannot be bought in Bluvfi yet. Do not present them as current prices.";
+
+/** Where GetEquity sends the user back after a card payment. */
+function getEquityReturnUrl(): string {
+  return `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://bluvfi.xyz").replace(/\/$/, "")}/app`;
+}
 
 export function createTools(walletAddress?: string, userId?: string, solanaAddress?: string, paidBillIds: string[] = [], userName?: string) {
   // Pick the right address for a given blockchain context
@@ -68,6 +74,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     // ── Cryptorefills (USDC on Base, x402) — see lib/ai/cryptorefills-tools.ts ─
     ...createCryptorefillsTools(userId),
+
+    // ── US stocks & ETFs (Backpack) — see lib/ai/stocks-tools.ts ───────────────
+    ...createStocksTools(userId),
 
     // ── UI actions ────────────────────────────────────────────────────────────
 
@@ -887,7 +896,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     buy_investment: tool({
       description:
-        "NOT AVAILABLE. Buying stocks or ETFs from the SAMPLE catalog is not supported in Bluvfi — that catalog is sample data with frozen prices, so this tool never starts a payment. " +
+        "DEPRECATED — never use this to buy. Real US stock/ETF trades go through trade_stock (Backpack); real prices through search_stocks / get_stock. This sample-catalog tool never starts a payment. " +
         "This does NOT apply to pre-IPO / private-market investing — that's real via getequity_* tools; never call this tool for a pre-IPO request, use getequity_create_member / getequity_get_fund_invest_quote / getequity_fund_invest instead. " +
         "Call this only to get the standard explanation to relay to the user for a stock/ETF request; do NOT tell the user a purchase is pending or that a Confirm card will appear.",
       inputSchema: z.object({
@@ -897,8 +906,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       }),
       execute: async ({ symbol }) => ({
         error:
-          `Buying ${symbol.toUpperCase()} isn't available in Bluvfi yet — stock and ETF purchases are coming soon, and no payment was started. ` +
-          "Tokenized-stock prices/info can still be discussed via the xstocks_* tools, though trading isn't enabled yet either. " +
+          `Use trade_stock to buy ${symbol.toUpperCase()} — it's a real US stock/ETF trade via Backpack (confirm card, USDC from the wallet). No payment was started by this call. ` +
           "If the user actually meant pre-IPO / private-market investing, that IS available for real — use the getequity_* tools instead of this one.",
       }),
     }),
@@ -906,7 +914,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     get_market_prices: tool({
       description:
         "Get the SAMPLE catalog prices for stocks, ETFs and illustrative pre-IPO-style entries. These are frozen illustrative numbers, NOT live market data — never present them as current prices. " +
-        "For real tokenized-stock prices use xstocks_get_asset_price_data; for crypto use get_crypto_prices; for real pre-IPO/private-market token prices use getequity_list_tokens / getequity_get_token instead.",
+        "For real US stock/ETF prices use search_stocks / get_stock; for crypto use get_crypto_prices; for real pre-IPO/private-market token prices use getequity_list_tokens / getequity_get_token instead.",
       inputSchema: z.object({
         type: z
           .enum(["stock", "ipo", "etf", "all"])
@@ -1256,7 +1264,7 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
     }),
 
     doma_create_order: tool({
-      description: "Create a Doma order to register or renew domains. It charges nothing by itself — it returns a signed payment voucher and the on-chain steps (approve + pay on Doma chain, in USDC.e) that the user must sign in their own EVM wallet. ONLY call after the user has explicitly confirmed the exact domains, years and total price (quote them first with doma_get_pricing). Registration also needs a registrantHandle from doma_upload_registrant_contacts / doma_upload_verified_registrant_contacts; renewals do not.",
+      description: "Create a Doma order to register or renew domains. It charges nothing by itself — it returns a signed payment voucher, shown as a pay card that runs the on-chain steps (approve + pay on the Doma chain, in USDC.e) from the user's wallet; the network cost is covered by Bluvfi where possible. ONLY call after the user has explicitly confirmed the exact domains, years and total price (quote them first with doma_get_pricing). Registration also needs a registrantHandle from doma_upload_registrant_contacts / doma_upload_verified_registrant_contacts; renewals do not.",
       inputSchema: z.object({
         domains: z.array(z.object({
           domain: z.string(),
@@ -1279,7 +1287,14 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
           if (order?.__typename === "CreateOrderValidationError") {
             return { created: false, errors: order.errors, note: "No order was created. Tell the user which domains failed and why." };
           }
-          return { created: true, order: { orderId: order.orderId, totalPayment: order.totalPayment, status: order.status, items: order.items, voucherExpiresAt: order.voucherExpiresAt }, payment: prepareDomaOrderPayment(order) };
+          return {
+            created: true,
+            // Rendered as a pay card in chat that runs payment.steps in the user's wallet — see doma-payment-card.tsx.
+            domaPayment: true,
+            order: { orderId: order.orderId, totalPayment: order.totalPayment, status: order.status, items: order.items, voucherExpiresAt: order.voucherExpiresAt },
+            payment: prepareDomaOrderPayment(order),
+            tip: 'PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When it reports {paid:true}, call doma_get_order(orderId) to confirm registration. If {paid:false}, relay the error.',
+          };
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
@@ -1308,8 +1323,73 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
       },
     }),
 
+    doma_buy_listing: tool({
+      description:
+        "Buy a domain listed for sale on the Doma marketplace. Finds the listing (by domain name, or a listing id from doma_get_listings), " +
+        "prices it for the user's wallet and shows a buy card in chat; the card pays from their wallet (approve + Seaport fill) and the " +
+        "domain is transferred to them. Nothing is paid until they confirm in the card. ONLY call after the user confirmed the domain and price.",
+      inputSchema: z.object({
+        name: z.string().optional().describe("Domain to buy, e.g. 'software.ai'. Picks its cheapest active listing."),
+        listingId: z.string().optional().describe("A specific listing: its externalId (0x…) or numeric id from doma_get_listings"),
+      }),
+      execute: async ({ name, listingId }) => {
+        try {
+          if (!walletAddress) return { error: "No EVM wallet available for this user." };
+          if (!name && !listingId) return { error: "Ask which domain (or listing) the user wants to buy." };
+          const { getDomaListings, getDomaListingFulfillment } = await import("@/lib/doma");
+          const { listingPayment, SUPPORTED_LISTING_CHAINS } = await import("@/lib/doma-chain");
+
+          type Listing = { id: string; externalId: string; name: string; price: string | number; offererAddress?: string; orderbook?: string;
+            expiresAt?: string; currency?: { symbol?: string; decimals?: number }; chain?: { name?: string; networkId?: string } };
+          let listings: Listing[];
+          if (name) {
+            const [sld, ...rest] = name.trim().toLowerCase().split(".");
+            const data = (await getDomaListings({ sld, tlds: rest.length ? [rest.join(".")] : undefined, take: 50 })) as { listings?: { items?: Listing[] } };
+            listings = (data.listings?.items ?? []).filter((l) => l.name?.toLowerCase() === name.trim().toLowerCase());
+          } else {
+            const data = (await getDomaListings({ take: 100 })) as { listings?: { items?: Listing[] } };
+            listings = (data.listings?.items ?? []).filter((l) => l.externalId === listingId || l.id === listingId);
+          }
+          const now = Date.now();
+          const usable = listings
+            .filter((l) => !l.expiresAt || new Date(l.expiresAt).getTime() > now)
+            .filter((l) => SUPPORTED_LISTING_CHAINS.includes(Number(l.chain?.networkId?.split(":")[1])))
+            .filter((l) => l.offererAddress?.toLowerCase() !== walletAddress.toLowerCase())
+            .sort((a, b) => Number(a.price) - Number(b.price));
+          if (!usable.length) {
+            return { error: listings.length
+              ? "That listing can't be bought here (expired, yours, or on an unsupported chain)."
+              : `No active listing found for ${name ?? listingId}. Use doma_get_listings or doma_search_names to check.` };
+          }
+          const l = usable[0];
+          const chainId = Number(l.chain!.networkId!.split(":")[1]);
+          // Priced for THIS user's wallet — Doma's zone signature is bound to the buyer address.
+          const fulfillment = await getDomaListingFulfillment({ orderId: l.externalId, buyer: walletAddress });
+          const payment = listingPayment(fulfillment as any);
+          const decimals = l.currency?.decimals ?? 18;
+          return {
+            domaListingBuy: true,
+            listing: {
+              name: l.name,
+              externalId: l.externalId,
+              chainId,
+              chainName: l.chain?.name ?? `chain ${chainId}`,
+              orderbook: l.orderbook,
+              expiresAt: l.expiresAt,
+              symbol: l.currency?.symbol ?? (payment.token === "native" ? "ETH" : "token"),
+              decimals,
+              priceDisplay: Number(payment.amount) / 10 ** decimals,
+            },
+            payment: { token: payment.token, amount: payment.amount.toString() },
+            buyer: walletAddress,
+            tip: 'BUY CARD SHOWN. Output only: "A payment card has been shown. Please confirm the purchase." Then STOP. When it reports {paid:true}, tell the user the domain is theirs (it may take a minute to show). If {paid:false}, relay the error.',
+          };
+        } catch (err: any) { return { error: err?.message ?? "Failed" }; }
+      },
+    }),
+
     doma_prepare_buy: tool({
-      description: "Prepare Doma marketplace fulfillment data for buying a listing. The user must still sign the returned transaction/calldata in their EVM wallet.",
+      description: "Raw Doma marketplace fulfillment data for a listing (developer use). To actually BUY a listing for the user, use doma_buy_listing instead.",
       inputSchema: z.object({
         orderId: z.string(),
         buyer: z.string().optional().describe("Buyer wallet; defaults to user's EVM wallet"),
@@ -5970,13 +6050,15 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
         tokenId: z.string(),
         investmentAmount: z.number(), currency: z.string(),
         paymentMethod: z.enum(["card", "bank_transfer"]),
-        redirectUrl: z.string().optional().describe("Required for card, not needed for bank_transfer"),
+        redirectUrl: z.string().optional().describe("Optional — defaults to the Bluvfi app; never ask the user for it"),
       }),
       execute: async ({ tokenId, ...body }) => {
         try {
           const id = await resolveGetEquityMemberId();
           const { fundInvest } = await import("@/lib/getequity");
-          return await fundInvest(id, tokenId, body as any);
+          const result = await fundInvest(id, tokenId, { ...body, redirectUrl: body.redirectUrl ?? getEquityReturnUrl() } as any);
+          // Rendered as a pay card in chat (card link or bank-transfer details) — see getequity-payment-card.tsx.
+          return { getEquityPayment: true, purpose: "invest", amount: body.investmentAmount, currency: body.currency, paymentMethod: body.paymentMethod, result };
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),
@@ -6040,13 +6122,15 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
         amount: z.number(),
         currency: z.enum(["NGN", "USD", "KES", "GHS", "ZAR", "GBP", "EUR"]),
         paymentMethod: z.enum(["card", "bank_transfer", "ussd", "mobilemoney"]).optional(),
-        redirectUrl: z.string().optional().describe("Required unless paymentMethod is bank_transfer"),
+        redirectUrl: z.string().optional().describe("Optional — defaults to the Bluvfi app; never ask the user for it"),
       }),
       execute: async (body) => {
         try {
           const id = await resolveGetEquityMemberId();
           const { fundMemberWallet } = await import("@/lib/getequity");
-          return await fundMemberWallet(id, body as any);
+          const needsRedirect = body.paymentMethod !== "bank_transfer";
+          const result = await fundMemberWallet(id, { ...body, redirectUrl: body.redirectUrl ?? (needsRedirect ? getEquityReturnUrl() : undefined) } as any);
+          return { getEquityPayment: true, purpose: "fund_wallet", amount: body.amount, currency: body.currency, paymentMethod: body.paymentMethod ?? "card", result };
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
     }),

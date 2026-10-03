@@ -6,7 +6,6 @@ import { DefaultChatTransport } from "ai";
 import { showRewardedAd, isCapacitorApp } from "@/hooks/use-admob";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
-import type { Chain } from "viem";
 import { useChatSheet } from "@/contexts/chat-context";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
 import { useDemoState } from "@/contexts/demo-state-context";
@@ -14,7 +13,12 @@ import { MessageBubble } from "./message-bubble";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { ToolResultCard } from "./tool-result-card";
+import { payEvmTransfer, pickPrivyWalletOrThrow } from "@/lib/evm-pay";
 import { CryptorefillsPaymentCard } from "./cryptorefills-payment-card";
+import { StockTradeCard } from "./stock-trade-card";
+import { GetEquityPaymentCard } from "./getequity-payment-card";
+import { DomaPaymentCard } from "./doma-payment-card";
+import { DomaListingCard } from "./doma-listing-card";
 
 function OpenFundWalletTrigger({ toolCallId }: { toolCallId: string }) {
   useEffect(() => {
@@ -159,220 +163,45 @@ function BitrefillPaymentCard({
         await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
       } else {
         // ── EVM payment ───────────────────────────────────────────────────────
-        // Layer 1: Privy native gas sponsorship (EIP-7702, `sponsor: true`) on the
-        //   embedded wallet — configured in the dashboard under Wallet
-        //   infrastructure → Gas management. NOT the same as ERC-4337 smart
-        //   *contract* wallets (@privy-io/react-auth/smart-wallets); that feature
-        //   creates a separate 4337 account and requires `user.smartWallet` to be
-        //   provisioned, which this app doesn't use.
-        // Layer 2: Privy EOA — direct ERC-20 transfer, user pays native gas (ETH/MATIC/etc.).
-        // Layer 3: ArcKit EOA fallback (Circle) for all EVM chains except BSC.
-        // BSC fallback: manual deposit address shown directly in the card UI.
-
-        // Turn a raw error into a short, human-readable one-liner for console
-        // logs. Some errors are already clean (e.g. ArcKit's own pre-flight
-        // check: "Insufficient token balance on Arbitrum"); others are a
-        // multi-hundred-character RPC/simulation dump (USDT on Ethereum reverts
-        // with a bare "invalid opcode" instead of a message when the balance is
-        // too low). Detect the known-noisy cases and say the real reason instead
-        // — the raw error is still passed as a separate console.error argument
-        // for anyone who needs the full trace.
-        const summarizeError = (err: unknown, pmId: string): string => {
-          const raw = (err as Error)?.message ?? String(err);
-          const m = raw.toLowerCase();
-          const network = pmId.includes("erc20") ? "Ethereum"
-            : pmId.includes("polygon") ? "Polygon"
-            : pmId.includes("arbitrum") ? "Arbitrum"
-            : pmId.includes("optimism") ? "Optimism"
-            : pmId.includes("base") ? "Base"
-            : "this network";
-          if (m.includes("balance_insufficient") || m.includes("insufficient token balance")) {
-            return raw.split("\n")[0]; // already clean, e.g. "Insufficient token balance on Arbitrum"
-          }
-          if (m.includes("invalid opcode") || m.includes("invalidfeopcode") || m.includes("fe opcode")) {
-            const token = pmId.includes("usdt") ? "USDT" : pmId.includes("usdc") ? "USDC" : "the token";
-            return `Insufficient ${token} balance on ${network} (contract reverted without a reason string)`;
-          }
-          if (m.includes("insufficient funds for gas") || m.includes("gas required exceeds allowance")) {
-            return `Insufficient native gas balance on ${network}`;
-          }
-          // Otherwise: RPC/simulation dumps are one giant multi-line string —
-          // the first line is almost always the actual message.
-          return raw.split("\n")[0];
-        };
-
-        const swConfig = BITREFILL_SMART_WALLET_TOKENS[pm];
-        let swSucceeded = false;
-
-        if (swConfig) {
-          try {
-            const { encodeFunctionData, erc20Abi, parseAbi, parseUnits } = await import("viem");
-            // USDT contracts (Ethereum, Polygon, Arbitrum) use a non-standard
-            // transfer() with no bool return — use a stripped ABI for all USDT.
-            const isUsdt = pm.includes("usdt");
-            const transferAbi = isUsdt
-              ? parseAbi(["function transfer(address to, uint256 amount)"])
-              : erc20Abi;
-            const calldata = encodeFunctionData({
-              abi: transferAbi,
-              functionName: "transfer",
-              args: [output.paymentAddress as `0x${string}`, parseUnits(String(output.paymentAmount), 6)],
-            });
-            await privySendTransaction(
-              {
-                to: swConfig.contract,
-                data: calldata,
-                chainId: swConfig.chainId,
-              },
-              { sponsor: true },
-            );
-            swSucceeded = true;
-          } catch (swErr: unknown) {
-            console.error(`[chat/bitrefill] Layer 1 ❌ Native gas sponsorship failed (${pm}):`, summarizeError(swErr, pm), swErr);
-          }
+        // Shared 3-layer fallback (lib/evm-pay.ts): Privy gas sponsorship →
+        // Privy wallet with the user's gas → Circle ArcKit. Stops if the user
+        // rejects instead of re-prompting on the next layer.
+        // BSC isn't covered by any layer: show the deposit address for a manual send.
+        if (pm === "usdt_bsc") {
+          const addr = output.paymentAddress;
+          if (!addr) throw new Error("No deposit address returned for BSC USDT");
+          setManualAddress(addr);
+          setState("manual");
+          addToolResult({
+            tool: "buy_bitrefill_product",
+            toolCallId,
+            output: {
+              paid: false,
+              manualTransferRequired: true,
+              depositAddress: addr,
+              depositAmount: output.paymentAmount,
+              currency: "USDT",
+              network: "BSC (BEP-20)",
+              invoiceId: output.invoiceId,
+              tip: `BSC USDT requires manual transfer. The deposit address has been shown to the user. Ask them to send ${output.paymentAmount} USDT (BEP-20) to ${addr}, then call poll_bitrefill_order(invoiceId="${output.invoiceId}", isTopup=${!!output.isTopup}) every ~5 s until the status changes.`,
+            },
+          });
+          return;
         }
 
-        if (!swSucceeded) {
-          // BSC: no smart wallet, no EOA, no ArcKit — show manual deposit address card.
-          if (pm === "usdt_bsc") {
-            const addr = output.paymentAddress;
-            if (!addr) throw new Error("No deposit address returned for BSC USDT");
-            setManualAddress(addr);
-            setState("manual");
-            addToolResult({
-              tool: "buy_bitrefill_product",
-              toolCallId,
-              output: {
-                paid: false,
-                manualTransferRequired: true,
-                depositAddress: addr,
-                depositAmount: output.paymentAmount,
-                currency: "USDT",
-                network: "BSC (BEP-20)",
-                invoiceId: output.invoiceId,
-                tip: `BSC USDT requires manual transfer. The deposit address has been shown to the user. Ask them to send ${output.paymentAmount} USDT (BEP-20) to ${addr}, then call poll_bitrefill_order(invoiceId="${output.invoiceId}", isTopup=${!!output.isTopup}) every ~5 s until the status changes.`,
-              },
-            });
-            return;
-          }
-
-          // ── Layer 2: Privy EOA — direct ERC-20 transfer, user pays native gas ──
-          // The embedded Privy wallet signs the tx; the user needs ETH/MATIC/etc.
-          // for gas. No paymaster involved — plain EOA → contract call.
-          let eoaSucceeded = false;
-          if (swConfig) {
-            try {
-              const {
-                createWalletClient, createPublicClient, custom, http,
-                encodeFunctionData, erc20Abi, parseAbi, parseUnits,
-              } = await import("viem");
-              const { base, mainnet, polygon, arbitrum, optimism } = await import("viem/chains");
-              const VIEM_CHAINS_EOA: Record<number, Chain> = {
-                1:     mainnet,
-                8453:  base,
-                137:   polygon,
-                42161: arbitrum,
-                10:    optimism,
-              };
-              const viemChain = VIEM_CHAINS_EOA[swConfig.chainId];
-              const privyEoa = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-              if (!privyEoa) throw new Error("No EVM wallet connected");
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const eoaProvider = await privyEoa.getEthereumProvider();
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const walletClient = createWalletClient({ chain: viemChain, transport: custom(eoaProvider as any) });
-              const [eoaAccount] = await walletClient.getAddresses();
-
-              // Privy's embedded wallet fires its own gas-estimate preview for the
-              // confirm-tx UI as an *unhandled* promise (outside our await chain) —
-              // if the account has no native gas token that preview throws an
-              // uncaught rejection our try/catch never sees. Check the balance
-              // ourselves first so we throw (and catch) a clean error instead.
-              // viem's default RPC per chain isn't on the app's CSP allowlist, so
-              // point explicitly at an Alchemy endpoint (already whitelisted, same
-              // one wagmi.ts uses) — this avoids "Refused to connect" CSP errors.
-              const ALCHEMY_SUBDOMAIN: Record<number, string> = {
-                1: "eth-mainnet", 8453: "base-mainnet", 137: "polygon-mainnet",
-                42161: "arb-mainnet", 10: "opt-mainnet",
-              };
-              const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-              const rpcUrl = alchemyKey
-                ? `https://${ALCHEMY_SUBDOMAIN[swConfig.chainId]}.g.alchemy.com/v2/${alchemyKey}`
-                : undefined;
-              const publicClient = createPublicClient({ chain: viemChain, transport: http(rpcUrl) });
-              const nativeBalance = await publicClient.getBalance({ address: eoaAccount });
-              if (nativeBalance === 0n) {
-                throw new Error(`No ${viemChain.nativeCurrency.symbol} balance on ${viemChain.name} to pay gas`);
-              }
-
-              const isUsdtEoa = pm.includes("usdt");
-              const eoaAbi = isUsdtEoa
-                ? parseAbi(["function transfer(address to, uint256 amount)"])
-                : erc20Abi;
-              const eoaCalldata = encodeFunctionData({
-                abi: eoaAbi,
-                functionName: "transfer",
-                args: [output.paymentAddress as `0x${string}`, parseUnits(String(output.paymentAmount), 6)],
-              });
-              // The Privy EOA may be on a different chain (e.g. Base when we need
-              // Ethereum). Switch it to the target chain before sending.
-              await walletClient.switchChain({ id: viemChain.id });
-              await walletClient.sendTransaction({
-                account: eoaAccount,
-                to: swConfig.contract,
-                data: eoaCalldata,
-                chain: viemChain,
-              });
-              eoaSucceeded = true;
-            } catch (eoaErr: unknown) {
-              // Native gas unavailable or user rejected — fall through to ArcKit (Layer 3).
-              console.error(`[chat/bitrefill] Layer 2 ❌ Privy EOA failed (${pm}):`, summarizeError(eoaErr, pm), eoaErr);
-            }
-          }
-
-          // ── Layer 3: ArcKit EOA fallback — Circle handles gas; Privy EOA signs ──
-          if (!eoaSucceeded) {
-            const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-            if (!privyWallet) throw new Error("No EVM wallet connected");
-            const provider = await privyWallet.getEthereumProvider();
-            const { createViemAdapterFromProvider } = await import("@circle-fin/adapter-viem-v2");
-            const { arcKit, AGENT_CHAIN } = await import("@/lib/arc-kit");
-            const { Blockchain } = await import("@circle-fin/app-kit");
-            const EVM_CHAIN_MAP: Record<string, typeof Blockchain[keyof typeof Blockchain]> = {
-              usdc_base:     Blockchain.Base,     usdt_base:     Blockchain.Base,
-              usdc_erc20:    Blockchain.Ethereum, usdt_erc20:    Blockchain.Ethereum,
-              usdc_polygon:  Blockchain.Polygon,  usdt_polygon:  Blockchain.Polygon,
-              usdc_arbitrum: Blockchain.Arbitrum, usdt_arbitrum: Blockchain.Arbitrum,
-              usdc_optimism: Blockchain.Optimism, usdt_optimism: Blockchain.Optimism,
-            };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const adapter = await createViemAdapterFromProvider({ provider: provider as any });
-            const chain = EVM_CHAIN_MAP[pm] ?? AGENT_CHAIN;
-            // ArcKit v1.10.0 has usdtAddress: null for Polygon, Arbitrum, Optimism, and
-            // Base — it only recognises the "USDT" alias on Ethereum. Passing the raw
-            // contract address (TokenAddress) bypasses alias validation and lets ArcKit
-            // treat it as a generic ERC-20 token (it fetches decimals from the chain).
-            const swCfg = BITREFILL_SMART_WALLET_TOKENS[pm];
-            const arcKitToken: string =
-              pm.includes("usdt") && pm !== "usdt_erc20" && swCfg?.contract
-                ? swCfg.contract   // raw contract address for non-Ethereum USDT
-                : pm.includes("usdt") ? "USDT" : "USDC";  // alias for Ethereum USDT / all USDC
-            let arcKitResult: unknown;
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              arcKitResult = await arcKit.send({ from: { adapter, chain: chain as any }, to: output.paymentAddress, amount: String(output.paymentAmount), token: arcKitToken as any });
-            } catch (arcErr: unknown) {
-              console.error(`[chat/bitrefill] Layer 3 ❌ ArcKit failed (${pm}):`, summarizeError(arcErr, pm), arcErr);
-              throw arcErr;
-            }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if ((arcKitResult as any)?.state && (arcKitResult as any).state !== "success") {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              console.error(`[chat/bitrefill] Layer 3 ❌ ArcKit returned non-success state (${pm}):`, (arcKitResult as any).state);
-              throw new Error("Transfer did not complete");
-            }
-          }
-        }
+        const token = BITREFILL_SMART_WALLET_TOKENS[pm];
+        if (!token) throw new Error(`Paying with ${pm} isn't supported from the wallet.`);
+        await payEvmTransfer({
+          chainId: token.chainId,
+          token: token.contract,
+          symbol: pm.includes("usdt") ? "USDT" : "USDC",
+          decimals: 6,
+          recipient: output.paymentAddress as `0x${string}`,
+          amount: String(output.paymentAmount),
+          wallet: pickPrivyWalletOrThrow(wallets),
+          sendTransaction: privySendTransaction,
+          label: "chat/bitrefill",
+        });
       }
 
       setState("done");
@@ -950,6 +779,50 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                       ) {
                         return (
                           <CryptorefillsPaymentCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult as any}
+                          />
+                        );
+                      }
+
+                      // GetEquity — card link or bank-transfer details for fund / fund-and-invest
+                      if (tp.state === "output-available" && (tp.output as any)?.getEquityPayment === true) {
+                        return <GetEquityPaymentCard key={tp.toolCallId} output={tp.output as any} />;
+                      }
+
+                      // Doma — pays a domain order's voucher on the Doma chain from the user's wallet
+                      if (tp.state === "output-available" && (tp.output as any)?.domaPayment === true) {
+                        return (
+                          <DomaPaymentCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult as any}
+                          />
+                        );
+                      }
+
+                      // Doma marketplace — buys a listed domain (Seaport fill) from the user's wallet
+                      if (tp.state === "output-available" && (tp.output as any)?.domaListingBuy === true) {
+                        return (
+                          <DomaListingCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult as any}
+                          />
+                        );
+                      }
+
+                      // Backpack stock trade — confirm card that pays and places the order
+                      if (
+                        tp.state === "output-available" &&
+                        (tp.output as any)?.pendingStockTrade === true
+                      ) {
+                        return (
+                          <StockTradeCard
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}

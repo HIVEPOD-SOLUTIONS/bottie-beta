@@ -3,6 +3,11 @@
 import { VAULT_FRIENDLY_NAMES } from "@/lib/constants";
 import { BuyAssetConfirmCard } from "./buy-asset-confirm-card";
 import { useDemoState } from "@/contexts/demo-state-context";
+import { useState } from "react";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
+import { walletRailFor, sendFromWallet } from "@/lib/wallet-send";
+import { pickPrivyWallet } from "@/lib/evm-pay";
 
 /** Shows the right number of decimal places for any USDC amount down to $0.000001. */
 function fmtUsdc(n: number): string {
@@ -19,6 +24,58 @@ function networkLabel(net: string | null | undefined): string {
   if (net.startsWith("eip155:")) return `🔷 EVM (${net})`;
   if (net.startsWith("solana:")) return "◎ Solana";
   return net;
+}
+
+// Bitrefill deposit-address methods the Bluvfi wallet itself can pay (the rest —
+// BSC, Tron, TON, BTC… — need coins it can't hold, so they stay manual).
+const BITREFILL_WALLET_METHODS: Record<string, { coin: string; network: string }> = {
+  ethereum:     { coin: "ETH", network: "ETH Mainnet" },
+  eth_base:     { coin: "ETH", network: "Base" },
+  eth_arbitrum: { coin: "ETH", network: "Arbitrum" },
+  solana:       { coin: "SOL", network: "Solana" },
+};
+
+/** One-tap payment of a Bitrefill deposit address from the Bluvfi wallet. Remembers the send per invoice. */
+function BitrefillWalletPay({ method, address, amount, invoiceId }: { method: string; address?: string; amount: string; invoiceId?: string }) {
+  const { sendTransaction } = usePrivy();
+  const { wallets } = useWallets();
+  const { wallets: solanaWallets } = useSolanaWallets();
+  const meta = BITREFILL_WALLET_METHODS[method];
+  const rail = meta ? walletRailFor(meta.coin, meta.network) : null;
+  const key = `br_paid_${invoiceId ?? address}`;
+  const [sent, setSent] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(key); } catch { return null; }
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (!meta || !rail || !address || !(Number(amount) > 0)) return null;
+
+  const pay = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const hash = await sendFromWallet({ rail, coin: meta.coin, to: address, amount, sendTransaction, evmWallet: pickPrivyWallet(wallets), solanaWallet: solanaWallets[0] });
+      setSent(hash);
+      try { sessionStorage.setItem(key, hash); } catch { /* ignore */ }
+    } catch (e) {
+      const m = (e as Error)?.message ?? "Payment failed.";
+      setErr(/reject|denied|cancel/i.test(m) ? "Cancelled. Nothing was sent." : /insufficient|exceeds balance/i.test(m)
+        ? `Not enough ${meta.coin} in your wallet on ${meta.network}.` : m.split("\n")[0]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return sent ? (
+    <p className="text-[10px] text-green-400">Sent from your wallet ✓ — ask me to check the order in a minute.</p>
+  ) : (
+    <div>
+      <button onClick={pay} disabled={busy} className="w-full rounded-lg bg-[#8FAE82] py-2 text-[11px] font-semibold text-[#141513] disabled:opacity-50">
+        {busy ? "Confirm in your wallet…" : `Pay ${amount} ${meta.coin} from my wallet`}
+      </button>
+      {err && <p className="mt-1 text-[10px] text-red-400">{err}</p>}
+    </div>
+  );
 }
 
 interface ToolResultCardProps {
@@ -89,9 +146,12 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
               <p className="font-mono text-[10px] text-[#F2F0E8] break-all">{data.paymentAddress}</p>
             </div>
             {data.paymentAmount != null ? (
-              <p className="text-[10px] text-[#A7A79A]">
-                Send exactly <span className="text-[#F2F0E8] font-mono">{data.paymentAmount} {data.paymentCurrency}</span> to the address above.
-              </p>
+              <>
+                <p className="text-[10px] text-[#A7A79A]">
+                  Send exactly <span className="text-[#F2F0E8] font-mono">{data.paymentAmount} {data.paymentCurrency}</span> to the address above.
+                </p>
+                <BitrefillWalletPay method={pm} address={data.paymentAddress} amount={String(data.paymentAmount)} invoiceId={data.invoiceId} />
+              </>
             ) : data.paymentLink ? (
               // Bitcoin, TON, usdt_ton, ark, and Solana never return an exact
               // amount under guest checkout — Bitrefill's own hosted checkout

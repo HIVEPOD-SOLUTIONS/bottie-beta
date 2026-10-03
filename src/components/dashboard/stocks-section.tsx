@@ -2,9 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePrivy } from "@privy-io/react-auth";
-import { encodeFunctionData, erc20Abi, parseUnits } from "viem";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { pickPrivyWalletOrThrow } from "@/lib/evm-pay";
 import { authFetch } from "@/lib/api-auth-fetch";
+import {
+  executeStockTrade,
+  orderFailureMessage,
+  friendlyTradeError,
+  walletShare,
+  type StockQuote as Quote,
+} from "@/lib/stocks-client";
 
 /**
  * Invest → Stocks / ETFs. US stocks and ETFs traded through Backpack Exchange
@@ -33,20 +40,7 @@ interface Portfolio {
   orders: { id: string; asset: string; side: string; quantity: string; status: string; fillPrice: string | null; fillQuantity: string | null; error: string | null; createdAt: string }[];
 }
 
-interface Quote {
-  asset: string;
-  name: string;
-  side: "buy" | "sell";
-  quantity: string;
-  venue: "rfq" | "spot";
-  marketPrice: number;
-  limitPrice: string;
-  estimateUsdc: string;
-  feeUsdc: string;
-}
-
-const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
-const ETF_RE = /\bETF\b|\bTrust\b|\bFund\b|iShares|SPDR|Vanguard|ProShares|Invesco|Direxion/i;
+export const ETF_RE = /\bETF\b|\bTrust\b|\bFund\b|iShares|SPDR|Vanguard|ProShares|Invesco|Direxion/i;
 
 const usd = (n: number, dp = 2) => `$${n.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 const pct = (n: number | null) => (n === null ? "" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
@@ -73,14 +67,16 @@ function Sheet({ title, subtitle, onClose, children }: { title: string; subtitle
 
 /**
  * Company/fund logo. Backpack's API has no logos, so try two public logo CDNs
- * (both keyless; each 404s for tickers it doesn't know) and fall back to the
- * ticker text. Class-share tickers use a dash on the CDNs (BRK.B → BRK-B).
+ * (both keyless; each 404s for tickers it doesn't know), then CoinMarketCap via
+ * /api/stocks/logo, and finally the ticker text. Class-share tickers use a dash
+ * on the CDNs (BRK.B → BRK-B).
  */
-function StockLogo({ ticker, size = "h-11 w-11" }: { ticker: string; size?: string }) {
+export function StockLogo({ ticker, size = "h-11 w-11" }: { ticker: string; size?: string }) {
   const sym = ticker.replace(/\./g, "-");
   const sources = [
     `https://financialmodelingprep.com/image-stock/${encodeURIComponent(sym)}.png`,
     `https://assets.parqet.com/logos/symbol/${encodeURIComponent(sym)}?format=png`,
+    `/api/stocks/logo?ticker=${encodeURIComponent(ticker)}`,
   ];
   const [i, setI] = useState(0);
   if (i >= sources.length) {
@@ -293,43 +289,6 @@ function PriceChart({ asset }: { asset: string }) {
 
 // ── Trade sheet ──────────────────────────────────────────────────────────────
 
-type GetAccessToken = () => Promise<string | null>;
-type SendTransaction = ReturnType<typeof usePrivy>["sendTransaction"];
-
-/**
- * Moves `amountUsd` of USDC (Base, gas sponsored) from the user's Bluvfi
- * wallet to Bluvfi's Backpack account and waits until the server has
- * credited it. Used inside Buy, so there's no separate "add cash" step.
- */
-async function fundFromWallet(amountUsd: number, sendTransaction: SendTransaction, getAccessToken: GetAccessToken) {
-  const info = await authFetch("/api/stocks/deposit", undefined, getAccessToken).then(async (r) => {
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
-    return d as { address: `0x${string}` };
-  });
-  const { hash } = await sendTransaction(
-    {
-      to: BASE_USDC,
-      chainId: 8453,
-      data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [info.address, parseUnits(amountUsd.toFixed(2), 6)] }),
-    },
-    { sponsor: true },
-  );
-  // The receipt can take a few seconds to be visible.
-  for (let i = 0; i < 20; i++) {
-    const r = await authFetch("/api/stocks/deposit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ txHash: hash }),
-    }, getAccessToken);
-    if (r.ok) return;
-    const d = await r.json().catch(() => ({}));
-    if (r.status !== 404) throw new Error(d.error ?? "Couldn't confirm your payment.");
-    await new Promise((res) => setTimeout(res, 3000));
-  }
-  throw new Error("Your USDC was sent but isn't confirmed yet. It'll be saved as credit once it confirms — try the buy again in a minute.");
-}
-
 type TradeStep = "form" | "review" | "funding" | "placing" | "pending" | "done" | "error";
 
 function StockSheet({
@@ -342,6 +301,7 @@ function StockSheet({
   onTraded: () => void;
 }) {
   const { getAccessToken, sendTransaction } = usePrivy();
+  const { wallets } = useWallets();
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState(""); // buy: dollars · sell: shares
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -358,7 +318,7 @@ function StockSheet({
   const shares = side === "buy" ? (price > 0 ? Number(amount) / price : 0) : Number(amount);
   const estimate = side === "buy" ? Number(amount) || 0 : shares * price;
   // What has to come from the wallet: the quote's max cost minus any credit already held.
-  const fromWallet = quote && quote.side === "buy" ? Math.max(0, Math.ceil((Number(quote.estimateUsdc) - credit) * 100) / 100) : 0;
+  const fromWallet = quote ? walletShare(quote, credit) : 0;
 
   const review = async () => {
     setMsg(null);
@@ -377,43 +337,20 @@ function StockSheet({
   const confirm = async () => {
     if (!quote) return;
     try {
-      if (fromWallet > 0) {
-        setStep("funding");
-        await fundFromWallet(fromWallet, sendTransaction, getAccessToken);
-      }
-      setStep("placing");
-      const r = await authFetch("/api/stocks/trade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset: quote.asset, side: quote.side, quantity: quote.quantity, limitPrice: quote.limitPrice }),
-      }, getAccessToken);
-      const d = await r.json();
-      if (!r.ok) {
-        // Money already moved in stays as credit for the next buy — say so.
-        throw new Error(fromWallet > 0 ? `${d.error} Your ${usd(fromWallet)} is saved as credit for your next buy.` : d.error);
-      }
-      let order = d.order;
-      setStep("pending");
-      // Deferred settlement: accepted RFQs fill shortly after. Poll for up to ~2 minutes.
-      for (let i = 0; i < 40 && order.status === "pending" && alive.current; i++) {
-        await new Promise((res) => setTimeout(res, 3000));
-        const o = await authFetch(`/api/stocks/orders/${order.id}`, undefined, getAccessToken).then((x) => x.json()).catch(() => null);
-        if (o?.order) order = o.order;
-      }
+      const order = await executeStockTrade({
+        quote, creditUsd: credit, sendTransaction, wallet: pickPrivyWalletOrThrow(wallets), getAccessToken, onStep: setStep, isAlive: () => alive.current,
+      });
       if (!alive.current) return;
       onTraded();
       setResult(order);
       if (order.status === "filled" || order.status === "pending") setStep("done");
       else {
         setStep("error");
-        setMsg(order.status === "expired" || order.status === "cancelled"
-          ? `No one filled the order within your price cap. ${quote.side === "buy" ? "Your money is kept as credit for your next buy" : "Your shares are unchanged"}.`
-          : order.error ?? "The order failed. Nothing was charged.");
+        setMsg(orderFailureMessage(order, quote.side));
       }
     } catch (e) {
-      const m = (e as Error).message ?? "The trade failed.";
       setStep("error");
-      setMsg(/reject|denied|cancel/i.test(m) ? "Cancelled. Nothing was sent." : m.split("\n")[0]);
+      setMsg(friendlyTradeError(e));
       onTraded();
     }
   };

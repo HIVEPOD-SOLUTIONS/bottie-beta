@@ -8,6 +8,9 @@ const ACTION_TOOLS = new Set([
   "buy_bitrefill_product",
   "poll_bitrefill_order",
   "buy_cryptorefills_product",
+  "trade_stock",
+  "withdraw_stock_credit",
+  "doma_buy_listing",
   "fund_xrp_purchase_from_wallet",
   "recover_xrp_order",
   "buy_investment",
@@ -800,6 +803,35 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         : errCode === "spend_limit_exceeded"
           ? `x402 payment blocked — offer exceeds $${input.max_amount_usdc ?? 0.002} cap: ${input.url}`
           : `x402 payment failed on ${netLabel} for: ${input.url}`;
+      break;
+    }
+    case "withdraw_stock_credit": {
+      const p = parsed as any;
+      line = p?.sent || p?.queued
+        ? `Stock credit $${p.amountUsd} ${p.sent ? "sent" : "queued"} to wallet ${p.to}`
+        : `Stock credit withdrawal not done: ${p?.error ?? "unknown error"}`;
+      break;
+    }
+    case "doma_buy_listing": {
+      const p = parsed as any;
+      const what = `${p?.listing?.name ?? input.name ?? input.listingId} for ${p?.listing?.priceDisplay ?? "?"} ${p?.listing?.symbol ?? ""}`.trim();
+      line = !p?.domaListingBuy
+        ? `Doma listing purchase not prepared (${input.name ?? input.listingId}): ${p?.error ?? "unknown error"}`
+        : p.paid === true ? `Bought Doma listing ${what} — tx ${p.txHash}`
+        : p.paid === false ? `Doma listing purchase not completed (${what}): ${p.error ?? "unknown error"}`
+        : `Doma listing buy card shown — ${what}`;
+      break;
+    }
+    case "trade_stock": {
+      const p = parsed as any;
+      const what = `${p?.side ?? input.side} ${p?.quote?.quantity ?? ""} ${p?.ticker ?? input.ticker}`.replace(/\s+/g, " ").trim();
+      line = !p?.pendingStockTrade
+        ? `Stock trade not prepared (${what}): ${p?.error ?? "unknown error"}`
+        : p.done === true
+          ? `Stock order ${p.orderId} ${p.status === "filled" ? `filled — ${what} at $${p.fillPrice}` : `placed, settling — ${what}`}`
+          : p.done === false
+            ? `Stock trade not completed (${what}): ${p.error ?? "unknown error"}`
+            : `Stock trade confirm card shown — ${what}, est. $${p.quote?.estimateUsdc}`;
       break;
     }
     case "buy_cryptorefills_product": {

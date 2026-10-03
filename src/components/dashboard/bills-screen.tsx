@@ -4,13 +4,10 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
-import { arcKit, AGENT_CHAIN } from "@/lib/arc-kit";
-import { Blockchain } from "@circle-fin/app-kit";
-import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { useDemoState } from "@/contexts/demo-state-context";
 import { usePaymentsContext } from "@/contexts/payments-context";
 import { useChatSheet } from "@/contexts/chat-context";
-import type { Chain } from "viem";
+import { payEvmTransfer, pickPrivyWalletOrThrow } from "@/lib/evm-pay";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -655,31 +652,6 @@ const PAYMENT_METHOD_GROUPS: { label: string; methods: PaymentMethodDef[] }[] = 
 ];
 
 const ALL_PAYMENT_METHODS = PAYMENT_METHOD_GROUPS.flatMap((g) => g.methods);
-
-/**
- * Maps Bitrefill payment method IDs to the Arc AppKit Blockchain enum.
- * Used as the `from.chain` in arcKit.send() (the ArcKit EOA fallback).
- * BSC is absent — Circle's AppKit has no BSC support.
- * Defaults to AGENT_CHAIN (Base) for any unmapped method.
- */
-const BITREFILL_EVM_CHAINS: Record<string, Blockchain> = {
-  usdc_base:      Blockchain.Base,
-  usdt_base:      Blockchain.Base,
-  usdc_erc20:     Blockchain.Ethereum,
-  usdt_erc20:     Blockchain.Ethereum,
-  ethereum:       Blockchain.Ethereum,
-  usdc_polygon:   Blockchain.Polygon,
-  usdt_polygon:   Blockchain.Polygon,
-  usdc_arbitrum:  Blockchain.Arbitrum,
-  usdt_arbitrum:  Blockchain.Arbitrum,
-  eth_arbitrum:   Blockchain.Arbitrum,
-  usdc_optimism:  Blockchain.Optimism,
-  usdt_optimism:  Blockchain.Optimism,
-};
-
-function getEvmChain(pmId: string): Blockchain {
-  return BITREFILL_EVM_CHAINS[pmId] ?? AGENT_CHAIN;
-}
 
 function getPaymentMethod(id: string): PaymentMethodDef {
   return ALL_PAYMENT_METHODS.find((m) => m.id === id) ?? ALL_PAYMENT_METHODS[0];
@@ -1571,52 +1543,11 @@ function CheckoutSheet({
         await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
       } else {
         // ── EVM payment ───────────────────────────────────────────────────────
-        //
-        // Layer 1 — Privy native gas sponsorship (EIP-7702, `sponsor: true`).
-        //   Configured in the dashboard under Wallet infrastructure → Gas
-        //   management; sponsors gas on the existing embedded wallet directly
-        //   (no separate ERC-4337 contract account, no user.smartWallet needed).
-        //
-        // Layer 2 — Privy EOA, user pays native gas (ETH/MATIC/etc.) directly.
-        //
-        // Layer 3 — ArcKit EOA fallback (all EVM except BSC). Circle sponsors
-        //   gas here too, so the user still pays nothing extra.
-        //   BSC is absent from ArcKit — its fallback is a manual deposit address.
-        //
+        // Shared 3-layer fallback (lib/evm-pay.ts): Privy gas sponsorship →
+        // Privy wallet with the user's gas → Circle ArcKit. Stops if the user
+        // rejects instead of re-prompting on the next layer.
         // Note: USDT contracts (Ethereum/Polygon/Arbitrum) use a non-standard
-        //   transfer() with no bool return — we use a stripped ABI for calldata.
-
-        // Turn a raw error into a short, human-readable one-liner for console
-        // logs. Some errors are already clean (e.g. ArcKit's own pre-flight
-        // check: "Insufficient token balance on Arbitrum"); others are a
-        // multi-hundred-character RPC/simulation dump (USDT on Ethereum reverts
-        // with a bare "invalid opcode" instead of a message when the balance is
-        // too low). Detect the known-noisy cases and say the real reason instead
-        // — the raw error is still passed as a separate console.error argument
-        // for anyone who needs the full trace.
-        const summarizeError = (err: unknown, pmId: string): string => {
-          const raw = (err as Error)?.message ?? String(err);
-          const m = raw.toLowerCase();
-          const network = pmId.includes("erc20") ? "Ethereum"
-            : pmId.includes("polygon") ? "Polygon"
-            : pmId.includes("arbitrum") ? "Arbitrum"
-            : pmId.includes("optimism") ? "Optimism"
-            : pmId.includes("base") ? "Base"
-            : "this network";
-          if (m.includes("balance_insufficient") || m.includes("insufficient token balance")) {
-            return raw.split("\n")[0]; // already clean, e.g. "Insufficient token balance on Arbitrum"
-          }
-          if (m.includes("invalid opcode") || m.includes("invalidfeopcode") || m.includes("fe opcode")) {
-            const token = pmId.includes("usdt") ? "USDT" : pmId.includes("usdc") ? "USDC" : "the token";
-            return `Insufficient ${token} balance on ${network} (contract reverted without a reason string)`;
-          }
-          if (m.includes("insufficient funds for gas") || m.includes("gas required exceeds allowance")) {
-            return `Insufficient native gas balance on ${network}`;
-          }
-          // Otherwise: RPC/simulation dumps are one giant multi-line string —
-          // the first line is almost always the actual message.
-          return raw.split("\n")[0];
-        };
+        //   transfer() with no bool return — the helper uses a stripped ABI for USDT.
 
         // Contract addresses for every payment method supported by Privy Gas Management.
         // Source: https://dashboard.privy.io → Wallet infrastructure → Gas management
@@ -1640,169 +1571,30 @@ function CheckoutSheet({
           // usdt_bsc goes straight to manual deposit address (no smart wallet attempt).
         };
 
+        // BSC isn't covered by any layer: show the deposit address for a manual send.
+        if (paymentMethodId === "usdt_bsc") {
+          if (!paymentAddress) throw new Error("No deposit address returned for BSC USDT");
+          setDepositAddress(paymentAddress);
+          setDepositAmount(paymentAmount != null ? String(paymentAmount) : null);
+          setDepositPaymentUri(inv.payment_info?.paymentUri ?? null);
+          setStep("address");
+          pollInvoice(invoiceId, token, invCreatedTime, invExpirationMinutes);
+          return;
+        }
+
         const swConfig = SMART_WALLET_TOKENS[paymentMethodId];
-        let smartWalletSucceeded = false;
-
-        // Layer 1 uses Privy's *native* gas sponsorship (EIP-7702, `sponsor: true`
-        // on the embedded wallet's own sendTransaction) — configured in the
-        // dashboard under Wallet infrastructure → Gas management. This is a
-        // different feature from ERC-4337 smart *contract* wallets
-        // (@privy-io/react-auth/smart-wallets, user.smartWallet): native
-        // sponsorship upgrades the existing embedded EOA in place instead of
-        // creating a separate 4337 contract account, so no `user.smartWallet` is
-        // ever created or needed for this path.
-        if (swConfig) {
-          try {
-            const { encodeFunctionData, erc20Abi, parseAbi, parseUnits } = await import("viem");
-            // USDT contracts (Ethereum, Polygon, Arbitrum) use a non-standard transfer()
-            // with no bool return value — use a stripped ABI for all USDT tokens.
-            const isUsdt = paymentMethodId.includes("usdt");
-            const transferAbi = isUsdt
-              ? parseAbi(["function transfer(address to, uint256 amount)"])
-              : erc20Abi;
-            const calldata = encodeFunctionData({
-              abi: transferAbi,
-              functionName: "transfer",
-              args: [paymentAddress as `0x${string}`, parseUnits(String(paymentAmount), 6)],
-            });
-            await sendTransaction(
-              {
-                to: swConfig.contract,
-                data: calldata,
-                chainId: swConfig.chainId,
-              },
-              { sponsor: true },
-            );
-            smartWalletSucceeded = true;
-          } catch (swErr: unknown) {
-            // Paymaster/asset unavailable, insufficient stablecoin for fee, or user
-            // rejected — fall through to Privy EOA (Layer 2, user pays native gas).
-            console.error(`[bills] Layer 1 ❌ Native gas sponsorship failed (${paymentMethodId}):`, summarizeError(swErr, paymentMethodId), swErr);
-          }
-        }
-
-        if (!smartWalletSucceeded) {
-          // BSC: no smart wallet, no EOA, no ArcKit — show manual deposit address.
-          if (paymentMethodId === "usdt_bsc") {
-            if (!paymentAddress) throw new Error("No deposit address returned for BSC USDT");
-            setDepositAddress(paymentAddress);
-            setDepositAmount(paymentAmount != null ? String(paymentAmount) : null);
-            setDepositPaymentUri(inv.payment_info?.paymentUri ?? null);
-            setStep("address");
-            pollInvoice(invoiceId, token, invCreatedTime, invExpirationMinutes);
-            return;
-          }
-
-          // ── Layer 2: Privy EOA — direct ERC-20 transfer, user pays native gas ──
-          // The embedded Privy wallet signs the tx; the user needs ETH/MATIC/etc.
-          // for gas. No paymaster involved — plain EOA → contract call.
-          let eoaSucceeded = false;
-          if (swConfig) {
-            try {
-              const {
-                createWalletClient, createPublicClient, custom, http,
-                encodeFunctionData, erc20Abi, parseAbi, parseUnits,
-              } = await import("viem");
-              const { base, mainnet, polygon, arbitrum, optimism } = await import("viem/chains");
-              const VIEM_CHAINS_EOA: Record<number, Chain> = {
-                1:     mainnet,
-                8453:  base,
-                137:   polygon,
-                42161: arbitrum,
-                10:    optimism,
-              };
-              const viemChain = VIEM_CHAINS_EOA[swConfig.chainId];
-              const privyEoa = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-              if (!privyEoa) throw new Error("No EVM wallet connected");
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const eoaProvider = await privyEoa.getEthereumProvider();
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const walletClient = createWalletClient({ chain: viemChain, transport: custom(eoaProvider as any) });
-              const [eoaAccount] = await walletClient.getAddresses();
-
-              // Privy's embedded wallet fires its own gas-estimate preview for the
-              // confirm-tx UI as an *unhandled* promise (outside our await chain) —
-              // if the account has no native gas token that preview throws an
-              // uncaught rejection our try/catch never sees. Check the balance
-              // ourselves first so we throw (and catch) a clean error instead.
-              // viem's default RPC per chain isn't on the app's CSP allowlist, so
-              // point explicitly at an Alchemy endpoint (already whitelisted, same
-              // one wagmi.ts uses) — this avoids "Refused to connect" CSP errors.
-              const ALCHEMY_SUBDOMAIN: Record<number, string> = {
-                1: "eth-mainnet", 8453: "base-mainnet", 137: "polygon-mainnet",
-                42161: "arb-mainnet", 10: "opt-mainnet",
-              };
-              const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-              const rpcUrl = alchemyKey
-                ? `https://${ALCHEMY_SUBDOMAIN[swConfig.chainId]}.g.alchemy.com/v2/${alchemyKey}`
-                : undefined;
-              const publicClient = createPublicClient({ chain: viemChain, transport: http(rpcUrl) });
-              const nativeBalance = await publicClient.getBalance({ address: eoaAccount });
-              if (nativeBalance === 0n) {
-                throw new Error(`No ${viemChain.nativeCurrency.symbol} balance on ${viemChain.name} to pay gas`);
-              }
-
-              const isUsdtEoa = paymentMethodId.includes("usdt");
-              const eoaAbi = isUsdtEoa
-                ? parseAbi(["function transfer(address to, uint256 amount)"])
-                : erc20Abi;
-              const eoaCalldata = encodeFunctionData({
-                abi: eoaAbi,
-                functionName: "transfer",
-                args: [paymentAddress as `0x${string}`, parseUnits(String(paymentAmount), 6)],
-              });
-              // The Privy EOA may be on a different chain (e.g. Base when we need
-              // Ethereum). Switch it to the target chain before sending.
-              await walletClient.switchChain({ id: viemChain.id });
-              await walletClient.sendTransaction({
-                account: eoaAccount,
-                to: swConfig.contract,
-                data: eoaCalldata,
-                chain: viemChain,
-              });
-              eoaSucceeded = true;
-            } catch (eoaErr: unknown) {
-              // Native gas unavailable or user rejected — fall through to ArcKit (Layer 3).
-              console.error(`[bills] Layer 2 ❌ Privy EOA failed (${paymentMethodId}):`, summarizeError(eoaErr, paymentMethodId), eoaErr);
-            }
-          }
-
-          // ── Layer 3: ArcKit EOA fallback — Circle handles gas; Privy EOA signs ──
-          if (!eoaSucceeded) {
-            const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
-            if (!privyWallet) throw new Error("No EVM wallet connected");
-            const provider = await privyWallet.getEthereumProvider();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const adapter = await createViemAdapterFromProvider({ provider: provider as any });
-            // ArcKit v1.10.0 has usdtAddress: null for Polygon, Arbitrum, Optimism, and
-            // Base — it only recognises the "USDT" alias on Ethereum. Passing the raw
-            // contract address (TokenAddress) bypasses alias validation and lets ArcKit
-            // treat it as a generic ERC-20 token (it fetches decimals from the chain).
-            const arcKitToken: string =
-              pm.token === "USDT" && paymentMethodId !== "usdt_erc20" && swConfig?.contract
-                ? swConfig.contract  // raw contract address for non-Ethereum USDT
-                : pm.token;          // "USDC" alias (always works) or "USDT" on Ethereum
-            let arcKitResult: unknown;
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              arcKitResult = await arcKit.send({
-                from: { adapter, chain: getEvmChain(paymentMethodId) },
-                to: paymentAddress,
-                amount: String(paymentAmount),
-                token: arcKitToken as any,
-              });
-            } catch (arcErr: unknown) {
-              console.error(`[bills] Layer 3 ❌ ArcKit failed (${paymentMethodId}):`, summarizeError(arcErr, paymentMethodId), arcErr);
-              throw arcErr;
-            }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if ((arcKitResult as any)?.state && (arcKitResult as any).state !== "success") {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              console.error(`[bills] Layer 3 ❌ ArcKit returned non-success state (${paymentMethodId}):`, (arcKitResult as any).state);
-              throw new Error("Transfer did not complete");
-            }
-          }
-        }
+        if (!swConfig) throw new Error(`Paying with ${pm.label} on ${pm.badge} isn't supported from the wallet.`);
+        await payEvmTransfer({
+          chainId: swConfig.chainId,
+          token: swConfig.contract,
+          symbol: pm.token,
+          decimals: 6,
+          recipient: paymentAddress as `0x${string}`,
+          amount: String(paymentAmount),
+          wallet: pickPrivyWalletOrThrow(wallets),
+          sendTransaction,
+          label: "bills",
+        });
       }
 
       setStep("polling");
