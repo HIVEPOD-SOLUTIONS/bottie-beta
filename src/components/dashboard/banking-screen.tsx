@@ -2178,8 +2178,6 @@ const BANKING_PLATFORMS = [
     name: "Ripple Payments ODL",
     tag: "Cross-Border ODL",
     description: "On-Demand Liquidity — XRP-bridged cross-border payments, request-for-payment & settlement reporting",
-    badge: "Beta",
-    badgeColor: "text-slate-300 bg-slate-400/10",
   },
   {
     id: "spherepay" as BankingPlatform,
@@ -2713,7 +2711,7 @@ export function BankingScreen() {
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-semibold text-[#F2F0E8]">{p.name}</p>
                 <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-[#A7A79A]">{p.tag}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${p.badgeColor}`}>{p.badge}</span>
+                {p.badge && <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${p.badgeColor}`}>{p.badge}</span>}
               </div>
               <p className="truncate text-xs text-[#A7A79A] mt-0.5">{p.description}</p>
             </div>
