@@ -11,6 +11,7 @@ import { payments } from "@/lib/db/schema";
  * Only the authenticated user's own payments can be updated.
  *
  * Body: { referenceId: string, status: string, txHash?: string }
+ *   or  { id: string, status: string, ... } for rows that have no referenceId (e.g. card funding).
  */
 export async function PATCH(req: Request) {
   let userId: string;
@@ -26,7 +27,8 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { referenceId, status, txHash, description, amountUsdc, chain } = body as {
+  const { referenceId, id, status, txHash, description, amountUsdc, chain } = body as {
+    id?: string;
     referenceId?: string;
     status?: string;
     txHash?: string;
@@ -35,7 +37,7 @@ export async function PATCH(req: Request) {
     chain?: string;
   };
 
-  if (!referenceId || !status) {
+  if ((!referenceId && !id) || !status) {
     return NextResponse.json(
       { error: "referenceId and status are required" },
       { status: 400 },
@@ -60,7 +62,7 @@ export async function PATCH(req: Request) {
         ...(amountUsdc ? { amountUsdc } : {}),
         ...(chain ? { chain } : {}),
       })
-      .where(and(eq(payments.userId, userId), eq(payments.referenceId, referenceId)))
+      .where(and(eq(payments.userId, userId), referenceId ? eq(payments.referenceId, referenceId) : eq(payments.id, id!)))
       .returning();
 
     if (!updated) {
