@@ -146,7 +146,7 @@ export async function takeAll(key: string): Promise<number> {
       )
       UPDATE rate_limits r SET count = 0 FROM old WHERE r.key = old.key RETURNING old.count AS taken
     `);
-    const rows = (result as { rows?: { taken: number | string }[] }).rows ?? [];
+    const rows = ((result as unknown as { rows?: { taken: number | string }[] }).rows) ?? [];
     return rows[0] ? Number(rows[0].taken) : 0;
   } catch {
     const b = memory.get(key);

@@ -93,7 +93,11 @@ export async function showInterstitial(): Promise<void> {
  * Callers must guard with `isCapacitorApp()` before showing any offer UI.
  * `onRewarded` receives the amount from the AdMob console (e.g. 5 inference units).
  */
-export async function showRewardedAd(onRewarded: (amount: number) => void): Promise<void> {
+/**
+ * Show a rewarded ad. Pass `ssv.userId` so AdMob's signed server callback (/api/admob/ssv) names the user; the
+ * server uses it to confirm the ad was really watched. Harmless when server-side verification isn't switched on.
+ */
+export async function showRewardedAd(onRewarded: (amount: number) => void, ssv?: { userId: string }): Promise<void> {
   if (!isCapacitorApp()) return;
   try {
     const { AdMob, RewardAdPluginEvents } = await import("@capacitor-community/admob");
@@ -101,7 +105,10 @@ export async function showRewardedAd(onRewarded: (amount: number) => void): Prom
       onRewarded(reward.amount);
       listener.remove();
     });
-    await AdMob.prepareRewardVideoAd({ adId: REWARDED_AD_ID });
+    await AdMob.prepareRewardVideoAd({
+      adId: REWARDED_AD_ID,
+      ...(ssv ? { ssv: { userId: ssv.userId, customData: "chat-bonus" } } : {}),
+    });
     await AdMob.showRewardVideoAd();
   } catch (e) {
     console.warn("[AdMob] rewarded ad error:", e);

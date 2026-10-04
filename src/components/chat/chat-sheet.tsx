@@ -878,14 +878,24 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                         const token = await getAccessToken();
                         const headers: Record<string, string> = { "Content-Type": "application/json" };
                         if (token) headers["Authorization"] = `Bearer ${token}`;
-                        await fetch("/api/chat/bonus", {
-                          method: "POST",
-                          headers,
-                          body: JSON.stringify({ amount }),
-                        });
-                        setDailyLimitHit(false);
+                        // With server-side verification on, the server answers 202 until Google's callback has
+                        // confirmed the ad (a few seconds), so poll; otherwise it grants straight away.
+                        for (let attempt = 0; attempt < 10; attempt++) {
+                          const res = await fetch("/api/chat/bonus", {
+                            method: "POST",
+                            headers,
+                            body: JSON.stringify({ amount }),
+                          });
+                          if (res.status === 202) {
+                            await new Promise((r) => setTimeout(r, 2000));
+                            continue;
+                          }
+                          // Only lift the limit when messages were actually granted.
+                          if (res.ok) setDailyLimitHit(false);
+                          break;
+                        }
                       } catch { /* ignore — user can retry */ }
-                    });
+                    }, user?.id ? { userId: user.id } : undefined);
                     setRewardedAdBusy(false);
                   }}
                   className="w-full rounded-xl py-2.5 text-sm font-semibold text-cream transition-opacity disabled:opacity-50"
