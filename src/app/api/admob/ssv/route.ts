@@ -24,14 +24,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Verification unavailable" }, { status: 503 });
   }
 
-  if (!result.ok || !result.userId || !result.transactionId) {
+  if (!result.ok) {
     // Nothing secret here — the query is Google's own callback (parameters and a public signature) — and seeing
     // exactly what arrived is what diagnoses an encoding mismatch.
     console.warn("[admob-ssv] rejected callback:", result.reason, "| query:", rawQuery.slice(0, 700));
     return NextResponse.json({ error: "Invalid callback" }, { status: 403 });
   }
 
-  await addVerifiedAdCredit(result.userId, result.transactionId, result.rewardAmount);
+  // A genuine, signed callback without a user id is AdMob's "Verify URL" test: confirm receipt, credit nobody.
+  if (result.userId && result.transactionId) {
+    await addVerifiedAdCredit(result.userId, result.transactionId, result.rewardAmount);
+  }
   // 200 whether this was new or a retried delivery: Google only needs to know we got it.
   return new NextResponse("ok", { status: 200 });
 }

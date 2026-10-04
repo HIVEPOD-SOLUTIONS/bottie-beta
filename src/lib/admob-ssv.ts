@@ -42,20 +42,47 @@ export interface SsvResult {
   adUnit?: string;
 }
 
-/** Equivalent spellings of the signed query string (see verifyAdMobCallback). The as-received form is tried first. */
-function signedCandidates(signed: string): string[] {
-  const out = new Set<string>([signed, signed.replace(/\+/g, "%20"), signed.replace(/%20/g, "+")]);
-  try {
-    const pairs = signed.split("&").map((p) => {
+/**
+ * The strings the signature might cover, most likely first.
+ *
+ * Google signs every parameter except `signature` and `key_id`, joined as name=value with "&" and sorted by name.
+ * (Checked against a real callback from AdMob's "Verify URL" button, which arrives with its parameters in a shuffled
+ * order and `signature` in the middle — so "everything before &signature=" is NOT the signed content in general.
+ * Real callbacks arrive already sorted, with the two at the end, so both cases come out the same.)
+ *
+ * Each base form is also tried with the usual re-encodings (spaces as "+" or "%20", "%3A" vs ":") in case a hosting
+ * layer re-spelled the query on its way to us.
+ */
+function signedCandidates(rawQuery: string): string[] {
+  const pairs = rawQuery
+    .split("&")
+    .filter(Boolean)
+    .map((p) => {
       const i = p.indexOf("=");
-      const key = i < 0 ? p : p.slice(0, i);
-      const value = i < 0 ? "" : decodeURIComponent(p.slice(i + 1).replace(/\+/g, " "));
-      return [key, value] as const;
+      return [i < 0 ? p : p.slice(0, i), i < 0 ? "" : p.slice(i + 1)] as const;
     });
-    out.add(pairs.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"));
-    out.add(pairs.map(([k, v]) => `${k}=${v}`).join("&"));
-  } catch {
-    /* malformed escapes: the as-received form is all we can try */
+  const rest = pairs.filter(([k]) => k !== "signature" && k !== "key_id");
+  const join = (list: readonly (readonly [string, string])[]) => list.map(([k, v]) => `${k}=${v}`).join("&");
+  const sigAt = rawQuery.indexOf("&signature=");
+
+  const bases = [join([...rest].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))), join(rest)];
+  if (sigAt >= 0) bases.push(rawQuery.slice(0, sigAt));
+
+  const out = new Set<string>();
+  for (const base of bases) {
+    out.add(base);
+    out.add(base.replace(/\+/g, "%20"));
+    out.add(base.replace(/%20/g, "+"));
+    try {
+      const decoded = base.split("&").map((p) => {
+        const i = p.indexOf("=");
+        return [p.slice(0, i), decodeURIComponent(p.slice(i + 1).replace(/\+/g, " "))] as const;
+      });
+      out.add(decoded.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"));
+      out.add(decoded.map(([k, v]) => `${k}=${v}`).join("&"));
+    } catch {
+      /* malformed escapes: the other forms are all we can try */
+    }
   }
   return [...out];
 }
@@ -66,12 +93,14 @@ function fromBase64Url(s: string): Buffer {
 }
 
 /**
- * Verifies a rewarded-ad callback. `rawQuery` must be the query string exactly as received (without the leading
- * "?"): the signature covers the original bytes up to "&signature=", so it can't be rebuilt from parsed params.
+ * Verifies a rewarded-ad callback. `rawQuery` is the query string as received (without the leading "?"); the values
+ * must keep their original encoding because the signature covers those bytes.
+ *
+ * `userId` / `transactionId` can be absent on a *valid* callback: AdMob's "Verify URL" test button sends a signed
+ * sample without a user id, and the caller must answer it 200 (there's just nobody to credit).
  */
 export async function verifyAdMobCallback(rawQuery: string): Promise<SsvResult> {
-  const sigAt = rawQuery.indexOf("&signature=");
-  if (sigAt < 0) return { ok: false, reason: "missing signature" };
+  if (!/(^|&)signature=/.test(rawQuery)) return { ok: false, reason: "missing signature" };
 
   const params = new URLSearchParams(rawQuery);
   const signature = params.get("signature");
@@ -86,14 +115,14 @@ export async function verifyAdMobCallback(rawQuery: string): Promise<SsvResult> 
   // "+" or "%20", "%3A" decoded, …), so try the usual equivalent spellings; any one that verifies is genuine, because
   // only Google's private key can produce a signature that matches.
   const sig = fromBase64Url(signature);
-  const valid = signedCandidates(rawQuery.slice(0, sigAt)).some((candidate) => {
+  const valid = signedCandidates(rawQuery).some((candidate) => {
     try {
       return createVerify("SHA256").update(candidate).verify(pem, sig);
     } catch {
       return false;
     }
   });
-  if (!valid) return { ok: false, reason: `bad signature (key_id ${keyId}, signed part ${sigAt} chars)` };
+  if (!valid) return { ok: false, reason: `bad signature (key_id ${keyId})` };
 
   // Google documents the timestamp as epoch time but its examples are in microseconds; accept either.
   let timestamp = Number(params.get("timestamp"));
@@ -102,14 +131,10 @@ export async function verifyAdMobCallback(rawQuery: string): Promise<SsvResult> 
     return { ok: false, reason: "stale callback" };
   }
 
-  const transactionId = params.get("transaction_id");
-  const userId = params.get("user_id");
-  if (!transactionId || !userId) return { ok: false, reason: "missing transaction_id or user_id" };
-
   return {
     ok: true,
-    userId,
-    transactionId,
+    userId: params.get("user_id") || undefined,
+    transactionId: params.get("transaction_id") || undefined,
     rewardAmount: Number(params.get("reward_amount")) || undefined,
     adUnit: params.get("ad_unit") ?? undefined,
   };
