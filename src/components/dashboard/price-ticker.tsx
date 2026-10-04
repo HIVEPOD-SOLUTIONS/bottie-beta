@@ -79,7 +79,7 @@ export function PriceTicker({ className = "" }: { className?: string }) {
         <span
           className={`h-1.5 w-1.5 rounded-full ${data.stale ? "bg-amber-400" : "animate-pulse bg-green-400"}`}
         />
-        {data.stale ? "Delayed" : "Live"} · via CoinMarketCap
+        {data.stale ? "Delayed" : "Live"}
       </p>
     </div>
   );

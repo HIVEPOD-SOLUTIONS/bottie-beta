@@ -124,14 +124,14 @@ export async function cmcGetCached(path: string, params: Params = {}): Promise<{
 export function describeCmcError(err: unknown): string {
   if (err instanceof PriceFeedNotConfiguredError) return "Live market data isn't set up on this server yet.";
   if (err instanceof CmcApiError) {
-    if (err.httpStatus === 403) return "That data isn't included in the current CoinMarketCap plan.";
+    if (err.httpStatus === 403) return "That data isn't available right now.";
     // 1008 per-minute limit, 1011 per-IP limit -> retry shortly.
     if (err.httpStatus === 429 || err.errorCode === 1008 || err.errorCode === 1011) {
-      return "CoinMarketCap is rate-limiting requests right now — try again in a minute.";
+      return "The market data feed is rate-limiting requests right now — try again in a minute.";
     }
     // 1009 daily / 1010 monthly allowance, or 402 overdue -> retrying won't help soon.
-    if (err.httpStatus === 402 || err.errorCode === 1009 || err.errorCode === 1010) return "The CoinMarketCap usage allowance has been reached for now.";
-    if (err.httpStatus === 400) return `CoinMarketCap couldn't process that request (${err.message.replace(/^CoinMarketCap[^:]*:\s*/, "")}).`;
+    if (err.httpStatus === 402 || err.errorCode === 1009 || err.errorCode === 1010) return "The market data allowance has been reached for now.";
+    if (err.httpStatus === 400) return `The market data feed couldn't process that request (${err.message.replace(/^CoinMarketCap[^:]*:\s*/, "")}).`;
   }
   return "Market data is temporarily unavailable.";
 }

@@ -14,6 +14,7 @@ import { getSupportedCoins } from "@/lib/supported-coins";
  */
 
 type Row = {
+  id: number | null;
   symbol: string;
   name: string;
   rank: number | null;
@@ -49,6 +50,7 @@ export async function GET() {
     const coins: Row[] = quotes
       .filter((q) => providersOf.has(q.symbol.toUpperCase()))
       .map((q) => ({
+        id: q.id,
         symbol: q.symbol.toUpperCase(),
         name: q.name,
         rank: q.rank,

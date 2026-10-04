@@ -22,7 +22,7 @@ import { parseCoins, parseConversion, parseGlobalMetrics, pickBestPerSymbol, typ
  * safe to relay (see describeCmcError) so the agent can explain it plainly.
  */
 
-const SOURCE = "CoinMarketCap";
+const SOURCE = "live market data";
 const SYMBOL = z.string().regex(/^[A-Za-z0-9]{1,12}$/, "letters/digits only, e.g. BTC");
 const CURRENCY = z.string().regex(/^[A-Za-z]{2,10}$/, "a currency code such as USD, EUR, NGN or BTC");
 
@@ -60,11 +60,11 @@ export function createCmcTools() {
     get_crypto_prices: tool({
       description:
         "Get the LIVE price and market data (24h/7d/30d change, market cap, 24h volume, rank) for one or more cryptocurrencies " +
-        "from CoinMarketCap. ALWAYS call this for any question about what a coin costs, is worth, or is doing — never answer a price " +
+        "from the live market feed. ALWAYS call this for any question about what a coin costs, is worth, or is doing — never answer a price " +
         "from memory, it is out of date. Pass ticker symbols such as BTC, ETH, SOL, XRP, DOGE (max 10). " +
         "Prices default to USD; set `convert` for another currency (e.g. NGN, EUR). " +
         "Many tickers are shared by unrelated look-alike coins; the result is always the best-ranked coin with that symbol (e.g. the real Bitcoin for BTC) — mention this if the user might mean a different coin. " +
-        "Report the price with its `asOf` time and say it comes from CoinMarketCap.",
+        "Report the price with its `asOf` time and do not name the data provider.",
       inputSchema: z.object({
         symbols: z.array(SYMBOL).min(1).max(10).describe("Ticker symbols, e.g. ['BTC','ETH']"),
         convert: CURRENCY.optional().describe("Quote currency; defaults to USD"),
@@ -96,9 +96,9 @@ export function createCmcTools() {
 
     get_crypto_market_overview: tool({
       description:
-        "Get a live snapshot of the overall crypto market from CoinMarketCap: total market cap, 24h volume, Bitcoin and Ethereum " +
+        "Get a live snapshot of the overall crypto market from the live market feed: total market cap, 24h volume, Bitcoin and Ethereum " +
         "dominance, and the top coins by market cap with their prices and 24h/7d change. Use for 'how is the market doing', " +
-        "'what are the biggest coins', or general market-mood questions. Values are in USD. Cite CoinMarketCap and the `asOf` time.",
+        "'what are the biggest coins', or general market-mood questions. Values are in USD. Give the `asOf` time and never name the data provider.",
       inputSchema: z.object({
         topCount: z.number().int().min(1).max(25).optional().describe("How many top coins to include (default 10)"),
       }),
@@ -137,10 +137,10 @@ export function createCmcTools() {
 
     get_top_movers: tool({
       description:
-        "Get the biggest crypto gainers or losers right now from CoinMarketCap, over 1 hour, 24 hours or 7 days. " +
+        "Get the biggest crypto gainers or losers right now from the live market feed, over 1 hour, 24 hours or 7 days. " +
         "Restricted to coins above a minimum market cap (default $50M) so the list isn't dominated by illiquid micro-caps — " +
         "lower `minMarketCapUsd` only if the user explicitly wants small/speculative coins. " +
-        "Use for 'what's pumping', 'top gainers today', 'what's crashing'. Cite CoinMarketCap and the `asOf` time; " +
+        "Use for 'what's pumping', 'top gainers today', 'what's crashing'. Give the `asOf` time and never name the data provider; " +
         "this is market data, not a recommendation to buy or sell.",
       inputSchema: z.object({
         direction: z.enum(["gainers", "losers"]).optional().describe("Default gainers"),
@@ -185,10 +185,10 @@ export function createCmcTools() {
 
     get_trending_crypto: tool({
       description:
-        "Get the cryptocurrencies currently TRENDING on CoinMarketCap (ranked by search/attention) over 24h, 7d or 30d. " +
+        "Get the cryptocurrencies currently TRENDING on the market (ranked by search/attention) over 24h, 7d or 30d. " +
         "Use for 'what's trending' / 'what is everyone looking at'. Different from get_top_movers, which ranks by price change. " +
-        "This data needs a higher CoinMarketCap plan; if it comes back unavailable, say so briefly and offer get_top_movers instead. " +
-        "Cite CoinMarketCap and the `asOf` time.",
+        "This data isn't always available; if it comes back unavailable, say so briefly and offer get_top_movers instead. " +
+        "Give the `asOf` time and never name the data provider.",
       inputSchema: z.object({
         timePeriod: z.enum(["24h", "7d", "30d"]).optional().describe("Default 24h"),
         limit: z.number().int().min(1).max(15).optional().describe("Default 5"),
@@ -207,7 +207,7 @@ export function createCmcTools() {
         } catch (err) {
           // Startup-plan-only endpoint: give the agent something actionable, not a bare failure.
           if (err instanceof CmcApiError && err.httpStatus === 403) {
-            return { error: "Trending data isn't available on the current CoinMarketCap plan. Use get_top_movers for the biggest price movers instead." };
+            return { error: "Trending data isn't available right now. Use get_top_movers for the biggest price movers instead." };
           }
           return fail(err);
         }
@@ -216,11 +216,11 @@ export function createCmcTools() {
 
     convert_crypto: tool({
       description:
-        "Convert an amount of one cryptocurrency into other currencies (fiat like USD/EUR/NGN, or other crypto) at the live CoinMarketCap rate. " +
+        "Convert an amount of one cryptocurrency into other currencies (fiat like USD/EUR/NGN, or other crypto) at the live market rate. " +
         "Use for 'how much is 250 XRP in dollars', 'what is 0.5 ETH in naira', 'how much SOL can I get for 100 USD-worth'. " +
         "To value the user's own holdings, first read the balance (e.g. get_xrp_balance) and then convert it here. " +
         "`from` is the coin being converted; `to` is up to 3 target currency codes. The result is the TOTAL value of the whole amount. " +
-        "To convert fiat INTO a coin, use get_crypto_prices and divide. Cite CoinMarketCap and the `asOf` time.",
+        "To convert fiat INTO a coin, use get_crypto_prices and divide. Give the `asOf` time and never name the data provider.",
       inputSchema: z.object({
         amount: z.number().min(1e-8).max(1e12).describe("How much of `from` to convert"),
         from: SYMBOL.describe("Ticker of the coin to convert, e.g. XRP"),
