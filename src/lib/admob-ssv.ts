@@ -42,6 +42,24 @@ export interface SsvResult {
   adUnit?: string;
 }
 
+/** Equivalent spellings of the signed query string (see verifyAdMobCallback). The as-received form is tried first. */
+function signedCandidates(signed: string): string[] {
+  const out = new Set<string>([signed, signed.replace(/\+/g, "%20"), signed.replace(/%20/g, "+")]);
+  try {
+    const pairs = signed.split("&").map((p) => {
+      const i = p.indexOf("=");
+      const key = i < 0 ? p : p.slice(0, i);
+      const value = i < 0 ? "" : decodeURIComponent(p.slice(i + 1).replace(/\+/g, " "));
+      return [key, value] as const;
+    });
+    out.add(pairs.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"));
+    out.add(pairs.map(([k, v]) => `${k}=${v}`).join("&"));
+  } catch {
+    /* malformed escapes: the as-received form is all we can try */
+  }
+  return [...out];
+}
+
 /** Base64url (web-safe base64, no padding) → Buffer. */
 function fromBase64Url(s: string): Buffer {
   return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
@@ -55,7 +73,6 @@ export async function verifyAdMobCallback(rawQuery: string): Promise<SsvResult> 
   const sigAt = rawQuery.indexOf("&signature=");
   if (sigAt < 0) return { ok: false, reason: "missing signature" };
 
-  const signed = rawQuery.slice(0, sigAt);
   const params = new URLSearchParams(rawQuery);
   const signature = params.get("signature");
   const keyId = params.get("key_id");
@@ -65,15 +82,22 @@ export async function verifyAdMobCallback(rawQuery: string): Promise<SsvResult> 
   if (!pem) pem = (await loadKeys(true)).get(keyId); // a freshly rotated key
   if (!pem) return { ok: false, reason: "unknown key_id" };
 
-  let valid = false;
-  try {
-    valid = createVerify("SHA256").update(signed).verify(pem, fromBase64Url(signature));
-  } catch {
-    valid = false;
-  }
-  if (!valid) return { ok: false, reason: "bad signature" };
+  // The signature covers the bytes Google sent. A hosting layer can hand us the same query re-encoded (spaces as
+  // "+" or "%20", "%3A" decoded, …), so try the usual equivalent spellings; any one that verifies is genuine, because
+  // only Google's private key can produce a signature that matches.
+  const sig = fromBase64Url(signature);
+  const valid = signedCandidates(rawQuery.slice(0, sigAt)).some((candidate) => {
+    try {
+      return createVerify("SHA256").update(candidate).verify(pem, sig);
+    } catch {
+      return false;
+    }
+  });
+  if (!valid) return { ok: false, reason: `bad signature (key_id ${keyId}, signed part ${sigAt} chars)` };
 
-  const timestamp = Number(params.get("timestamp"));
+  // Google documents the timestamp as epoch time but its examples are in microseconds; accept either.
+  let timestamp = Number(params.get("timestamp"));
+  if (timestamp > 1e14) timestamp /= 1000;
   if (!Number.isFinite(timestamp) || Date.now() - timestamp > MAX_AGE_MS) {
     return { ok: false, reason: "stale callback" };
   }

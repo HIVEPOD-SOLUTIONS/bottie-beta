@@ -25,7 +25,9 @@ export async function GET(req: NextRequest) {
   }
 
   if (!result.ok || !result.userId || !result.transactionId) {
-    console.warn("[admob-ssv] rejected callback:", result.reason);
+    // Nothing secret here — the query is Google's own callback (parameters and a public signature) — and seeing
+    // exactly what arrived is what diagnoses an encoding mismatch.
+    console.warn("[admob-ssv] rejected callback:", result.reason, "| query:", rawQuery.slice(0, 700));
     return NextResponse.json({ error: "Invalid callback" }, { status: 403 });
   }
 
