@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   }
 
   const isPremium = await isUserPremium(userId);
-  const rateLimit = checkVoiceLimit(userId, isPremium);
+  const rateLimit = await checkVoiceLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: rateLimit.reason },

@@ -4,6 +4,7 @@ import { authErrorResponse } from "@/lib/auth-response";
 import { cmcGetCached, describeCmcError, PriceFeedNotConfiguredError } from "@/lib/coinmarketcap";
 import { parseCoins, pickBestPerSymbol, type CoinQuote } from "@/lib/coinmarketcap-parse";
 import { getSupportedCoins } from "@/lib/supported-coins";
+import { checkApiLimit } from "@/lib/user-rate-limiter";
 
 /**
  * GET /api/prices/all?start=1&limit=100       — every coin CoinMarketCap lists, by market cap, a page at a time
@@ -14,6 +15,8 @@ import { getSupportedCoins } from "@/lib/supported-coins";
  */
 
 const PAGE_MAX = 200;
+/** Only the top 5,000 coins are pageable, which bounds how many distinct CMC pages (credits) one account can pull. */
+const START_MAX = 5_000;
 
 /** Providers keyed by the canonical coin's CMC id, so a look-alike sharing a ticker never gets a real coin's badge. */
 async function providersById(): Promise<Map<number, string[]>> {
@@ -47,15 +50,22 @@ function row(c: CoinQuote, providers: Map<number, string[]>) {
 }
 
 export async function GET(req: NextRequest) {
+  let userId: string;
   try {
-    await verifyAuth();
+    ({ userId } = await verifyAuth());
   } catch (err) {
     return authErrorResponse(err);
   }
 
+  // Each new page costs CoinMarketCap credits, so cap it per user as well as per IP (the screen loads a page per scroll).
+  const limit_ = await checkApiLimit(userId, "prices-all", 60, 3000);
+  if (!limit_.allowed) {
+    return NextResponse.json({ error: limit_.reason }, { status: 429, headers: limit_.headers });
+  }
+
   const sp = req.nextUrl.searchParams;
   const symbol = sp.get("symbol")?.trim().toUpperCase();
-  const start = Math.max(1, Math.min(50_000, Math.floor(Number(sp.get("start")) || 1)));
+  const start = Math.max(1, Math.min(START_MAX, Math.floor(Number(sp.get("start")) || 1)));
   const limit = Math.max(1, Math.min(PAGE_MAX, Math.floor(Number(sp.get("limit")) || 100)));
 
   if (symbol && !/^[A-Z0-9]{1,12}$/.test(symbol)) {

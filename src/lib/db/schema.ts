@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index, integer } from "drizzle-orm/pg-core";
 
 export const goals = pgTable("goals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -300,4 +300,14 @@ export const stockOrders = pgTable("stock_orders", {
 }, (table) => [
   index("stock_orders_user_created_idx").on(table.userId, table.createdAt),
   index("stock_orders_status_idx").on(table.status),
+]);
+
+// Shared per-user rate-limit counters (see src/lib/rate-limit-store.ts). One row per bucket
+// ("chat:daily:<userId>"); the row is reset in place when its window has passed.
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("rate_limits_reset_idx").on(table.resetAt),
 ]);

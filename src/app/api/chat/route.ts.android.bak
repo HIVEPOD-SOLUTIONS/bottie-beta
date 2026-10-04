@@ -4,7 +4,7 @@ import { createTools } from "@/lib/ai/tools";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { windowMessages, extractConversationRecap } from "@/lib/ai/window-messages";
 import { verifyAuth } from "@/lib/auth";
-import { checkChatLimit } from "@/lib/user-rate-limiter";
+import { checkChatLimit, checkChatTokenBudget, checkToolBudget, recordChatTokens, refundChat } from "@/lib/user-rate-limiter";
 import { isUserPremium } from "@/lib/revenuecat-server";
 import { db } from "@/lib/db";
 import { xrplSidebarWallets } from "@/lib/db/schema";
@@ -15,6 +15,29 @@ import { resolveXrpBalance } from "@/lib/xrplBalance";
 // Allow streaming responses up to 60s on Vercel Pro/Enterprise.
 // Hobby plan is capped at 10s — upgrade if you hit timeouts on long AI steps.
 export const maxDuration = 60;
+
+/** A chat request is a few KB; refuse anything absurd before parsing it (and again after windowing). */
+const MAX_BODY_BYTES = 1_000_000;
+const MAX_CONTEXT_CHARS = 300_000;
+
+/**
+ * The agent's tools call paid third parties, and one chat request can run up to ten steps. Wrap every executable
+ * tool so each run is counted against the user's daily tool budget (checkToolBudget); over it, the tool returns a
+ * plain error the model relays instead of running.
+ */
+function guardTools<T extends Record<string, unknown>>(tools: T, userId: string, isPremium: boolean): T {
+  for (const t of Object.values(tools)) {
+    const tool = t as { execute?: (...args: unknown[]) => unknown };
+    const run = tool.execute;
+    if (typeof run !== "function") continue;
+    tool.execute = async (...args: unknown[]) => {
+      const budget = await checkToolBudget(userId, isPremium);
+      if (!budget.allowed) return { error: budget.reason };
+      return run.apply(tool, args);
+    };
+  }
+  return tools;
+}
 
 /**
  * AI SDK v6 puts all parts from a multi-step round-trip into a single
@@ -104,7 +127,7 @@ export async function POST(req: Request) {
   // Checked after auth so we rate-limit by user identity, not just IP.
   // IP-based limits in proxy.ts are still the outer gate for unauthenticated abuse.
   const isPremium = await isUserPremium(userId);
-  const rateLimit = checkChatLimit(userId, isPremium);
+  const rateLimit = await checkChatLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return Response.json(
       { error: rateLimit.reason },
@@ -112,10 +135,22 @@ export async function POST(req: Request) {
     );
   }
 
+  // Cost budgets: LLM tokens used today, and an oversized-body guard. Rejections give the message back.
+  const tokenBudget = await checkChatTokenBudget(userId, isPremium);
+  if (!tokenBudget.allowed) {
+    await refundChat(userId);
+    return Response.json({ error: tokenBudget.reason }, { status: 429, headers: tokenBudget.headers });
+  }
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
+    await refundChat(userId);
+    return new Response("Request too large", { status: 413 });
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
+    await refundChat(userId);
     return new Response("Invalid JSON", { status: 400 });
   }
 
@@ -152,12 +187,17 @@ export async function POST(req: Request) {
   };
 
   if (!Array.isArray(messages)) {
+    await refundChat(userId);
     return new Response("messages must be an array", { status: 400 });
   }
 
-  const tools = createTools(walletAddress, userId, solanaAddress, Array.isArray(paidBillIds) ? paidBillIds : [], userName);
+  const tools = guardTools(createTools(walletAddress, userId, solanaAddress, Array.isArray(paidBillIds) ? paidBillIds : [], userName), userId, isPremium);
   const recap = extractConversationRecap(messages);
   const windowed = windowMessages(messages);
+  if (JSON.stringify(windowed).length > MAX_CONTEXT_CHARS) {
+    await refundChat(userId);
+    return new Response("Conversation too large", { status: 413 });
+  }
 
   // Resolve XRP wallet address from DB (cheap) and live balance from bluvfi-xrpl (may fail).
   // The client sends xrpBalanceClient — the dashboard's polled value — as a fallback so the
@@ -195,6 +235,7 @@ export async function POST(req: Request) {
     console.debug('[chat] modelMessages count:', modelMessages.length, 'roles:', modelMessages.map((m: { role: string }) => m.role).join('->'));
   } catch (err) {
     console.error('[chat] convertToModelMessages failed:', err);
+    await refundChat(userId);
     return new Response('Message conversion failed', { status: 500 });
   }
 
@@ -227,6 +268,7 @@ export async function POST(req: Request) {
     candidates = getLanguageModelCandidates();
   } catch (err) {
     console.error('[chat] no AI provider configured:', err);
+    await refundChat(userId);
     return new Response('AI service error', { status: 503 });
   }
 
@@ -239,6 +281,10 @@ export async function POST(req: Request) {
         messages: modelMessages,
         tools,
         stopWhen: stepCountIs(10),
+        // What the request actually cost, against the user's daily token budget.
+        onFinish: ({ totalUsage }) => {
+          void recordChatTokens(userId, totalUsage?.totalTokens ?? 0);
+        },
         onError: (err) => {
         const modelId = (model as { modelId?: string }).modelId ?? name;
         console.error(`[chat] ${name} (${modelId}) streamText error (mid-stream):`, err);
@@ -282,5 +328,6 @@ export async function POST(req: Request) {
   }
 
   console.error('[chat] all AI providers failed:', lastErr);
+  await refundChat(userId);
   return new Response('AI service error', { status: 503 });
 }

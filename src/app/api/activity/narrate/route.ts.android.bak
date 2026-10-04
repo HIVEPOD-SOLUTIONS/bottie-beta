@@ -19,7 +19,7 @@ export async function GET() {
 
   // Per-user rate limit — each call invokes Gemini Flash.
   const isPremium = await isUserPremium(userId);
-  const rateLimit = checkNarrateLimit(userId, isPremium);
+  const rateLimit = await checkNarrateLimit(userId, isPremium);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: rateLimit.reason },
