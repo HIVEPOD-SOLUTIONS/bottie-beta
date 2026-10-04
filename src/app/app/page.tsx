@@ -152,7 +152,6 @@ function DashboardInner() {
         <div className="text-center">
           <p className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-light/50 uppercase tracking-wide">
             Bluvfi
-            <span className="rounded text-[9px] font-bold tracking-wide uppercase bg-violet-500/20 text-violet-400 px-1 py-px leading-none normal-case">beta</span>
           </p>
         </div>
 

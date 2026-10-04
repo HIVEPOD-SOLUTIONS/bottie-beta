@@ -678,7 +678,6 @@ export function ChatSheet({ visible }: ChatSheetProps) {
             >
               <div className="relative">
                 <img src="/Bluvfiv2.jpg" alt="Bluvfi" className="h-8 w-8 rounded-full object-cover" />
-                <span className="absolute -top-1 -right-5 rounded text-[9px] font-bold tracking-wide uppercase bg-violet-500/20 text-violet-400 px-1 py-px leading-none">beta</span>
               </div>
             </button>
           </div>

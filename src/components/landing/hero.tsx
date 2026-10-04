@@ -284,7 +284,6 @@ export function HeroSection() {
         className="absolute inset-x-0 top-0 flex justify-center pt-6">
         <div className="relative inline-block">
           <img src="/Bluvfiv2.jpg" alt="Bluvfi" className="h-12 w-12 rounded-full object-cover" />
-          <span className="absolute -top-1 -right-6 rounded text-[9px] font-bold tracking-wide uppercase bg-violet-500/20 text-violet-400 px-1 py-px leading-none">beta</span>
         </div>
       </motion.div>
 
