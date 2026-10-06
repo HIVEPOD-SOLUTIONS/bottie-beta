@@ -169,6 +169,10 @@ export async function POST(req: Request) {
     portfolioValueUsd,
     billCount,
     appVersion,
+    client,
+    connectedWallet,
+    walletOnly,
+    seeker,
   } = body as {
     messages: UIMessage[];
     walletAddress?: string;
@@ -184,6 +188,11 @@ export async function POST(req: Request) {
     portfolioValueUsd?: number;
     billCount?: number;
     appVersion?: string;
+    /** "expo-android" from the native app; absent on the website and the older WebView app. */
+    client?: string;
+    connectedWallet?: { name?: string; address?: string };
+    walletOnly?: boolean;
+    seeker?: boolean;
   };
 
   if (!Array.isArray(messages)) {
@@ -255,6 +264,13 @@ export async function POST(req: Request) {
     conversationRecap: recap || undefined,
     currentDate: new Date().toISOString().slice(0, 10),
     appVersion: typeof appVersion === "string" ? appVersion : undefined,
+    client: typeof client === "string" ? client : undefined,
+    connectedWallet:
+      connectedWallet && typeof connectedWallet === "object"
+        ? { name: String(connectedWallet.name ?? ""), address: String(connectedWallet.address ?? "") }
+        : undefined,
+    walletOnly: walletOnly === true,
+    seeker: seeker === true,
   });
 
   // ── Cross-provider fallback ────────────────────────────────────────────

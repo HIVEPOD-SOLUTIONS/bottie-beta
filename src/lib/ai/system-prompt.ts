@@ -19,6 +19,35 @@ interface UserContext {
   currentDate?: string;
   /** e.g. "1.3.0 (53)" — from Capacitor App.getInfo() on Android; absent on web */
   appVersion?: string;
+  /** "expo-android" for the native Android app. Everything app-specific below is gated on it. */
+  client?: string;
+  /** External Solana wallet the user connected in the app (Seed Vault, Phantom, Solflare…). */
+  connectedWallet?: { name?: string; address?: string };
+  /** Signed in with a wallet only: no email or Google to recover the account with. */
+  walletOnly?: boolean;
+  /** The phone is a Solana Seeker. */
+  seeker?: boolean;
+}
+
+const isNativeApp = (ctx: UserContext) => ctx.client === "expo-android";
+
+/** What the native Android app looks like and can do, so the agent points people at real screens and real features. */
+function nativeAppSection(): string[] {
+  return [
+    `## The Bluvfi Android app (you are inside it)`,
+    `- The user is in the native Bluvfi Android app, not the website and not the older WebView app. Ignore advice above that is specific to the older app: the "below 1.3.0 (build 58)" microphone advice does not apply (native app versions start at 1.0.0), and nothing here runs in a WebView.`,
+    `- Bottom tabs: Home, Crypto, AI Chat (you), Profile. Home shows Digital Products purchased, Portfolio and Wallets cards, a live price strip, and four sections: Bills, Invest, Banking, History.`,
+    `- Bills: browse and buy gift cards, mobile top-ups and eSIMs (Bitrefill, and Cryptorefills in the Bills section). Invest: Backpack (tokenized stocks), GetEquity (private-market raises), Nosana (GPU compute) and Doma (domains).`,
+    `- Banking shows "Coming soon" in the app. Do NOT start, quote or create buy-crypto-with-UPI (onramp), sell-for-INR (offramp), SpherePay, Fuze or banking payout flows here: say Banking is coming to the app soon and that it is available on the Bluvfi website (www.bluvfi.xyz) today.`,
+    `- History lists payments, with a short weekly AI summary, and pending payments settle by themselves in real time; use get_payment_history for details.`,
+    `- Crypto tab: live prices for every major coin (searchable, tap a coin for a chart). Use the live-price tools for any price question; the card you return is shown in the chat.`,
+    `- Wallets: Fund Wallet (open it with open_fund_wallet) has a Solana tab with a "connect wallet" card. The user can connect a Solana wallet app (Seed Vault on a Solana Seeker, Phantom, Solflare, Backpack…) through Mobile Wallet Adapter, then Deposit from it into their Bluvfi wallet or Withdraw from the Bluvfi wallet back to it.`,
+    `- Paying: when a wallet is connected, Solana payment cards show a "Pay from" choice (Bluvfi wallet or the connected wallet). The user picks it on the card; you do not choose and you cannot sign for their connected wallet.`,
+    `- Signing in: Google, email code, passkey, or a Solana wallet (Seed Vault on a Seeker). Profile shows the user's name (they can tap "Set your name"), wallets, balances and Log out.`,
+    `- A wallet-only account (see User context) has no email or Google. If it comes up (lost phone, security, recovery, "what if I lose my wallet"), say plainly that Bluvfi cannot recover a wallet-only account and that they can add an email or Google in Profile. Do not nag about it otherwise.`,
+    `- You can link to screens; tapping opens them: [Crypto tab](bluvfi://crypto), [Profile](bluvfi://profile), [Home](bluvfi://home). Only use these links in the app, only when pointing the user somewhere helps, and never invent other bluvfi:// links.`,
+    ``,
+  ];
 }
 
 export function buildSystemPrompt(ctx: UserContext): string {
@@ -926,6 +955,7 @@ export function buildSystemPrompt(ctx: UserContext): string {
     `- Fuze / SpherePay: B2B server-side APIs — no user wallet involved; operate on behalf of the platform`,
     `- Doma marketplace: EVM wallet (the user must sign listings/offers with their wallet; Bluvfi cannot sign)`,
     ``,
+    ...(isNativeApp(ctx) ? nativeAppSection() : []),
     `## User context`,
   ];
 
@@ -935,6 +965,19 @@ export function buildSystemPrompt(ctx: UserContext): string {
 
   if (ctx.appVersion) {
     lines.push(`- App version: ${ctx.appVersion} (Android)`);
+  }
+
+  if (isNativeApp(ctx)) {
+    const w = ctx.connectedWallet;
+    const addr = w?.address && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w.address) ? w.address : undefined;
+    if (addr) {
+      const label = (w?.name ?? "").replace(/[^\p{L}\p{N}\s-]/gu, "").slice(0, 24) || "Solana wallet";
+      lines.push(`- Connected external Solana wallet: ${label} (${addr}) — Solana purchases can be paid from it or from the Bluvfi wallet; the user chooses on the payment card`);
+    } else {
+      lines.push(`- Connected external Solana wallet: none`);
+    }
+    if (ctx.walletOnly) lines.push(`- Account type: wallet-only (signed in with a wallet; no email or Google added)`);
+    if (ctx.seeker) lines.push(`- Device: Solana Seeker (Seed Vault is the built-in wallet)`);
   }
 
   if (ctx.userName) {

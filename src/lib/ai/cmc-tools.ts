@@ -39,6 +39,7 @@ function roundPrice(n: number): number {
 
 function compact(c: CoinQuote) {
   return {
+    id: c.id,
     symbol: c.symbol,
     name: c.name,
     rank: c.rank,
