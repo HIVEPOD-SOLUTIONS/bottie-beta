@@ -91,7 +91,8 @@ export async function attachReferral(userId: string, rawCode: unknown): Promise<
   await ensureProfile(userId);
   const updated = await db
     .update(sharProfiles)
-    .set({ referredBy: referrer.userId })
+    // referred_at is the DB clock, the same clock that stamps payments.created_at, so "before" and "after" compare like with like.
+    .set({ referredBy: referrer.userId, referredAt: sql`now()` })
     .where(and(eq(sharProfiles.userId, userId), sql`${sharProfiles.referredBy} is null`))
     .returning({ userId: sharProfiles.userId });
   if (updated.length === 0) return { ok: false, status: 409, error: "You've already used a referral code." };
@@ -149,7 +150,11 @@ export async function getSummary(userId: string, now: Date = new Date()) {
         with ${spendCte()}
         select s.user_id, coalesce(sum(s.shar) filter (where s.status = 'completed'), 0) as shar
         from spend s join shar_profiles r on r.user_id = s.user_id
-        where r.referred_by = ${userId} group by s.user_id`),
+        where r.referred_by = ${userId}
+          -- Only spending after the code was entered counts. A row with no referred_at (a link made before this rule existed)
+          -- earns nothing rather than risk paying for spending that came first.
+          and r.referred_at is not null and s.created_at >= r.referred_at
+        group by s.user_id`),
     ),
   );
   const referredCount = await guarded(0, async () => {

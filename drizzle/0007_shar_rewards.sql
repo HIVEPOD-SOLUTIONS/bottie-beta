@@ -5,9 +5,13 @@ CREATE TABLE IF NOT EXISTS "shar_profiles" (
 	"user_id" text PRIMARY KEY NOT NULL,
 	"referral_code" text NOT NULL,
 	"referred_by" text,
+	"referred_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "shar_profiles_referral_code_unique" UNIQUE("referral_code")
 );
+--> statement-breakpoint
+-- For databases that already ran an earlier version of this file: the column that records when a referral code was entered.
+ALTER TABLE "shar_profiles" ADD COLUMN IF NOT EXISTS "referred_at" timestamp;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "shar_profiles_referred_by_idx" ON "shar_profiles" USING btree ("referred_by");
 --> statement-breakpoint

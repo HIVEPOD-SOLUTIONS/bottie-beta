@@ -322,6 +322,8 @@ export const sharProfiles = pgTable("shar_profiles", {
   userId: text("user_id").primaryKey(),
   referralCode: text("referral_code").notNull().unique(),
   referredBy: text("referred_by"), // referrer's user id, set once
+  /** When the code was entered. Only spending from this moment on earns the referrer a bonus. */
+  referredAt: timestamp("referred_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("shar_profiles_referred_by_idx").on(table.referredBy),
