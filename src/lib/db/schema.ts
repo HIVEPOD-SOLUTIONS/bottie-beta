@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index, integer } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const goals = pgTable("goals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -310,4 +311,71 @@ export const rateLimits = pgTable("rate_limits", {
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
 }, (table) => [
   index("rate_limits_reset_idx").on(table.resetAt),
+]);
+
+// ── Shar rewards (see src/lib/shar.ts) ───────────────────────────────────────
+// Shar earned from spending is derived from `payments`, not stored, so it can never drift or double-count. These tables
+// hold only what can't be derived: referral links, SKR claims, and the open provider network.
+
+/** One row per user who has opened Shar: their referral code and who (if anyone) referred them. */
+export const sharProfiles = pgTable("shar_profiles", {
+  userId: text("user_id").primaryKey(),
+  referralCode: text("referral_code").notNull().unique(),
+  referredBy: text("referred_by"), // referrer's user id, set once
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("shar_profiles_referred_by_idx").on(table.referredBy),
+]);
+
+/** A request to take Shar out as SKR. Paid by the team; the user only ever has one open request at a time. */
+export const sharClaims = pgTable("shar_claims", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  shar: integer("shar").notNull(),
+  skrAmount: text("skr_amount").notNull(), // decimal string, fixed when the claim is made
+  wallet: text("wallet").notNull(),        // Solana address the SKR is sent to
+  status: text("status").notNull().default("requested"), // "requested" | "paid" | "rejected"
+  txSignature: text("tx_signature"),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  paidAt: timestamp("paid_at"),
+}, (table) => [
+  index("shar_claims_user_created_idx").on(table.userId, table.createdAt),
+  uniqueIndex("shar_claims_one_open_idx").on(table.userId).where(sql`status = 'requested'`),
+]);
+
+/** A provider or protocol someone added to the open network (or remixed from another listing). */
+export const providerListings = pgTable("provider_listings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerUserId: text("owner_user_id").notNull(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  summary: text("summary").notNull(),
+  category: text("category").notNull(),      // "data" | "ai" | "payments" | "defi" | "identity" | "other"
+  endpointUrl: text("endpoint_url").notNull(),
+  docsUrl: text("docs_url"),
+  priceUsdc: text("price_usdc").notNull().default("0"), // per call; paid calls settle over x402 (not enabled yet)
+  payoutWallet: text("payout_wallet").notNull(),        // owner's Solana address for commission
+  remixOfId: uuid("remix_of_id"),
+  status: text("status").notNull().default("submitted"), // "submitted" | "verified" | "rejected" | "paused"
+  reviewNote: text("review_note"),
+  verifiedAt: timestamp("verified_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("provider_listings_status_idx").on(table.status),
+  index("provider_listings_owner_idx").on(table.ownerUserId),
+]);
+
+/** One metered use of a verified provider; `shar` is what the owner earned for it. */
+export const providerUsage = pgTable("provider_usage", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  listingId: uuid("listing_id").notNull(),
+  callerUserId: text("caller_user_id").notNull(),
+  amountUsdc: text("amount_usdc").notNull().default("0"),
+  shar: integer("shar").notNull().default(0),
+  settlementRef: text("settlement_ref"), // x402 payment reference once paid calls are enabled
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("provider_usage_listing_idx").on(table.listingId, table.createdAt),
+  index("provider_usage_caller_idx").on(table.callerUserId, table.createdAt),
 ]);
