@@ -305,7 +305,7 @@ export type ClaimResult =
 export async function createClaim(userId: string, body: { shar?: unknown; wallet?: unknown }): Promise<ClaimResult> {
   const shar = Number(body.shar);
   if (!Number.isInteger(shar) || shar < SHAR.minClaimShar) {
-    return { ok: false, status: 400, error: `The smallest claim is ${SHAR.minClaimShar} Shar.` };
+    return { ok: false, status: 400, error: `The smallest claim is ${SHAR.minClaimShar.toLocaleString("en-US")} Shar.` };
   }
   if (!isSolanaAddress(body.wallet)) return { ok: false, status: 400, error: "Enter a valid Solana wallet address." };
 

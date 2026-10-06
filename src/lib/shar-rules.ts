@@ -5,7 +5,7 @@
  *  • Spend: 1 Shar per $1 on a completed purchase of $10 or more (gift cards, top-ups, eSIMs, investments).
  *  • Companion boost: a person's referrer earns 10% of the Shar that person earns from spending.
  *  • Providers: the owner of a verified provider earns Shar each time someone else uses it (capped, see provider-network.ts).
- *  • Claim: Shar can be taken out as SKR at a fixed rate; a claim is paid by the team.
+ *  • Claim: Shar can be taken out as SKR at a fixed rate (1 Shar = 0.9 SKR); a claim is paid by the team.
  *
  * The rates below are a first proposal, not a promise: change them here and everything (the API, the app's "How Shar works"
  * sheet, the claim maths) follows.
@@ -23,9 +23,9 @@ export const SHAR = {
   /** Shar the owner of a verified provider earns per eligible use. */
   providerUseShar: 1,
   /** SKR paid per Shar when a claim is made (fixed, so the amount is known before claiming). */
-  skrPerShar: 1,
+  skrPerShar: 0.9,
   /** Smallest claim, to keep payouts worth sending. */
-  minClaimShar: 50,
+  minClaimShar: 1000,
   leaderboardSize: 10,
 } as const;
 
@@ -85,7 +85,9 @@ export function referralBonus(refereeSpendingShar: number): number {
 
 /** SKR for an amount of Shar, as a decimal string (no float noise). */
 export function skrForShar(shar: number): string {
-  const total = Math.round(shar * SHAR.skrPerShar * 1_000_000);
+  // Whole micro-SKR throughout, so a fractional rate never picks up float noise (1234 * 0.9 is 1110.6000000000001 in floating point).
+  const microPerShar = Math.round(SHAR.skrPerShar * 1_000_000);
+  const total = (Number.isFinite(shar) ? Math.max(0, Math.floor(shar)) : 0) * microPerShar;
   const whole = Math.floor(total / 1_000_000);
   const frac = String(total % 1_000_000).padStart(6, "0").replace(/0+$/, "");
   return frac ? `${whole}.${frac}` : String(whole);
