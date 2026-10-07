@@ -37,6 +37,10 @@ const nextConfig: NextConfig = {
     config.resolve.alias = {
       ...config.resolve.alias,
       viem: path.resolve(process.cwd(), "node_modules/viem"),
+      // MetaMask SDK ships React Native code; stub the RN async-storage dep for web/Capacitor builds.
+      "@react-native-async-storage/async-storage": path.resolve(process.cwd(), "src/lib/stubs/empty.ts"),
+      // Privy optionally imports Farcaster mini-app helpers; stub for non-Farcaster builds.
+      "@farcaster/mini-app-solana": path.resolve(process.cwd(), "src/lib/stubs/empty.ts"),
     };
     return config;
   },

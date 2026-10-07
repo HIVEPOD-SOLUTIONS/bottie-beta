@@ -2547,17 +2547,17 @@
   resolved "https://registry.npmjs.org/@solana-program/token-2022/-/token-2022-0.6.1.tgz"
   integrity sha512-Ex02cruDMGfBMvZZCrggVR45vdQQSI/unHVpt/7HPt/IwFYB4eTlXtO8otYZyqV/ce5GqZ8S6uwyRf0zy6fdbA==
 
+"@solana-program/token@0.9.0", "@solana-program/token@^0.9.0":
+  version "0.9.0"
+  resolved "https://registry.yarnpkg.com/@solana-program/token/-/token-0.9.0.tgz#9582068c6053b1600472eedb3fe084b262cbc1c7"
+  integrity sha512-vnZxndd4ED4Fc56sw93cWZ2djEeeOFxtaPS8SPf5+a+JZjKA/EnKqzbE1y04FuMhIVrLERQ8uR8H2h72eZzlsA==
+
 "@solana-program/token@^0.13.0":
   version "0.13.0"
   resolved "https://registry.yarnpkg.com/@solana-program/token/-/token-0.13.0.tgz#6ef44f5fdc9cc4f087fcda3a001da8fe033ab678"
   integrity sha512-/Apjrd5lwOJGrPB0J5Rv7EBeclvyEBQPAGA85Scm7wBH+GpkbdLDM9uK3TNg8jjFKyWQYai/JtPHbrx7VgFLSg==
   dependencies:
     "@solana-program/system" "^0.12.0"
-
-"@solana-program/token@^0.9.0":
-  version "0.9.0"
-  resolved "https://registry.npmjs.org/@solana-program/token/-/token-0.9.0.tgz"
-  integrity sha512-vnZxndd4ED4Fc56sw93cWZ2djEeeOFxtaPS8SPf5+a+JZjKA/EnKqzbE1y04FuMhIVrLERQ8uR8H2h72eZzlsA==
 
 "@solana-program/zk-elgamal-proof@^0.1.0":
   version "0.1.0"
