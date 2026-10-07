@@ -22,12 +22,18 @@ export const NETWORK = {
   earningUsesPerCallerPerDay: 5,
   /** Most Shar one owner can earn from provider use in a day, across all their listings. */
   ownerDailyShar: 100,
+  /** Longest example request body we store (JSON text). */
+  exampleMaxChars: 1_500,
+  searchMax: 60,
   maxRequestBytes: 8_192,
   maxResponseBytes: 262_144,
   callTimeoutMs: 10_000,
 } as const;
 
 export type Category = (typeof NETWORK.categories)[number];
+
+export const SORTS = ["featured", "popular", "new"] as const;
+export type Sort = (typeof SORTS)[number];
 
 const PRIVATE_TLDS = [".local", ".localhost", ".internal", ".lan", ".home", ".corp", ".intranet", ".private", ".test", ".invalid"];
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
@@ -94,11 +100,33 @@ export interface ListingInput {
   priceUsdc: string;
   payoutWallet: string;
   remixOfId: string | null;
+  /** A JSON object showing what a good request looks like (stored as text), or null. */
+  exampleRequest: string | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * An example request body: a JSON object (given as text or already parsed), small enough to show and send as-is.
+ * Returns the canonical compact JSON, or null when empty.
+ */
+export function normalizeExampleRequest(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) return { ok: true, value: null };
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { ok: false, error: "The example request must be valid JSON." };
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false, error: "The example request must be a JSON object, like {\"city\": \"Lagos\"}." };
+  const text = JSON.stringify(parsed);
+  if (text.length > NETWORK.exampleMaxChars) return { ok: false, error: `The example request is too long (the limit is ${NETWORK.exampleMaxChars} characters).` };
+  return { ok: true, value: text };
+}
 
 export function validateListingInput(input: unknown): { ok: true; value: ListingInput } | { ok: false; error: string } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return { ok: false, error: "Send the listing as an object." };
@@ -137,6 +165,9 @@ export function validateListingInput(input: unknown): { ok: true; value: Listing
     remixOfId = b.remixOfId.toLowerCase();
   }
 
+  const example = normalizeExampleRequest(b.exampleRequest);
+  if (!example.ok) return example;
+
   return {
     ok: true,
     value: {
@@ -148,6 +179,112 @@ export function validateListingInput(input: unknown): { ok: true; value: Listing
       priceUsdc: String(Number(rawPrice)),
       payoutWallet: b.payoutWallet,
       remixOfId,
+      exampleRequest: example.value,
     },
+  };
+}
+
+// ── Editing, pausing and removing a listing ───────────────────────────────────
+
+/** The editable fields, as stored. */
+export interface EditableListing {
+  name: string;
+  summary: string;
+  category: string;
+  endpointUrl: string;
+  docsUrl: string | null;
+  priceUsdc: string;
+  payoutWallet: string;
+  exampleRequest: string | null;
+}
+
+export type ListingChanges = Partial<EditableListing>;
+
+/** The refusal for an edit that changes nothing (also used to tell "no listing fields changed" from a real error). */
+export const NOTHING_TO_CHANGE = "Nothing to change.";
+
+/**
+ * Validates a partial edit by laying it over the current listing and running the full listing checks, so an edit can never
+ * store anything a new listing couldn't. `reviewNeeded` is true when the change alters what people see or what gets called
+ * (name, description, category, endpoint, docs link, price): the team has to look again. The example request and the payout
+ * wallet can change freely.
+ */
+export function validateListingUpdate(
+  input: unknown,
+  current: EditableListing,
+): { ok: true; changes: ListingChanges; reviewNeeded: boolean } | { ok: false; error: string } {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return { ok: false, error: "Send the changes as an object." };
+  const b = input as Record<string, unknown>;
+  const keys: (keyof EditableListing)[] = ["name", "summary", "category", "endpointUrl", "docsUrl", "priceUsdc", "payoutWallet", "exampleRequest"];
+  const merged: Record<string, unknown> = { ...current };
+  for (const k of keys) if (k in b) merged[k] = b[k];
+
+  const checked = validateListingInput(merged);
+  if (!checked.ok) return checked;
+  const next = checked.value;
+
+  const changes: ListingChanges = {};
+  for (const k of keys) {
+    if (k in b && next[k] !== current[k]) (changes as Record<string, unknown>)[k] = next[k];
+  }
+  if (Object.keys(changes).length === 0) return { ok: false, error: NOTHING_TO_CHANGE };
+  const reviewNeeded = (["name", "summary", "category", "endpointUrl", "docsUrl", "priceUsdc"] as const).some((k) => k in changes);
+  return { ok: true, changes, reviewNeeded };
+}
+
+export interface ListingState {
+  status: string;
+  pausedByOwner: boolean;
+  verifiedAt: Date | string | null;
+}
+export type OwnerAction = "pause" | "resume" | "delete";
+type Plan = { ok: true; status: string; pausedByOwner: boolean } | { ok: false; status: number; error: string };
+
+/** What an owner may do with their listing, and where it ends up. */
+export function ownerActionPlan(state: ListingState, action: unknown): Plan {
+  if (state.status === "removed") return { ok: false, status: 404, error: "Provider not found." };
+  if (action === "delete") return { ok: true, status: "removed", pausedByOwner: false };
+  if (action === "pause") {
+    if (state.status !== "verified") return { ok: false, status: 409, error: "Only a live provider can be paused." };
+    return { ok: true, status: "paused", pausedByOwner: true };
+  }
+  if (action === "resume") {
+    if (state.status !== "paused") return { ok: false, status: 409, error: "This provider isn't paused." };
+    if (!state.pausedByOwner) return { ok: false, status: 409, error: "The team paused this provider, so only the team can turn it back on." };
+    if (!state.verifiedAt) return { ok: false, status: 409, error: "This provider needs to be verified before it can go live." };
+    return { ok: true, status: "verified", pausedByOwner: false };
+  }
+  return { ok: false, status: 400, error: "action must be pause, resume or delete" };
+}
+
+/** Where a listing ends up after the owner edits it. A change that needs review sends it back to the team. */
+export function editPlan(state: ListingState, reviewNeeded: boolean): Plan & { clearReview?: boolean } {
+  if (state.status === "removed") return { ok: false, status: 404, error: "Provider not found." };
+  if (state.status === "paused" && !state.pausedByOwner) {
+    return { ok: false, status: 409, error: "The team paused this provider, so it can't be edited. Contact support." };
+  }
+  if (!reviewNeeded) return { ok: true, status: state.status, pausedByOwner: state.pausedByOwner };
+  return { ok: true, status: "submitted", pausedByOwner: false, clearReview: true };
+}
+
+// ── Browsing ──────────────────────────────────────────────────────────────────
+
+export interface Browse {
+  q: string;
+  category: Category | null;
+  sort: Sort;
+  free: boolean;
+}
+
+/** Search, filter and sort from the query string. Anything unrecognised falls back to the default instead of failing. */
+export function parseBrowse(params: URLSearchParams): Browse {
+  const q = (params.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, NETWORK.searchMax);
+  const cat = params.get("category");
+  const sort = params.get("sort");
+  return {
+    q,
+    category: NETWORK.categories.includes(cat as Category) ? (cat as Category) : null,
+    sort: SORTS.includes(sort as Sort) ? (sort as Sort) : "featured",
+    free: params.get("free") === "1",
   };
 }

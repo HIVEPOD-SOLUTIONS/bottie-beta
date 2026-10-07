@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index, integer, bigint, primaryKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const goals = pgTable("goals", {
@@ -336,14 +336,18 @@ export const sharClaims = pgTable("shar_claims", {
   shar: integer("shar").notNull(),
   skrAmount: text("skr_amount").notNull(), // decimal string, fixed when the claim is made
   wallet: text("wallet").notNull(),        // Solana address the SKR is sent to
-  status: text("status").notNull().default("requested"), // "requested" | "paid" | "rejected"
+  status: text("status").notNull().default("requested"), // "requested" | "processing" | "sent" | "paid" | "rejected"
   txSignature: text("tx_signature"),
+  /** The last block the signed transaction can land in; once the chain is past it, a "sent" payout provably failed. */
+  lastValidBlockHeight: bigint("last_valid_block_height", { mode: "number" }),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
   paidAt: timestamp("paid_at"),
 }, (table) => [
   index("shar_claims_user_created_idx").on(table.userId, table.createdAt),
-  uniqueIndex("shar_claims_one_open_idx").on(table.userId).where(sql`status = 'requested'`),
+  // Open = in flight (requested, processing or sent), so a second claim can't be made while one is being paid.
+  uniqueIndex("shar_claims_one_open_idx").on(table.userId).where(sql`status IN ('requested', 'processing', 'sent')`),
 ]);
 
 /** A provider or protocol someone added to the open network (or remixed from another listing). */
@@ -359,13 +363,93 @@ export const providerListings = pgTable("provider_listings", {
   priceUsdc: text("price_usdc").notNull().default("0"), // per call; paid calls settle over x402 (not enabled yet)
   payoutWallet: text("payout_wallet").notNull(),        // owner's Solana address for commission
   remixOfId: uuid("remix_of_id"),
-  status: text("status").notNull().default("submitted"), // "submitted" | "verified" | "rejected" | "paused"
+  status: text("status").notNull().default("submitted"), // "submitted" | "verified" | "rejected" | "paused" | "removed"
   reviewNote: text("review_note"),
   verifiedAt: timestamp("verified_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  /** JSON text showing a good request body; the starting point for "Try it". */
+  exampleRequest: text("example_request"),
+  /** Promoted by the team; only ever true while verified. */
+  featured: boolean("featured").notNull().default(false),
+  featuredAt: timestamp("featured_at"),
+  /** Paused by the owner (who can resume it), as opposed to by the team. */
+  pausedByOwner: boolean("paused_by_owner").notNull().default(false),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  removedAt: timestamp("removed_at"),
 }, (table) => [
   index("provider_listings_status_idx").on(table.status),
   index("provider_listings_owner_idx").on(table.ownerUserId),
+]);
+
+/**
+ * Who is behind a listing and the terms they accepted when they submitted it (see drizzle/0012). A separate table, so listing reads
+ * never depend on it. contactEmail is for the Bluvfi team only.
+ */
+export const providerPublishers = pgTable("provider_publishers", {
+  listingId: uuid("listing_id").primaryKey(),
+  ownerUserId: text("owner_user_id").notNull(),
+  operatorType: text("operator_type").notNull(), // "individual" | "company"
+  companyName: text("company_name"),
+  companyWebsite: text("company_website"),
+  contactEmail: text("contact_email").notNull(),
+  rightsConfirmed: boolean("rights_confirmed").notNull().default(false),
+  termsVersion: text("terms_version").notNull(),
+  termsAcceptedAt: timestamp("terms_accepted_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("provider_publishers_owner_idx").on(table.ownerUserId),
+]);
+
+/** Provider creators: an opt-in sign-up (see drizzle/0015). Not every account can list providers. */
+export const providerCreators = pgTable("provider_creators", {
+  userId: text("user_id").primaryKey(),
+  operatorType: text("operator_type").notNull(), // "individual" | "company"
+  companyName: text("company_name"),
+  companyWebsite: text("company_website"),
+  contactEmail: text("contact_email").notNull(), // the Bluvfi team only
+  termsVersion: text("terms_version").notNull(),
+  termsAcceptedAt: timestamp("terms_accepted_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * How a provider is set up beyond its listing (see drizzle/0013): input fields, requirements, setup link, private team notes, and
+ * the encrypted credential Bluvfi uses to call the owner's API. A separate table, so listing reads never depend on it.
+ */
+export const providerConfigs = pgTable("provider_configs", {
+  listingId: uuid("listing_id").primaryKey(),
+  inputFields: text("input_fields"),     // JSON text, null = free-form
+  requirements: text("requirements"),    // JSON text, null = none
+  setupUrl: text("setup_url"),
+  teamNotes: text("team_notes"),         // private
+  authType: text("auth_type").notNull().default("none"), // "none" | "header" | "bearer"
+  authHeader: text("auth_header"),
+  authSecretEnc: text("auth_secret_enc"), // AES-256-GCM, never returned by any endpoint
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * An owner's own terms for the people who use their provider (see drizzle/0014), and who agreed to which version. Separate tables, so
+ * listing reads never depend on them. These sit on top of Bluvfi's own terms, which always apply.
+ */
+export const providerTerms = pgTable("provider_terms", {
+  listingId: uuid("listing_id").primaryKey(),
+  termsText: text("terms_text"),
+  termsUrl: text("terms_url"),
+  termsHash: text("terms_hash").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const providerTermsAcceptances = pgTable("provider_terms_acceptances", {
+  listingId: uuid("listing_id").notNull(),
+  userId: text("user_id").notNull(),
+  termsHash: text("terms_hash").notNull(),
+  acceptedAt: timestamp("accepted_at").defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.listingId, table.userId, table.termsHash] }),
+  index("provider_terms_acceptances_user_idx").on(table.userId),
 ]);
 
 /** One metered use of a verified provider; `shar` is what the owner earned for it. */
@@ -376,8 +460,112 @@ export const providerUsage = pgTable("provider_usage", {
   amountUsdc: text("amount_usdc").notNull().default("0"),
   shar: integer("shar").notNull().default(0),
   settlementRef: text("settlement_ref"), // x402 payment reference once paid calls are enabled
+  /** Whole micro-USDC the caller paid, and how it was split. owner + platform = paid. */
+  paidMicro: bigint("paid_micro", { mode: "number" }).notNull().default(0),
+  ownerMicro: bigint("owner_micro", { mode: "number" }).notNull().default(0),
+  platformMicro: bigint("platform_micro", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("provider_usage_listing_idx").on(table.listingId, table.createdAt),
   index("provider_usage_caller_idx").on(table.callerUserId, table.createdAt),
+]);
+
+// ── Admin audit, caller credits and owner commission (drizzle/0008_payouts_credits.sql) ──
+
+/** Every action an admin takes on a listing, claim or payout, with who and when. */
+export const adminAudit = pgTable("admin_audit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  adminUserId: text("admin_user_id").notNull(),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id").notNull(),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("admin_audit_target_idx").on(table.targetType, table.targetId, table.createdAt),
+]);
+
+/** What a caller has prepaid for paid provider calls, in whole micro-USDC. Never negative (a CHECK in the database). */
+export const creditBalances = pgTable("credit_balances", {
+  userId: text("user_id").primaryKey(),
+  balanceMicro: bigint("balance_micro", { mode: "number" }).notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Append-only record of every credit movement: a top-up, a call, a refund. */
+export const creditLedger = pgTable("credit_ledger", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  kind: text("kind").notNull(), // "topup" | "call" | "refund"
+  amountMicro: bigint("amount_micro", { mode: "number" }).notNull(),
+  ref: text("ref"),
+  listingId: uuid("listing_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("credit_ledger_user_idx").on(table.userId, table.createdAt),
+  uniqueIndex("credit_ledger_once_idx").on(table.kind, table.ref).where(sql`kind IN ('topup', 'refund')`),
+]);
+
+/** An owner's commission from paid calls, in whole micro-USDC. */
+export const earningsBalances = pgTable("earnings_balances", {
+  userId: text("user_id").primaryKey(),
+  availableMicro: bigint("available_micro", { mode: "number" }).notNull().default(0),
+  lifetimeMicro: bigint("lifetime_micro", { mode: "number" }).notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** A withdrawal of commission, paid as SKR. The SKR amount is fixed when an admin clicks Pay. */
+export const commissionPayouts = pgTable("commission_payouts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  usdMicro: bigint("usd_micro", { mode: "number" }).notNull(),
+  skrMicro: bigint("skr_micro", { mode: "number" }),
+  usdPerSkr: text("usd_per_skr"),
+  wallet: text("wallet").notNull(),
+  status: text("status").notNull().default("requested"), // "requested" | "processing" | "sent" | "paid" | "rejected"
+  txSignature: text("tx_signature"),
+  lastValidBlockHeight: bigint("last_valid_block_height", { mode: "number" }),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  paidAt: timestamp("paid_at"),
+}, (table) => [
+  index("commission_payouts_user_idx").on(table.userId, table.createdAt),
+  uniqueIndex("commission_payouts_one_open_idx").on(table.userId).where(sql`status IN ('requested', 'processing', 'sent')`),
+]);
+
+/** One payment an outside agent presented over x402. The unique payload hash means a signed payment can only be used once. */
+export const x402Receipts = pgTable("x402_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  listingId: uuid("listing_id").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  payer: text("payer"),
+  amountMicro: bigint("amount_micro", { mode: "number" }).notNull(),
+  status: text("status").notNull().default("verifying"), // verifying | calling | settling | settled | failed
+  signature: text("signature"),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("x402_receipts_payload_idx").on(table.payloadHash),
+  uniqueIndex("x402_receipts_signature_idx").on(table.signature).where(sql`signature IS NOT NULL`),
+  index("x402_receipts_status_idx").on(table.status, table.updatedAt),
+]);
+
+/** Who owns an on-chain signature: a credits top-up or an x402 payment, never both. */
+export const signatureClaims = pgTable("signature_claims", {
+  signature: text("signature").primaryKey(),
+  kind: text("kind").notNull(), // topup | x402
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** The phones an account has used (a one-way hash of the Android ID), so accounts on the same phone can be linked. */
+export const userDevices = pgTable("user_devices", {
+  userId: text("user_id").notNull(),
+  deviceHash: text("device_hash").notNull(),
+  firstSeen: timestamp("first_seen").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.deviceHash], name: "user_devices_pk" }),
+  index("user_devices_hash_idx").on(table.deviceHash),
 ]);

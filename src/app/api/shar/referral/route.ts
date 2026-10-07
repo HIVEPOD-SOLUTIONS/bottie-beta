@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
+import { noteDevice } from "@/lib/abuse";
 import { attachReferral, isMissingTable } from "@/lib/shar";
 import { checkApiLimit } from "@/lib/user-rate-limiter";
 
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
   }
   const limit = await checkApiLimit(userId, "shar-referral", 5, 30);
   if (!limit.allowed) return NextResponse.json({ error: limit.reason }, { status: 429, headers: limit.headers });
+  await noteDevice(req, userId);
 
   let body: Record<string, unknown>;
   try {

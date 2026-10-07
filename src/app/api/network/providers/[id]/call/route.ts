@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
-import { callProvider, getListing, recordUsage } from "@/lib/provider-network";
+import { noteDevice } from "@/lib/abuse";
+import { getListing, runProviderCall } from "@/lib/provider-network";
 import { NETWORK } from "@/lib/provider-network-rules";
 import { isMissingTable } from "@/lib/shar";
 import { checkApiLimit } from "@/lib/user-rate-limiter";
@@ -13,8 +14,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * POST /api/network/providers/:id/call  — send a JSON request to a verified provider and get its answer back.
  *
  * The gateway is what makes use measurable: each successful call is recorded, and the owner earns Shar for it (with caps, see
- * recordUsage). Only verified providers can be called. Paid providers need x402 settlement, which isn't enabled yet, so they
- * are refused rather than called for free.
+ * recordUsage). Only verified providers can be called.
+ *
+ * Paid providers: the price is taken from the caller's prepaid credits (/api/credits) before the call and given back if the
+ * provider fails, so nobody is charged for an error. On success the owner earns 80% as commission. With too few credits the
+ * answer is 402 { code: "insufficient_credits", requiredMicro, balanceMicro }.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   let userId: string;
@@ -25,6 +29,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   const limit = await checkApiLimit(userId, "network-call", 20, 300);
   if (!limit.allowed) return NextResponse.json({ error: limit.reason }, { status: 429, headers: limit.headers });
+  await noteDevice(req, userId);
 
   const { id } = await params;
   if (!UUID.test(id)) return NextResponse.json({ error: "Provider not found" }, { status: 404 });
@@ -43,13 +48,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const listing = await getListing(id);
     if (!listing || listing.status !== "verified") return NextResponse.json({ error: "Provider not found" }, { status: 404 });
-    if (Number(listing.priceUsdc) > 0) {
-      return NextResponse.json({ error: "Paid providers can't be called yet: x402 payments aren't enabled." }, { status: 501 });
+    const outcome = await runProviderCall(listing, userId, payload);
+    if (!outcome.ok) {
+      return NextResponse.json(
+        { error: outcome.error, code: outcome.code, requiredMicro: outcome.requiredMicro, balanceMicro: outcome.balanceMicro },
+        { status: outcome.status, headers: { "Cache-Control": "no-store" } },
+      );
     }
-    const result = await callProvider(listing, payload);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
-    if (result.status >= 200 && result.status < 300) await recordUsage(listing, userId);
-    return NextResponse.json({ providerStatus: result.status, data: result.body }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { providerStatus: outcome.providerStatus, data: outcome.data, chargedMicro: outcome.chargedMicro, balanceMicro: outcome.balanceMicro },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (err) {
     if (isMissingTable(err)) return NextResponse.json({ error: "The provider network is being set up." }, { status: 503 });
     console.error("[network/call]", err instanceof Error ? err.message : err);

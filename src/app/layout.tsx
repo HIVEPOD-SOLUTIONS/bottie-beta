@@ -7,9 +7,17 @@ import "./globals.css";
 
 const instrumentSerif = Instrument_Serif({
   weight: "400",
-  style: ["normal", "italic"],
+  style: "normal",
   subsets: ["latin"],
   variable: "--font-instrument-serif",
+  display: "swap",
+});
+
+const instrumentSerifItalic = Instrument_Serif({
+  weight: "400",
+  style: "italic",
+  subsets: ["latin"],
+  variable: "--font-instrument-serif-italic",
   display: "swap",
 });
 
@@ -78,7 +86,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${instrumentSerif.variable} ${sourceSerif4.variable} ${jetbrainsMono.variable} ${sora.variable} ${manrope.variable}`}
+      className={`${instrumentSerif.variable} ${instrumentSerifItalic.variable} ${sourceSerif4.variable} ${jetbrainsMono.variable} ${sora.variable} ${manrope.variable}`}
     >
       <body>
         <CapacitorFetchPatch />

@@ -200,7 +200,7 @@ export async function POST(req: Request) {
     return new Response("messages must be an array", { status: 400 });
   }
 
-  const tools = guardTools(createTools(walletAddress, userId, solanaAddress, Array.isArray(paidBillIds) ? paidBillIds : [], userName), userId, isPremium);
+  const tools = guardTools(createTools(walletAddress, userId, solanaAddress, Array.isArray(paidBillIds) ? paidBillIds : [], userName, typeof client === "string" ? client : undefined), userId, isPremium);
   const recap = extractConversationRecap(messages);
   const windowed = windowMessages(messages);
   if (JSON.stringify(windowed).length > MAX_CONTEXT_CHARS) {

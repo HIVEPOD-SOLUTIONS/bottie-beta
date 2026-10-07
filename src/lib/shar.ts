@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { claimBlockedByDevice, sharesDevice } from "@/lib/abuse";
 import { db } from "@/lib/db";
 import { sharClaims, sharProfiles } from "@/lib/db/schema";
 import {
@@ -25,10 +26,15 @@ import {
 const rowsOf = <T>(res: unknown): T[] => ((res as { rows?: T[] }).rows ?? (res as T[]));
 const num = (v: unknown) => Number(v ?? 0) || 0;
 
-/** Postgres "relation does not exist": the migration hasn't been run. */
+/**
+ * Postgres "relation does not exist" (42P01) or "column does not exist" (42703): a migration hasn't been run yet. Either way the
+ * feature reports "being set up" instead of crashing, so the code can be deployed before or after its migration.
+ */
 export function isMissingTable(err: unknown): boolean {
   const e = err as { code?: string; message?: string; cause?: { code?: string; message?: string } };
-  return e?.code === "42P01" || e?.cause?.code === "42P01" || /relation .* does not exist/i.test(`${e?.message} ${e?.cause?.message}`);
+  const code = e?.code ?? e?.cause?.code;
+  if (code === "42P01" || code === "42703") return true;
+  return /(relation|column) .* does not exist/i.test(`${e?.message} ${e?.cause?.message}`);
 }
 const isUniqueViolation = (err: unknown) => {
   const e = err as { code?: string; cause?: { code?: string } };
@@ -36,7 +42,7 @@ const isUniqueViolation = (err: unknown) => {
 };
 
 /** The qualifying payments, one row each with the Shar they earn (0 for ones that don't qualify). */
-function spendCte() {
+export function spendCte() {
   const types = sql.join(SHAR.qualifyingTypes.map((t) => sql`${t}`), sql`, `);
   return sql`spend as (
     select id, user_id, status, created_at, description, shar from (
@@ -88,6 +94,8 @@ export async function attachReferral(userId: string, rawCode: unknown): Promise<
   const [referrer] = await db.select().from(sharProfiles).where(eq(sharProfiles.referralCode, code)).limit(1);
   if (!referrer) return { ok: false, status: 404, error: "That code isn't valid." };
   if (referrer.userId === userId) return { ok: false, status: 400, error: "You can't use your own code." };
+  // A code from another account on the same phone is the same person: it would only ever pay out to themselves.
+  if (await sharesDevice(userId, referrer.userId)) return { ok: false, status: 400, error: "You can't use a code from an account on the same phone." };
   await ensureProfile(userId);
   const updated = await db
     .update(sharProfiles)
@@ -107,7 +115,8 @@ export type ActivityItem = {
   title: string;
   /** Signed: negative for claims. */
   shar: number;
-  state: "available" | "pending" | "requested" | "paid" | "rejected";
+  /** "sending": an admin has started the payout; it is on its way. */
+  state: "available" | "pending" | "requested" | "sending" | "paid" | "rejected";
   at: string;
 };
 
@@ -184,10 +193,12 @@ export async function getSummary(userId: string, now: Date = new Date()) {
   const claims = await guarded([] as (typeof sharClaims.$inferSelect)[], () =>
     db.select().from(sharClaims).where(eq(sharClaims.userId, userId)).orderBy(desc(sharClaims.createdAt)).limit(10),
   );
-  const claimed = claims.filter((c) => c.status === "requested" || c.status === "paid").reduce((s, c) => s + c.shar, 0);
+  // A claim still counts against the balance while it is being paid, not only while it waits: otherwise Shar would come back mid-payout.
+  const COUNTS = ["requested", "processing", "sent", "paid"];
+  const claimed = claims.filter((c) => COUNTS.includes(c.status)).reduce((s, c) => s + c.shar, 0);
   const claimedAll = await guarded(claimed, async () => {
     const [r] = rowsOf<{ n: string }>(
-      await db.execute(sql`select coalesce(sum(shar), 0) as n from shar_claims where user_id = ${userId} and status in ('requested', 'paid')`),
+      await db.execute(sql`select coalesce(sum(shar), 0) as n from shar_claims where user_id = ${userId} and status in ('requested', 'processing', 'sent', 'paid')`),
     );
     return num(r?.n);
   });
@@ -215,16 +226,16 @@ export async function getSummary(userId: string, now: Date = new Date()) {
     ...claims.map((c): ActivityItem => ({
       id: `c:${c.id}`,
       kind: "claim",
-      title: c.status === "paid" ? "Claimed as SKR" : c.status === "rejected" ? "Claim declined" : "SKR claim requested",
+      title: c.status === "paid" ? "Claimed as SKR" : c.status === "rejected" ? "Claim declined" : c.status === "processing" || c.status === "sent" ? "SKR on its way" : "SKR claim requested",
       shar: c.status === "rejected" ? 0 : -c.shar,
-      state: c.status as ActivityItem["state"],
+      state: (c.status === "processing" || c.status === "sent" ? "sending" : c.status) as ActivityItem["state"],
       at: c.createdAt.toISOString(),
     })),
   ]
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 25);
 
-  const open = claims.find((c) => c.status === "requested") ?? null;
+  const open = claims.find((c) => c.status === "requested" || c.status === "processing" || c.status === "sent") ?? null;
   return {
     ready,
     available,
@@ -236,7 +247,7 @@ export async function getSummary(userId: string, now: Date = new Date()) {
     skr: { perShar: SHAR.skrPerShar, availableSkr: skrForShar(available) },
     claim: {
       minShar: SHAR.minClaimShar,
-      open: open && { id: open.id, shar: open.shar, skr: open.skrAmount, wallet: open.wallet, at: open.createdAt.toISOString() },
+      open: open && { id: open.id, shar: open.shar, skr: open.skrAmount, wallet: open.wallet, at: open.createdAt.toISOString(), sending: open.status !== "requested" },
     },
     referral: { code: profile?.referralCode ?? null, referred: referredCount, bonus },
     provider: { owned: provider.owned, earned: provider.total },
@@ -308,6 +319,7 @@ export async function createClaim(userId: string, body: { shar?: unknown; wallet
     return { ok: false, status: 400, error: `The smallest claim is ${SHAR.minClaimShar.toLocaleString("en-US")} Shar.` };
   }
   if (!isSolanaAddress(body.wallet)) return { ok: false, status: 400, error: "Enter a valid Solana wallet address." };
+  if (await claimBlockedByDevice(userId)) return { ok: false, status: 409, error: "Too many accounts have claimed from this phone, so this can't go ahead. Contact support if that's a mistake." };
 
   const summary = await getSummary(userId);
   if (!summary.ready) return { ok: false, status: 503, error: "Claims are being set up. Try again soon." };

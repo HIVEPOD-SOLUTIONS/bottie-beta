@@ -12,6 +12,8 @@ import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 import { createCmcTools } from "@/lib/ai/cmc-tools";
 import { createCryptorefillsTools } from "@/lib/ai/cryptorefills-tools";
 import { createStocksTools } from "@/lib/ai/stocks-tools";
+import { createNetworkTools } from "@/lib/ai/network-tools";
+import { restrictForApp } from "@/lib/ai/app-tools";
 
 function extractMCPCode(invoice: Awaited<ReturnType<typeof mcpGetInvoice>>): string | null {
   if (!invoice.orders) return null;
@@ -42,7 +44,16 @@ function getEquityReturnUrl(): string {
   return `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://bluvfi.xyz").replace(/\/$/, "")}/app`;
 }
 
-export function createTools(walletAddress?: string, userId?: string, solanaAddress?: string, paidBillIds: string[] = [], userName?: string) {
+/**
+ * The tools for one chat. The website and the older app get every tool; the native Android app only the ones it has screens for
+ * (an allowlist, see app-tools.ts), so operator, banking and agent-wallet tools can never run from the app.
+ */
+export function createTools(walletAddress?: string, userId?: string, solanaAddress?: string, paidBillIds: string[] = [], userName?: string, client?: string) {
+  const all = createAllTools(walletAddress, userId, solanaAddress, paidBillIds, userName, client);
+  return client === "expo-android" ? restrictForApp(all) : all;
+}
+
+function createAllTools(walletAddress?: string, userId?: string, solanaAddress?: string, paidBillIds: string[] = [], userName?: string, client?: string) {
   // Pick the right address for a given blockchain context
   function addressFor(blockchain?: string): string {
     const chain = (blockchain ?? "").toLowerCase();
@@ -77,6 +88,9 @@ export function createTools(walletAddress?: string, userId?: string, solanaAddre
 
     // ── US stocks & ETFs (Backpack) — see lib/ai/stocks-tools.ts ───────────────
     ...createStocksTools(userId),
+
+    // ── Shar rewards & the open provider network: mobile app only. The website chat never gets these tools. ──
+    ...(client === "expo-android" ? createNetworkTools(userId) : {}),
 
     // ── UI actions ────────────────────────────────────────────────────────────
 

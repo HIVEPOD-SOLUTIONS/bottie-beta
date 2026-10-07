@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
-import { createListing, listMine, listVerified } from "@/lib/provider-network";
+import { listMine, listVerified, submitListing } from "@/lib/provider-network";
+import { parseBrowse } from "@/lib/provider-network-rules";
 import { isMissingTable } from "@/lib/shar";
 import { checkApiLimit } from "@/lib/user-rate-limiter";
 
 const SETTING_UP = { error: "The provider network is being set up. Try again soon." };
 
 /**
- * GET  /api/network/providers          — verified providers anyone can use (no endpoint URLs; calls go through the gateway)
+ * GET  /api/network/providers          — verified providers anyone can use (no endpoint URLs; calls go through the gateway).
+ *                                         Optional: ?q=search&category=data&free=1&sort=featured|popular|new
  * GET  /api/network/providers?mine=1   — the caller's own listings in every state, with what each has earned
- * POST /api/network/providers          — add a provider (or remix one with remixOfId); starts as "submitted" until verified
+ * POST /api/network/providers          — add a provider (or remix one with remixOfId); starts as "submitted" until verified.
+ *                                         Only creators can add one (403 creator_required otherwise; see /api/creator), and the listing needs
+ *                                         rightsConfirmed: true.
  */
 export async function GET(req: NextRequest) {
   let userId: string;
@@ -23,7 +27,7 @@ export async function GET(req: NextRequest) {
   if (!limit.allowed) return NextResponse.json({ error: limit.reason }, { status: 429, headers: limit.headers });
   try {
     const mine = req.nextUrl.searchParams.get("mine") === "1";
-    const providers = mine ? await listMine(userId) : await listVerified(userId);
+    const providers = mine ? await listMine(userId) : await listVerified(userId, parseBrowse(req.nextUrl.searchParams));
     return NextResponse.json({ providers }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (err) {
     if (isMissingTable(err)) return NextResponse.json({ providers: [], ready: false });
@@ -49,8 +53,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   try {
-    const result = await createListing(userId, body);
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+    const result = await submitListing(userId, body);
+    if (!result.ok) return NextResponse.json({ error: result.error, code: "code" in result ? result.code : undefined }, { status: result.status });
     const l = result.listing;
     return NextResponse.json({ provider: { id: l.id, name: l.name, slug: l.slug, status: l.status } }, { status: 201 });
   } catch (err) {
