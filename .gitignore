@@ -34,3 +34,5 @@ bluvfi-revenuecart*.json
 .env
 .env.*
 !.env.example
+*.jks
+*.keystore
