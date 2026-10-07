@@ -46,7 +46,7 @@ const load = (file, extra = {}) => {
 const schema = load("src/lib/db/schema.ts");
 const rules = load("src/lib/shar-rules.ts");
 const { SHAR } = rules;
-const MIGRATION = fs.readFileSync(path.join(ROOT, "drizzle/0007_shar_rewards.sql"), "utf8").split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean);
+const MIGRATION = require("./_migrations.cjs").statements; // every migration the Shar code needs, in order
 const PAYMENTS = `create table payments (id uuid primary key default gen_random_uuid(), user_id text not null, type text not null, reference_id text, description text not null, amount_usdc text not null, status text not null, tx_hash text, chain text, created_at timestamp default now() not null)`;
 const WALLET = "5FHwkrdxntdK24hgQU8qgBjn35Y1zwhz1GZwCkP2UJnM";
 
@@ -54,7 +54,8 @@ async function freshDb() {
   const client = new PGlite();
   await client.exec(PAYMENTS);
   for (const stmt of MIGRATION) await client.exec(stmt);
-  const shar = load("src/lib/shar.ts", { "@/lib/db": { db: drizzle(client, { schema }) }, "@/lib/db/schema": schema, "@/lib/shar-rules": rules });
+  const abuse = load("src/lib/abuse.ts", { "@/lib/db": { db: drizzle(client, { schema }) }, "@/lib/abuse-rules": load("src/lib/abuse-rules.ts", { "node:crypto": require("node:crypto") }) });
+  const shar = load("src/lib/shar.ts", { "@/lib/db": { db: drizzle(client, { schema }) }, "@/lib/db/schema": schema, "@/lib/shar-rules": rules, "@/lib/abuse": abuse });
   return { client, shar };
 }
 const spend = (client, user, usd) =>

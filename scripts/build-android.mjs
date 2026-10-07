@@ -61,6 +61,16 @@ function findBakFiles(dir) {
   return results;
 }
 
+// Pages that exist only on the web server (opened in the phone browser, not
+// rendered inside the Capacitor WebView) must be hidden during the static
+// export build, because they contain dynamic [param] segments that need
+// generateStaticParams — but with genuinely unknown params we can't supply any.
+const WEB_ONLY_PAGES = [
+  join(root, "src/app/r/[code]/page.tsx"),
+  join(root, "src/app/r/[code]/page.ts"),
+];
+
+const appDir = join(root, "src/app");
 const leftoverBaks = findBakFiles(apiDir);
 if (leftoverBaks.length > 0) {
   console.warn(`⚠   Found ${leftoverBaks.length} leftover .android.bak files from a previous run.`);
@@ -68,6 +78,11 @@ if (leftoverBaks.length > 0) {
   for (const bak of leftoverBaks) {
     renameSync(bak, bak.replace(/\.android\.bak$/, ""));
   }
+}
+// Also check for leftover baks in non-api pages
+const leftoverPageBaks = findBakFiles(appDir).filter(f => !f.startsWith(apiDir));
+for (const bak of leftoverPageBaks) {
+  renameSync(bak, bak.replace(/\.android\.bak$/, ""));
 }
 
 const routeFiles = findRouteFiles(apiDir);
@@ -77,10 +92,18 @@ console.log(`\n📦  Hiding ${routeFiles.length} API route files from Next.js sc
 const renames = []; // { original, backup }
 for (const file of routeFiles) {
   const backup = file + ".android.bak";
-  renameSync(file, backup);          // rename FILE (not directory) — no EPERM
+  renameSync(file, backup);
   renames.push({ original: file, backup });
 }
-console.log(`    Done — Next.js will see no API routes during this build.\n`);
+// Hide web-only page files that can't be statically exported
+for (const file of WEB_ONLY_PAGES) {
+  if (existsSync(file)) {
+    const backup = file + ".android.bak";
+    renameSync(file, backup);
+    renames.push({ original: file, backup });
+  }
+}
+console.log(`    Done — Next.js will see no API routes or web-only pages during this build.\n`);
 
 // ── Clear webpack cache (force full recompile) ────────────────────────────────
 const wpCache = join(root, ".next", "cache", "webpack");
