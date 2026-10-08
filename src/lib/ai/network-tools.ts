@@ -38,6 +38,16 @@ function setupFor(p: { inputFields?: unknown; requirements?: unknown; setupUrl?:
   };
 }
 
+/**
+ * In the app the Shar, Activity and Help & FAQ screens exist only for provider creators. A link to one would go nowhere for anyone else,
+ * so a tool result offers the screen only to a creator, and tells the agent to answer from the numbers (and how to unlock the screen) otherwise.
+ */
+async function creatorScreen(userId: string, link: string, what: string) {
+  const creator = await getCreator(userId).catch(() => null);
+  if (creator) return { openTheScreen: link };
+  return { openTheScreen: null, screenNote: `The ${what} screen in the app is for provider creators only, so don't link to it. Answer from these numbers. If they want it, they can become a creator (free): Profile, Become a creator, bluvfi://creator.` };
+}
+
 const amountText = (amount: number, unit: "shar" | "usd") => {
   const sign = amount > 0 ? "+" : amount < 0 ? "-" : "";
   const abs = Math.abs(amount);
@@ -77,7 +87,7 @@ export function createNetworkTools(userId?: string) {
             fromProviders: s.provider,
             howItWorks: {
               earn: `${s.rules.perUsd} Shar per $1 spent on a purchase of $${s.rules.minPurchaseUsd} or more; ${s.rules.referralBonusPct}% of a friend's Shar; ${s.rules.providerUseShar} Shar each time someone uses a provider you added.`,
-              openTheScreen: "bluvfi://shar",
+              ...(await creatorScreen(userId, "bluvfi://shar", "Shar")),
             },
           };
         } catch (err) {
@@ -144,7 +154,7 @@ export function createNetworkTools(userId?: string) {
             // Adding a provider is an opt-in sign-up (free, a minute): who they are, a contact email, and the provider terms. You can't sign anyone up or agree for them.
             creator: creator
               ? { signedUp: true, listingAs: creator.operatorType === "company" ? creator.companyName : "an individual", mustAgreeToNewTerms: creator.termsVersion !== PROVIDER_TERMS_VERSION, editOn: "bluvfi://creator" }
-              : { signedUp: false, becomeOne: "bluvfi://creator", note: "They need to sign up as a creator on the Network screen before they can add a provider." },
+              : { signedUp: false, becomeOne: "bluvfi://creator", note: "They need to sign up as a creator (free) before they can add a provider: Profile, then Become a creator." },
             creditsUsd: microToDecimal(credits),
             commission: {
               availableUsd: microToDecimal(earnings.availableMicro),
@@ -244,7 +254,7 @@ export function createNetworkTools(userId?: string) {
             })),
             hasMore: page.nextCursor !== null,
             partial: page.ready ? undefined : "Part of the history isn't available yet (still being set up).",
-            openTheScreen: "bluvfi://activity",
+            ...(await creatorScreen(userId, "bluvfi://activity", "Activity")),
           };
         } catch (err) {
           return fail(err, "get_my_activity");
