@@ -19,11 +19,11 @@
 }
 
 @theme inline {
-  --font-display: var(--font-instrument-serif), Georgia, serif;
-  --font-body: var(--font-source-serif-4), Georgia, serif;
-  --font-mono: var(--font-jetbrains-mono), "Fira Code", monospace;
-  --font-sora: var(--font-sora), sans-serif;
-  --font-manrope: var(--font-manrope), sans-serif;
+  --font-display: "Instrument Serif", Georgia, serif;
+  --font-body: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-sora: "Sora", sans-serif;
+  --font-manrope: "Manrope", sans-serif;
 }
 
 /* ─── Base ─── */

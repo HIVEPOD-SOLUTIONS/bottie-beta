@@ -1,53 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Serif, Source_Serif_4, JetBrains_Mono, Sora, Manrope } from "next/font/google";
 import { Providers } from "@/providers";
 import { CapacitorFetchPatch } from "@/components/capacitor-fetch-patch";
 import { AppUrlListener } from "@/components/app-url-listener";
 import "./globals.css";
-
-const instrumentSerif = Instrument_Serif({
-  weight: "400",
-  style: "normal",
-  subsets: ["latin"],
-  variable: "--font-instrument-serif",
-  display: "swap",
-});
-
-const instrumentSerifItalic = Instrument_Serif({
-  weight: "400",
-  style: "italic",
-  subsets: ["latin"],
-  variable: "--font-instrument-serif-italic",
-  display: "swap",
-});
-
-const sourceSerif4 = Source_Serif_4({
-  weight: ["300", "400", "600", "700"],
-  subsets: ["latin"],
-  variable: "--font-source-serif-4",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  weight: ["400", "500", "600"],
-  subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
-  display: "swap",
-});
-
-const sora = Sora({
-  weight: ["700"],
-  subsets: ["latin"],
-  variable: "--font-sora",
-  display: "swap",
-});
-
-const manrope = Manrope({
-  weight: ["400", "500"],
-  subsets: ["latin"],
-  variable: "--font-manrope",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Bluvfi — Your AI Finance Assistant",
@@ -84,10 +39,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className={`${instrumentSerif.variable} ${instrumentSerifItalic.variable} ${sourceSerif4.variable} ${jetbrainsMono.variable} ${sora.variable} ${manrope.variable}`}
-    >
+    <html lang="en">
+      <head>
+        {/* Runtime Google Fonts — loaded in the browser, not at build time,
+            so the build never needs network access to fonts.googleapis.com. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Source+Serif+4:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@700&family=Manrope:wght@400;500&display=swap"
+        />
+      </head>
       <body>
         <CapacitorFetchPatch />
         <AppUrlListener />
