@@ -82,7 +82,7 @@ export function createNetworkTools(userId?: string) {
             canClaimNow: s.available >= s.claim.minShar && !open,
             claimInProgress: open ? { shar: open.shar, skr: open.skr, status: open.sending ? "SKR is on its way" : "waiting for the team to review" } : null,
             referral: s.referral.code
-              ? { code: s.referral.code, link: `${SITE}/r/${s.referral.code}`, friendsJoined: s.referral.referred, bonusShar: s.referral.bonus }
+              ? { code: s.referral.code, link: `${SITE}/r/${s.referral.code}`, friendsJoined: s.referral.referred, bonusShar: s.referral.bonus, inviteScreen: "bluvfi://invite" }
               : null,
             fromProviders: s.provider,
             howItWorks: {
