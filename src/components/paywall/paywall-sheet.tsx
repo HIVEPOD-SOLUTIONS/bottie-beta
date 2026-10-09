@@ -87,7 +87,26 @@ export function PaywallSheet({ open, onClose, onPurchased, featureName = "Premiu
         <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20" />
 
         <h2 className="mb-1 text-xl font-bold text-[#F2F0E8]">{featureName}</h2>
-        <p className="mb-6 text-sm text-[#A7A79A]">Subscribe to unlock all features.</p>
+        <p className="mb-4 text-sm text-[#A7A79A]">Unlock everything Bluvfi has to offer.</p>
+
+        {/* Benefits list */}
+        <ul className="mb-6 space-y-2.5">
+          {[
+            "Take control with AI that's always up",
+            "Buy your needs, and manage investments",
+            "Unlimited AI financial guidance",
+            "Priority support when you need help fast",
+          ].map((benefit) => (
+            <li key={benefit} className="flex items-start gap-2.5 text-sm text-[#F2F0E8]">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#8FAE82]/20 text-[#8FAE82]">
+                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                  <path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+              {benefit}
+            </li>
+          ))}
+        </ul>
 
         {loading && (
           <div className="flex items-center justify-center py-10">
@@ -106,9 +125,13 @@ export function PaywallSheet({ open, onClose, onPurchased, featureName = "Premiu
             disabled={purchasing || restoring}
             className="mb-3 w-full rounded-2xl border border-[#8FAE82]/30 bg-[#8FAE82]/10 px-5 py-4 text-left transition-colors active:bg-[#8FAE82]/20 disabled:opacity-50"
           >
-            <p className="font-semibold text-[#F2F0E8]">{pkg.product.title}</p>
-            <p className="mt-1 text-xs text-[#A7A79A] [hyphens:none]">{pkg.product.description}</p>
-            <p className="mt-3 text-right text-base font-bold text-[#8FAE82]">{pkg.product.priceString}</p>
+            <div className="flex items-center justify-between">
+              <p className="font-semibold text-[#F2F0E8]">{pkg.product.title}</p>
+              <p className="text-base font-bold text-[#8FAE82]">{pkg.product.priceString}</p>
+            </div>
+            {pkg.product.subscriptionPeriod && (
+              <p className="mt-0.5 text-xs text-[#A7A79A]">per {pkg.product.subscriptionPeriod.toLowerCase().replace("p1m", "month").replace("p1y", "year").replace("p1w", "week")}</p>
+            )}
           </button>
         ))}
 
