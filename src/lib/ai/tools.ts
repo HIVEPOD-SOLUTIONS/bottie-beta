@@ -362,6 +362,8 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             };
           }
 
+          // The invoice's access token, handed to the poll tool so Bitrefill can find the order.
+          const tokenArg = invoice.invoice_access_token ? `, accessToken="${invoice.invoice_access_token}"` : "";
           const depositAddress  = invoice.payment_info.address;
           const depositAmount   = invoice.payment_info.altcoinPrice ?? invoice.payment_info.amount;
           const depositCurrency = invoice.payment_info.currency;
@@ -429,12 +431,12 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             tip: isAddressBased
               ? amountKnown
                 ? (isTopup
-                    ? `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true). Airtime credited directly to the phone; receipt to ${recipientEmail}.`
-                    : `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"). Code will be emailed to ${recipientEmail} after confirmation.`)
-                : `Deposit address shown to user, but Bitrefill did not provide an exact amount for this payment method. Tell the user to open ${paymentLink ?? "the payment link"} to see the exact amount to send (Bitrefill's own checkout page), then send that amount to the address already shown. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${isTopup ? ", isTopup=true" : ""}).`
+                    ? `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${tokenArg}, isTopup=true). Airtime credited directly to the phone; receipt to ${recipientEmail}.`
+                    : `Deposit address shown to user — they must send exactly ${depositAmount} ${depositCurrency} manually. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${tokenArg}). Code will be emailed to ${recipientEmail} after confirmation.`)
+                : `Deposit address shown to user, but Bitrefill did not provide an exact amount for this payment method. Tell the user to open ${paymentLink ?? "the payment link"} to see the exact amount to send (Bitrefill's own checkout page), then send that amount to the address already shown. Once sent, call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${tokenArg}${isTopup ? ", isTopup=true" : ""}).`
               : isTopup
-                ? `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}", isTopup=true) — no text before the call. Keep retrying every ~10 s up to 20 times until complete/failed/expired. Airtime credited directly to phone; receipt to ${recipientEmail}.`
-                : `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}") — no text before the call. Keep retrying every ~10 s up to 20 times until complete/failed/expired. Code emailed to ${recipientEmail} on completion.`,
+                ? `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${tokenArg}, isTopup=true) — no text before the call. Keep retrying every ~10 s up to 20 times until complete/failed/expired. Airtime credited directly to phone; receipt to ${recipientEmail}.`
+                : `PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. When you next receive {paid:true}, your FIRST action must be to call poll_bitrefill_order(invoiceId="${invoice.invoice_id}"${tokenArg}) — no text before the call. Keep retrying every ~10 s up to 20 times until complete/failed/expired. Code emailed to ${recipientEmail} on completion.`,
           };
         } catch (err: unknown) {
           const raw = err instanceof Error ? err.message : "Purchase failed";
@@ -483,8 +485,13 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           .boolean()
           .optional()
           .describe("Set to true for mobile top-ups — airtime is credited directly, no code is expected."),
+        accessToken: z
+          .string()
+          .max(512)
+          .optional()
+          .describe("The invoice's accessToken from buy_bitrefill_product. Pass it whenever the buy result gave one: Bitrefill can answer 'Invoice not found' without it."),
       }),
-      execute: async ({ invoiceId, productName, isTopup }) => {
+      execute: async ({ invoiceId, productName, isTopup, accessToken }) => {
         try {
           // ── DB-first: webhook may have already delivered the terminal state ──
           // This avoids an MCP round-trip (and quota consumption) when the webhook
@@ -563,7 +570,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           }
 
           // ── MCP fallback — webhook hasn't arrived yet ─────────────────────
-          const invoice = await mcpGetInvoice(invoiceId);
+          const invoice = await mcpGetInvoice(invoiceId, accessToken);
           const code = extractMCPCode(invoice);
 
           if (invoice.status === "complete") {
@@ -645,6 +652,19 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           };
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Status check failed";
+          // Bitrefill can answer "Invoice not found" for an order that was paid and is on its way (it isn't visible to this lookup yet, or the
+          // lookup needed the invoice's access token). That is not a failure to show the user: the payment already went through.
+          if (/not found|RESOURCE_NOT_FOUND/i.test(message)) {
+            return {
+              status: "pending",
+              invoiceId,
+              message: "Payment sent. Bitrefill hasn't shown this order to us yet.",
+              tip:
+                "This is NOT an error and the payment did not fail. Retry poll_bitrefill_order up to 3 more times about 10 seconds apart (pass accessToken if you have it). " +
+                "If it still isn't found, stop retrying and tell the user plainly: the payment was sent, the order is being confirmed, and it will appear in their purchase history (Home, Bills) and in Bitrefill's email when it completes. " +
+                "Do not say Bitrefill is slow, do not invent limits, and do not ask them to pay again.",
+            };
+          }
           return { error: message, invoiceId };
         }
       },
