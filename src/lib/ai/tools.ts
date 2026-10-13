@@ -266,6 +266,10 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             `user sends XRP and it's converted automatically. Deposit address + a short time-to-send countdown (~7.5 min) shown to user. Minimum item price ~$${MIN_XRP_BRIDGE_USD.toFixed(2)} — for anything cheaper, tell the user upfront and suggest a different payment method instead of calling this tool. ` +
             "IMPORTANT: never say 'swap', 'bridge', 'NEAR Intents', or explain the underlying conversion mechanism to the user — describe this only as \"paying with XRP\"; if something fails, say the payment couldn't be completed, not that a swap/bridge failed. " +
             "Do not check this one against get_product_details's supported_payment_methods — it works for any product. " +
+            "'zcash' (ZEC), 'hyperliquid' (USDC on Hyperliquid) and 'arc' (USDC on Arc) — also Bluvfi-only, work for any product, same 'never say swap/bridge' rule. " +
+            "'zcash' / 'hyperliquid': the user pays from their OWN Zcash wallet / Hyperliquid account to a deposit address shown in chat — you MUST first ask for their refundAddress there (Zcash: transparent t1…/t3… address; Hyperliquid: their 0x… account) and pass it. " +
+            `Minimum item price ~$${MIN_XRP_BRIDGE_USD.toFixed(2)} for these two. ` +
+            "'arc': paid automatically from the user's Bluvfi wallet USDC on Arc (USDC is also Arc's gas) — no refund address needed; the card asks them to confirm and prices it live (slightly above the item price). " +
             "Bitrefill's support for the other ids varies per product (especially usdt_base/usdt_optimism/usdc_optimism) — " +
             "call get_product_details first and only pass a value present in its supported_payment_methods list. " +
             "Only change from the default if the user explicitly asks for a different network or token."
@@ -275,6 +279,11 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           .max(30)
           .optional()
           .describe("Phone number for mobile top-ups in E.164 format, e.g. '+2348012345678'"),
+        refundAddress: z
+          .string()
+          .max(128)
+          .optional()
+          .describe("paymentMethod 'zcash' / 'hyperliquid' only, and required there: the user's OWN address on that chain where a failed payment is refunded (Zcash t1…/t3…, Hyperliquid 0x…). Ask the user — never guess or reuse their Bluvfi wallet address."),
         isTopup: z
           .boolean()
           .optional()
@@ -284,8 +293,72 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             "The email receives a payment confirmation receipt only."
           ),
       }),
-      execute: async ({ productId, packageValue, recipientEmail, recipientName, paymentMethod, sendTo, isTopup }) => {
+      execute: async ({ productId, packageValue, recipientEmail, recipientName, paymentMethod, sendTo, isTopup, refundAddress }) => {
         const resolvedMethod = paymentMethod ?? "usdc_base";
+
+        // Arc: the chat card creates the invoice and signs the route with the
+        // user's Privy wallet when they tap Pay (the server can't know which
+        // wallet will sign — see chain-purchase-client.ts).
+        if (resolvedMethod === "arc") {
+          return {
+            pendingBitrefillPayment: true,
+            paymentMethod:  "arc",
+            paymentCurrency: "USDC",
+            isAddressBased: false,
+            isTopup:        !!isTopup,
+            recipientEmail,
+            productId,
+            packageValue,
+            arcCheckout:    { productId, packageId: packageValue, recipientEmail, recipientName, sendTo },
+            tip: "A 'Pay with USDC on Arc' card is shown — wait for the user to confirm it. Its result carries the invoiceId to poll. Never say swap/bridge/LI.FI; this is just paying with USDC on Arc.",
+          };
+        }
+
+        // Zcash / Hyperliquid: deposit address from bluvfi-xrpl, paid by the
+        // user from their own wallet; refunds go to their refundAddress.
+        if (resolvedMethod === "zcash" || resolvedMethod === "hyperliquid") {
+          if (!refundAddress) {
+            return {
+              error: resolvedMethod === "zcash"
+                ? "Ask the user for their own transparent Zcash address (t1… or t3…) for refunds, then call this again with refundAddress."
+                : "Ask the user for their Hyperliquid account address (0x…) for refunds, then call this again with refundAddress.",
+            };
+          }
+          try {
+            const { initiateChainPurchase } = await import("@/lib/chain-purchase");
+            const p = await initiateChainPurchase({
+              chain: resolvedMethod,
+              refundAddress,
+              productId,
+              packageId: packageValue,
+              privyDid: userId ?? "",
+              recipientEmail,
+              recipientName,
+              sendTo,
+            });
+            const minutes = p.expiresAt ? Math.max(1, Math.round((new Date(p.expiresAt).getTime() - Date.now()) / 60000)) : p.expirationMinutes;
+            return {
+              pendingBitrefillPayment: true,
+              invoiceId:        p.invoiceId,
+              accessToken:      p.invoiceAccessToken,
+              productId,
+              packageValue,
+              paymentMethod:    resolvedMethod,
+              paymentAddress:   p.depositAddress,
+              paymentAmount:    p.amount,
+              paymentCurrency:  p.symbol,
+              depositMemo:      p.depositMemo,
+              refundAddress:    p.refundAddress,
+              isAddressBased:   true,
+              isTopup:          !!isTopup,
+              recipientEmail,
+              expiresInMinutes: minutes,
+              tip: `Deposit address shown to the user — they must send exactly ${p.amount} ${p.symbol}${resolvedMethod === "hyperliquid" ? " from their Hyperliquid spot balance" : " (transparent send) from their own Zcash wallet"}${p.depositMemo ? ` WITH memo ${p.depositMemo}` : ""} within about ${minutes} minutes. If it can't complete, it's refunded to ${p.refundAddress}. Once they say it's sent, call poll_bitrefill_order(invoiceId="${p.invoiceId}"${isTopup ? ", isTopup=true" : ""}) and keep polling (${resolvedMethod === "zcash" ? "Zcash confirmations take a few minutes" : "usually quick"}). Never mention swap/bridge/NEAR Intents.`,
+            };
+          } catch (err: unknown) {
+            return { error: err instanceof Error ? err.message : "Purchase failed" };
+          }
+        }
 
         // "xrp" is a Bluvfi-only pseudo-method — not a native Bitrefill payment
         // method. The underlying invoice always settles in USDC; XRP gets
@@ -553,6 +626,17 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
                 // History and this same check agree on what happened
                 // regardless of which surface detects it first.
                 await markXrpPurchaseFailed(dbRow.xrplWalletRequestId, failStatus);
+                // Zcash / Hyperliquid / Arc: no wallet of ours ever held the funds — the
+                // provider refunds them straight back, so there is nothing to recover.
+                if (wallet.chain && wallet.chain !== "xrpl") {
+                  return {
+                    status: failStatus,
+                    invoiceId,
+                    error:
+                      `The payment didn't go through. Anything the user sent is refunded automatically to ${wallet.chain === "arc" ? "their Bluvfi wallet on Arc" : `the refund address they gave (${wallet.refundAddress ?? "on file"})`} — usually within minutes. ` +
+                      "Tell them this, and offer to try again or use a different payment method. Do NOT call the XRP recovery tools.",
+                  };
+                }
                 return {
                   status: failStatus,
                   invoiceId,
@@ -1611,15 +1695,17 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         "'bridge' (Arc AppKit cross-chain bridges), " +
         "'onramp' (INR→crypto via UPI — starts pending, completed by webhook), " +
         "'offramp' (crypto→INR via bank — starts pending, completed by webhook). " +
-        "A 'bill' record with chain='xrpl' is a \"pay with XRP\" purchase — describe it to the user only as paid with XRP, never mention swaps/bridges/NEAR Intents. " +
-        "Each record includes chain ('evm'|'solana'|'xrpl'), amountUsdc, status, txHash, and createdAt.",
+        "'investment' also covers real Backpack stock/ETF fills (chain='backpack'), 'domain' is a Doma registration or marketplace buy (chain='doma', or 'evm' for Base listings; amountUsdc is 0 when paid in ETH — the description has the price). " +
+        "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid' or 'arc' was paid with XRP / ZEC / Hyperliquid USDC / Arc USDC — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
+        "'transfer' / 'bridge' with chain='arc' happened on Arc. " +
+        "Each record includes chain ('evm'|'solana'|'xrpl'|'arc'|'zcash'|'hyperliquid'|'doma'|'backpack'), amountUsdc, status, txHash, and createdAt.",
       inputSchema: z.object({
         limit: z
           .number()
           .optional()
           .describe("Number of records to return (default 20)"),
         type: z
-          .enum(["bill", "investment", "nanopay", "solpay", "x402", "transfer", "deposit", "withdrawal", "bridge", "onramp", "offramp"])
+          .enum(["bill", "investment", "domain", "nanopay", "solpay", "x402", "transfer", "deposit", "withdrawal", "bridge", "onramp", "offramp"])
           .optional()
           .describe("Filter by payment type"),
       }),
@@ -1645,13 +1731,71 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
               description: p.description,
               amountUsdc: p.amountUsdc,
               status: p.status,
-              chain: p.chain ?? "evm", // "evm" | "solana" — which network settled this payment
+              chain: p.chain ?? "evm", // which network settled this payment
+              txHash: p.txHash,
               createdAt: p.createdAt,
             })),
           };
         } catch (err: any) {
           return { error: err?.message || "Failed to fetch payment history" };
         }
+      },
+    }),
+
+    // ── Arc (Circle's stablecoin chain) ───────────────────────────────────────
+    get_arc_balance: tool({
+      description:
+        "Live USDC balance on Arc mainnet for each of the user's own EVM wallets (read on-chain, addresses from Privy — not from the chat). " +
+        "On Arc, USDC is also the gas token, so this is everything they need to pay or send there.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [{ getUserWalletAddresses }, { arcChain, ARC_USDC, arcAddressUrl }, viem] = await Promise.all([
+            import("@/lib/auth"),
+            import("@/lib/arc-chain"),
+            import("viem"),
+          ]);
+          const { evm } = await getUserWalletAddresses(userId);
+          if (!evm.length) return { error: "No EVM wallet on this account yet." };
+          const client = viem.createPublicClient({ chain: arcChain, transport: viem.http() });
+          const wallets = await Promise.all(evm.map(async (address) => {
+            const raw = await client.readContract({ address: ARC_USDC, abi: viem.erc20Abi, functionName: "balanceOf", args: [address as `0x${string}`] });
+            return { address, usdc: viem.formatUnits(raw, 6), explorer: arcAddressUrl(address) };
+          }));
+          const total = wallets.reduce((s, w) => s + Number(w.usdc), 0);
+          return {
+            network: "Arc mainnet",
+            totalUsdc: total.toFixed(6).replace(/\.?0+$/, "") || "0",
+            wallets,
+            tip: total > 0
+              ? "Report the balance. They can spend it with send_usdc_arc or by paying a Bitrefill item with paymentMethod 'arc'."
+              : "Empty. To add USDC: Wallet → 🟣 Arc tab → Bring USDC to Arc (bridges from Base and other chains; Circle completes the arrival).",
+          };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Couldn't read the Arc balance" };
+        }
+      },
+    }),
+
+    send_usdc_arc: tool({
+      description:
+        "Send USDC on Arc mainnet from the user's Bluvfi wallet to an 0x address. Shows a confirm card — nothing moves until the user taps Send. " +
+        "USDC pays the network fee too. Confirm the exact amount and recipient with the user first; never guess an address.",
+      inputSchema: z.object({
+        recipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/, "must be an 0x address").describe("Recipient 0x address on Arc"),
+        amount: z.string().regex(/^\d+(\.\d{1,6})?$/, "decimal USDC, max 6 decimals").describe("USDC amount, e.g. '12.5'"),
+        note: z.string().max(120).optional().describe("Optional short note shown on the card"),
+      }),
+      execute: async ({ recipient, amount, note }) => {
+        if (!(Number(amount) > 0)) return { error: "Amount must be more than 0." };
+        return {
+          arcSend: true,
+          recipient,
+          amount,
+          note,
+          tip: "A confirm card is shown. Wait for the user to tap Send; its result has sent + txHash (link: https://explorer.arc.io/tx/<hash>).",
+        };
       },
     }),
 

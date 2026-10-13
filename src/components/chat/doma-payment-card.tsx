@@ -5,6 +5,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { createPublicClient, http, erc20Abi, encodeFunctionData, parseAbi, type Hex } from "viem";
 import { payEvm, waitForEvmTx, friendlyEvmError } from "@/lib/evm-pay";
 import { domaChain, DOMA_BRIDGE_URL } from "@/lib/doma-chain";
+import { authFetch } from "@/lib/api-auth-fetch";
 
 /**
  * Pay card for the AI's doma_create_order tool. Doma returns a signed payment
@@ -41,7 +42,7 @@ export function DomaPaymentCard({
   addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
   const { wallets } = useWallets();
-  const { sendTransaction } = usePrivy();
+  const { sendTransaction, getAccessToken } = usePrivy();
   const [state, setState] = useState<State>(output.paid === true ? "done" : output.paid === false ? "error" : "idle");
   const [msg, setMsg] = useState<string | null>(output.paid === false ? output.error ?? "Payment didn't go through." : null);
   const [txHash, setTxHash] = useState<string | undefined>(output.txHash);
@@ -113,6 +114,19 @@ export function DomaPaymentCard({
       await waitForEvmTx(domaChain.id, hash);
       setTxHash(hash);
       setState("done");
+      authFetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "domain",
+          referenceId: output.order.orderId,
+          description: `Doma registration: ${domains || "domain"} (${display})`,
+          amountUsdc: native ? "0" : String(Number(amountAtomic) / 1e6),
+          status: "completed",
+          txHash: hash,
+          chain: "doma",
+        }),
+      }, getAccessToken).catch(() => {});
       report({ paid: true, txHash: hash });
     } catch (e) {
       let m = friendlyEvmError(e, "the Doma chain");

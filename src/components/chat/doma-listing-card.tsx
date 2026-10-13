@@ -151,6 +151,19 @@ export function DomaListingCard({
       await waitForEvmTx(chain.id, hash);
       setTxHash(hash);
       setState("done");
+      authFetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "domain",
+          referenceId: listing.externalId,
+          description: `Doma marketplace: bought ${listing.name} for ${price} on ${listing.chainName}`,
+          amountUsdc: /usd/i.test(listing.symbol) ? String(listing.priceDisplay) : "0",
+          status: "completed",
+          txHash: hash,
+          chain: chain.id === 8453 ? "evm" : "doma",
+        }),
+      }, getAccessToken).catch(() => {});
       report({ paid: true, txHash: hash });
     } catch (e) {
       const raw = (e as Error)?.message ?? "Purchase failed.";

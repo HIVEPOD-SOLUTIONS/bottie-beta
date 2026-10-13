@@ -116,6 +116,10 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
       ton:           { icon: "💎", label: "TON" },
       ethereum:      { icon: "⟠",  label: "Ethereum (ETH)" },
       solana:        { icon: "◎",  label: "Solana (SOL)" },
+      xrp:           { icon: "🌐", label: "XRP" },
+      zcash:         { icon: "🛡️", label: "Zcash (ZEC)" },
+      hyperliquid:   { icon: "🌊", label: "Hyperliquid (USDC)" },
+      arc:           { icon: "🟣", label: "Arc (USDC)" },
     };
     const pmMeta = PM_LABELS[pm] ?? { icon: "💳", label: pm };
     const isAddressBased = data.isAddressBased;
@@ -149,7 +153,20 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
               <>
                 <p className="text-[10px] text-[#A7A79A]">
                   Send exactly <span className="text-[#F2F0E8] font-mono">{data.paymentAmount} {data.paymentCurrency}</span> to the address above.
+                  {pm === "zcash" && " Use a transparent send from your own Zcash wallet."}
+                  {pm === "hyperliquid" && " Send from your Hyperliquid spot balance (Send → paste the address)."}
                 </p>
+                {data.depositMemo && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                    <p className="text-[10px] font-semibold text-amber-400">Include this memo, or the payment can&apos;t be matched</p>
+                    <p className="font-mono text-[10px] text-[#F2F0E8] break-all">{data.depositMemo}</p>
+                  </div>
+                )}
+                {data.refundAddress && (
+                  <p className="text-[10px] text-[#A7A79A]">
+                    If it can&apos;t complete, it&apos;s refunded to <span className="font-mono text-[#F2F0E8]">{String(data.refundAddress).slice(0, 8)}…{String(data.refundAddress).slice(-6)}</span>.
+                  </p>
+                )}
                 <BitrefillWalletPay method={pm} address={data.paymentAddress} amount={String(data.paymentAmount)} invoiceId={data.invoiceId} />
               </>
             ) : data.paymentLink ? (
@@ -184,7 +201,7 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
             }
           </p>
         )}
-        <p className="font-mono text-[10px] text-[#A7A79A]">Invoice {data.invoiceId}</p>
+        {data.invoiceId && <p className="font-mono text-[10px] text-[#A7A79A]">Invoice {data.invoiceId}</p>}
       </div>
     );
   }

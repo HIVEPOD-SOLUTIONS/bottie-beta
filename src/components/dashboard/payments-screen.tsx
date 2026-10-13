@@ -9,6 +9,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 const TYPE_META: Record<string, { icon: string; label: string; network?: string }> = {
   bill:        { icon: "🧾", label: "Bill / Gift Card" },
   investment:  { icon: "📈", label: "Investment" },
+  domain:      { icon: "🌐", label: "Domain" },
   transfer:    { icon: "↗️",  label: "Transfer" },
   bridge:      { icon: "🌉", label: "Bridge" },
   nanopay:     { icon: "⚡", label: "Circle Nanopay", network: "Base" },
@@ -49,6 +50,11 @@ function networkLabel(type: string, chain?: string | null) {
   // recognized here even though xrp-purchase.ts has stamped it on these
   // rows since the feature shipped).
   if (chain === "xrpl")   return "🌐 XRP";
+  if (chain === "arc")         return "🟣 Arc";
+  if (chain === "zcash")       return "🛡️ Zcash";
+  if (chain === "hyperliquid") return "🌊 Hyperliquid";
+  if (chain === "doma")        return "🌐 Doma";
+  if (chain === "backpack")    return "🎒 Backpack";
   return TYPE_META[type]?.network ?? "";
 }
 
@@ -56,6 +62,7 @@ function networkLabel(type: string, chain?: string | null) {
 const CATEGORY_LABELS: Record<string, string> = {
   bill:       "digital products",
   investment: "investments",
+  domain:     "domains",
   bridge:     "cross-chain bridges",
   transfer:   "transfers",
   nanopay:    "nanopayments",

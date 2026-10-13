@@ -3,7 +3,7 @@ import { and, eq, desc, inArray } from "drizzle-orm";
 import { createPublicClient, http, parseAbiItem, decodeEventLog, type Hex } from "viem";
 import { base } from "viem/chains";
 import { db } from "@/lib/db";
-import { stockOrders } from "@/lib/db/schema";
+import { payments, stockOrders } from "@/lib/db/schema";
 import { getServerEnv } from "@/lib/server-env";
 import { getUserWalletAddresses } from "@/lib/auth";
 import {
@@ -249,13 +249,29 @@ async function settle(orderId: string, fillQty: number, fillQuote: number, venue
         console.warn(`[stocks] proceeds of ${order.id} kept as credit:`, err instanceof Error ? err.message : err));
     }
   }
-  await db.update(stockOrders).set({
+  const [filled] = await db.update(stockOrders).set({
     status: "filled",
     fillQuantity: qtyStr,
     fillQuoteQuantity: fillQuote.toFixed(6),
     fillPrice: (fillQuote / fillQty).toFixed(6),
     updatedAt: new Date(),
-  }).where(and(eq(stockOrders.id, order.id), eq(stockOrders.status, "pending")));
+  }).where(and(eq(stockOrders.id, order.id), eq(stockOrders.status, "pending"))).returning({ id: stockOrders.id });
+
+  // Only the call that actually flipped it to filled writes History, so a
+  // re-run of settle() never records the trade twice.
+  if (filled) {
+    const price = (fillQuote / fillQty).toFixed(2);
+    const usd = order.side === "buy" ? usdc(fillQuote + fee) : usdc(fillQuote - fee);
+    await db.insert(payments).values({
+      userId: order.userId,
+      type: "investment",
+      referenceId: order.id,
+      description: `${order.side === "buy" ? "Bought" : "Sold"} ${qtyStr} ${order.asset.replace(/\.US$/, "")} @ $${price} (Backpack)`,
+      amountUsdc: usd,
+      status: "completed",
+      chain: "backpack",
+    }).catch((e: unknown) => console.warn("[stocks] history row failed", e));
+  }
 }
 
 /**

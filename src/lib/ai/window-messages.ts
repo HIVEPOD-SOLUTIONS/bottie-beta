@@ -11,6 +11,7 @@ const ACTION_TOOLS = new Set([
   "trade_stock",
   "withdraw_stock_credit",
   "doma_buy_listing",
+  "send_usdc_arc",
   "fund_xrp_purchase_from_wallet",
   "recover_xrp_order",
   "buy_investment",
@@ -174,7 +175,13 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
     case "buy_bitrefill_product": {
       const p = parsed as any;
       const emailNote = p?.recipientEmail ? ` → ${p.recipientEmail}` : "";
-      if (p?.pendingBitrefillPayment) {
+      if (p?.paid === true) {
+        line = `Paid Bitrefill invoice ${p.invoiceId ?? "?"}${p.paidWith ? ` with ${p.paidWith}` : ""} — poll_bitrefill_order next`;
+      } else if (p?.paid === false) {
+        line = `Bitrefill payment not completed for ${input.productId}: ${p.error ?? "unknown error"}`;
+      } else if (p?.pendingBitrefillPayment && p.paymentMethod === "arc") {
+        line = `Arc USDC payment card shown for ${input.productId}${emailNote} (priced when the user confirms)`;
+      } else if (p?.pendingBitrefillPayment) {
         const method = p.paymentMethod ?? (input.network === "solana" ? "usdc_solana" : "usdc_base");
         const amount = p.paymentAmount ?? "?";
         const currency = p.paymentCurrency ?? "USDC";
@@ -810,6 +817,15 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
       line = p?.sent || p?.queued
         ? `Stock credit $${p.amountUsd} ${p.sent ? "sent" : "queued"} to wallet ${p.to}`
         : `Stock credit withdrawal not done: ${p?.error ?? "unknown error"}`;
+      break;
+    }
+    case "send_usdc_arc": {
+      const p = parsed as any;
+      line = !p?.arcSend
+        ? `Arc USDC send not prepared: ${p?.error ?? "unknown error"}`
+        : p.sent === true ? `Sent ${p.amount} USDC on Arc to ${p.recipient} — tx ${p.txHash}`
+        : p.sent === false ? `Arc USDC send not completed (${p.amount} to ${p.recipient}): ${p.error ?? "unknown error"}`
+        : `Arc USDC send card shown — ${p.amount} to ${p.recipient}`;
       break;
     }
     case "doma_buy_listing": {

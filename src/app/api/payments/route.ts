@@ -130,7 +130,7 @@ export async function POST(req: Request) {
       amountUsdc?: string;
       status?: string;
       txHash?: string;
-      /** "evm" | "solana" — which network the payment was sent on */
+      /** Which network settled it: "evm" | "solana" | "xrpl" | "arc" | "zcash" | "hyperliquid" | "doma" | "backpack" */
       chain?: string;
     };
 
@@ -141,7 +141,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const validTypes = ["bill", "investment", "nanopay", "solpay", "x402", "transfer", "deposit", "withdrawal", "bridge", "onramp", "offramp"];
+  const validTypes = ["bill", "investment", "domain", "nanopay", "solpay", "x402", "transfer", "deposit", "withdrawal", "bridge", "onramp", "offramp"];
   if (!validTypes.includes(type)) {
     return NextResponse.json(
       { error: `Invalid type. Must be one of: ${validTypes.join(", ")}` },

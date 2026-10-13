@@ -91,7 +91,8 @@ export const payments = pgTable("payments", {
   amountUsdc: text("amount_usdc").notNull(),
   status: text("status").notNull(), // "pending" | "completed" | "failed"
   txHash: text("tx_hash"),
-  chain: text("chain"), // "evm" | "solana"
+  // Network that settled it: "evm" | "solana" | "xrpl" | "arc" | "zcash" | "hyperliquid" | "doma" | "backpack"
+  chain: text("chain"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("payments_user_created_idx").on(table.userId, table.createdAt),
@@ -111,17 +112,20 @@ export const bitrefillOrders = pgTable("bitrefill_orders", {
   productId: text("product_id").notNull(),
   productName: text("product_name"),
   packageValue: text("package_value").notNull(),
-  paymentMethod: text("payment_method").notNull(),   // e.g. "usdc_base", "bitcoin"
+  paymentMethod: text("payment_method").notNull(),   // e.g. "usdc_base", "bitcoin"; Bluvfi-only: "xrp" | "zcash" | "hyperliquid" | "arc"
   isAddressBased: boolean("is_address_based").notNull().default(false),
   paymentAddress: text("payment_address"),           // deposit address (address-based methods)
   paymentAmount: text("payment_amount"),             // amount in payment currency
   paymentCurrency: text("payment_currency"),         // e.g. "USDC", "BTC"
   amountUsdc: text("amount_usdc"),                   // USD equivalent
   recipientEmail: text("recipient_email"),
-  chain: text("chain"),                              // "evm" | "solana"
+  chain: text("chain"),                              // "evm" | "solana" | "xrpl" | "zcash" | "hyperliquid" | "arc"
   status: text("status").notNull().default("pending"), // "pending" | "complete" | "failed" | "expired"
   redemptionCode: text("redemption_code"),
   esimInstallLink: text("esim_install_link"),
+  // bluvfi-xrpl swap linked to this invoice — set when paymentMethod is
+  // "xrp", "zcash", "hyperliquid" or "arc" (see xrp-purchase.ts /
+  // chain-purchase.ts); xrplWalletAddress and xrplRecoveredAt are XRP-only.
   // "Pay with XRP" — set only when paymentMethod === "xrp". Underlying
   // settlement is still a normal usdc_base/usdc_solana Bitrefill invoice;
   // these two columns link that invoice to the bluvfi-xrpl swap wallet that

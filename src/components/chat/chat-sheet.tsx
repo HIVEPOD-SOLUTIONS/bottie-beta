@@ -13,12 +13,14 @@ import { MessageBubble } from "./message-bubble";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { ToolResultCard } from "./tool-result-card";
-import { payEvmTransfer, pickPrivyWalletOrThrow } from "@/lib/evm-pay";
+import { payEvmTransfer, pickPrivyWalletOrThrow, friendlyEvmError } from "@/lib/evm-pay";
+import { startChainPurchase, payArcPurchase } from "@/lib/chain-purchase-client";
 import { CryptorefillsPaymentCard } from "./cryptorefills-payment-card";
 import { StockTradeCard } from "./stock-trade-card";
 import { GetEquityPaymentCard } from "./getequity-payment-card";
 import { DomaPaymentCard } from "./doma-payment-card";
 import { DomaListingCard } from "./doma-listing-card";
+import { ArcSendCard } from "./arc-send-card";
 
 function OpenFundWalletTrigger({ toolCallId }: { toolCallId: string }) {
   useEffect(() => {
@@ -70,6 +72,8 @@ function BitrefillPaymentCard({
     paymentCurrency: string;
     isTopup?: boolean;
     expiresInMinutes?: number;
+    /** paymentMethod "arc" only: what to buy — the invoice is created when the user taps Pay. */
+    arcCheckout?: { productId: string; packageId: string; recipientEmail?: string; recipientName?: string; sendTo?: string };
   };
   addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
 }) {
@@ -79,8 +83,9 @@ function BitrefillPaymentCard({
   // sponsorship (EIP-7702) on the user's existing embedded wallet — the
   // "Gas management" dashboard feature. Falls back to Layer 2 (user pays
   // native gas) and Layer 3 (ArcKit) if unavailable.
-  const { user: privyUser, sendTransaction: privySendTransaction } = usePrivy();
+  const { user: privyUser, sendTransaction: privySendTransaction, getAccessToken } = usePrivy();
   const [state, setState] = useState<"idle" | "paying" | "done" | "error" | "manual">("idle");
+  const [arcStage, setArcStage] = useState<string | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [manualAddress, setManualAddress] = useState<string | null>(null);
   const [manualCopied, setManualCopied] = useState(false);
@@ -92,6 +97,37 @@ function BitrefillPaymentCard({
     output.paymentCurrency ||
     (pm.includes("usdt") ? "USDT" : "USDC");
 
+  // Arc (via bluvfi-xrpl / LI.FI): create the invoice + route now, sign it
+  // with the Privy wallet, report the hash. See src/lib/chain-purchase.ts.
+  const payArc = async () => {
+    if (!output.arcCheckout) throw new Error("Missing checkout details — ask me to start the purchase again.");
+    const wallet = pickPrivyWalletOrThrow(wallets);
+    const purchase = await startChainPurchase({ ...output.arcCheckout, chain: "arc", refundAddress: wallet.address }, getAccessToken);
+    try {
+      await payArcPurchase({
+        purchase,
+        wallet,
+        sendTransaction: privySendTransaction,
+        getAccessToken,
+        onStage: (s) => setArcStage(s === "approving" ? "Approving USDC…" : s === "paying" ? `Paying ${purchase.amount} USDC…` : "Confirming…"),
+      });
+    } catch (err) {
+      throw new Error(friendlyEvmError(err, "Arc"));
+    }
+    setState("done");
+    addToolResult({
+      tool: "buy_bitrefill_product",
+      toolCallId,
+      output: {
+        paid: true,
+        invoiceId: purchase.invoiceId,
+        paidWith: `${purchase.amount} USDC on Arc`,
+        isTopup: output.isTopup,
+        tip: `Paid ${purchase.amount} USDC on Arc from the user's Bluvfi wallet (it is converted and delivered to Bitrefill, usually within a minute or two). Call poll_bitrefill_order(invoiceId="${purchase.invoiceId}", isTopup=${!!output.isTopup}) now and keep retrying every ~10 s until complete/failed/expired. If it fails, the USDC is refunded to the user's Bluvfi wallet on Arc.`,
+      },
+    });
+  };
+
   const handlePay = async () => {
     setState("paying");
     setErrMsg(null);
@@ -100,6 +136,10 @@ function BitrefillPaymentCard({
       // server. Nothing is signed in this browser: show the destination and
       // let the user send XRP from their XRPL wallet, then continue polling
       // the invoice once they confirm the send.
+      if (pm === "arc") {
+        await payArc();
+        return;
+      }
       if (pm === "xrp") {
         if (!output.paymentAddress) throw new Error("No XRP payment address returned");
         setManualAddress(output.paymentAddress);
@@ -401,11 +441,16 @@ function BitrefillPaymentCard({
         )}
       </div>
       <div className="rounded-lg bg-[#141513] px-3 py-2 flex items-center justify-between">
-        <span className="text-xs text-[#A7A79A]">Amount</span>
+        <span className="text-xs text-[#A7A79A]">{pm === "arc" ? "Pay with" : "Amount"}</span>
         <span className="font-mono text-sm font-bold text-[#F2F0E8]">
-          {output.paymentAmount} {currencyLabel}
+          {pm === "arc" ? "USDC on Arc" : `${output.paymentAmount} ${currencyLabel}`}
         </span>
       </div>
+      {pm === "arc" && (
+        <p className="text-[10px] text-[#A7A79A]">
+          {arcStage ?? "Priced live when you tap Pay (a little above the item price to cover conversion). USDC also covers Arc's network fee."}
+        </p>
+      )}
       {errMsg && <p className="text-xs text-red-400">{errMsg}</p>}
       <div className="flex gap-2">
         <button
@@ -420,7 +465,7 @@ function BitrefillPaymentCard({
           disabled={state === "paying"}
           className="flex-1 rounded-xl bg-[#8FAE82] py-2.5 text-xs font-semibold text-[#141513] disabled:opacity-50 transition-opacity"
         >
-          {state === "paying" ? "Sending…" : `Pay ${output.paymentAmount} ${currencyLabel}`}
+          {state === "paying" ? (arcStage ?? "Sending…") : pm === "arc" ? "Pay with USDC on Arc" : `Pay ${output.paymentAmount} ${currencyLabel}`}
         </button>
       </div>
     </div>
@@ -795,6 +840,18 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                       if (tp.state === "output-available" && (tp.output as any)?.domaPayment === true) {
                         return (
                           <DomaPaymentCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult as any}
+                          />
+                        );
+                      }
+
+                      // Arc — sends USDC on Arc from the user's wallet after they confirm
+                      if (tp.state === "output-available" && (tp.output as any)?.arcSend === true) {
+                        return (
+                          <ArcSendCard
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}
