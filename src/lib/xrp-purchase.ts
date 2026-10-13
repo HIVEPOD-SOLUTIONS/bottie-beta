@@ -57,7 +57,7 @@ export type UnderlyingMethod =
 // nep245:v2_1.omni.hot.tg:<chainId>_<id>) are both real NEAR Intents
 // conventions, not a typo - bluvfi-xrpl's own EVM-address validation
 // (src/schemas/xrpl.schemas.ts) recognizes both.
-const USDC_DESTINATION_ASSET: Record<UnderlyingMethod, string> = {
+export const USDC_DESTINATION_ASSET: Record<UnderlyingMethod, string> = {
   usdc_base: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
   usdc_solana: "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
   usdc_erc20: "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
@@ -72,7 +72,7 @@ const USDC_DESTINATION_ASSET: Record<UnderlyingMethod, string> = {
 // assumed. Getting this wrong for BSC specifically would compute an
 // atomicTarget off by a factor of 10^12 - silently far too small, not an
 // error that surfaces cleanly.
-const USDC_DECIMALS: Record<UnderlyingMethod, number> = {
+export const USDC_DECIMALS: Record<UnderlyingMethod, number> = {
   usdc_base: 6,
   usdc_solana: 6,
   usdc_erc20: 6,
@@ -92,7 +92,7 @@ const USDC_DECIMALS: Record<UnderlyingMethod, number> = {
  * float precision limits), then scale the *remaining* decimals with
  * BigInt exponentiation, which is exact regardless of magnitude.
  */
-function usdToAtomicUsdc(usd: number, decimals: number): string {
+export function usdToAtomicUsdc(usd: number, decimals: number): string {
   if (decimals < 2) {
     throw new Error(`usdToAtomicUsdc: unexpected decimals ${decimals} (expected USDC-like, >= 2)`);
   }
@@ -126,7 +126,7 @@ export const MIN_XRP_BRIDGE_USD = 3.2;
  * ("Amount is too low for bridge, try at least ...") — confirmed via a live
  * call, not guessed.
  */
-function isAmountTooLowError(err: unknown): boolean {
+export function isAmountTooLowError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /too low|amount is too low/i.test(message);
 }
@@ -165,7 +165,7 @@ export interface XrpPurchaseResult {
 // a graceful "unavailable"), confirmed 2026-09-01. It's excluded from
 // UnderlyingMethod entirely for the same reason — no amount of NEAR Intents
 // support on that asset would ever let a Bitrefill invoice settle there.
-const FALLBACK_PRIORITY: UnderlyingMethod[] = [
+export const FALLBACK_PRIORITY: UnderlyingMethod[] = [
   "usdc_solana",
   "usdc_arbitrum",
   "usdc_polygon",
@@ -591,6 +591,8 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
       and(
         eq(bitrefillOrders.userId, userId),
         isNotNull(bitrefillOrders.xrplWalletRequestId),
+        // Only XRP purchases leave funds in a wallet of ours (see chain-purchase.ts).
+        eq(bitrefillOrders.chain, "xrpl"),
         inArray(bitrefillOrders.status, ["pending", "failed", "expired"]),
         isNull(bitrefillOrders.xrplRecoveredAt),
       ),

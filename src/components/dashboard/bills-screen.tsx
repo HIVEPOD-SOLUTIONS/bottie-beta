@@ -7,7 +7,8 @@ import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { useDemoState } from "@/contexts/demo-state-context";
 import { usePaymentsContext } from "@/contexts/payments-context";
 import { useChatSheet } from "@/contexts/chat-context";
-import { payEvmTransfer, pickPrivyWalletOrThrow } from "@/lib/evm-pay";
+import { payEvmTransfer, pickPrivyWalletOrThrow, friendlyEvmError } from "@/lib/evm-pay";
+import { PURCHASE_CHAIN_UI, startChainPurchase, payArcPurchase, type PurchaseChain } from "@/lib/chain-purchase-client";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -630,6 +631,12 @@ const PAYMENT_METHOD_GROUPS: { label: string; methods: PaymentMethodDef[] }[] = 
       // invoice-creation call: the underlying invoice always settles in USDC,
       // XRP is swapped into it via the bluvfi-xrpl service (src/lib/xrp-purchase.ts).
       { id: "xrp",          label: "XRP",        token: "XRP",  icon: "🌐", badge: "XRPL",      badgeColor: "text-slate-300",  chain: "address" },
+      // Also Bluvfi-only, through bluvfi-xrpl (src/lib/chain-purchase.ts): the
+      // invoice settles in USDC, the user pays from Zcash / Hyperliquid
+      // (deposit address, their own wallet) or Arc (signed by the Bluvfi wallet).
+      { id: "zcash",        label: "Zcash",      token: "ZEC",  icon: "🛡️", badge: "ZEC",       badgeColor: "text-yellow-300", chain: "address" },
+      { id: "hyperliquid",  label: "USDC",       token: "USDC", icon: "🌊", badge: "Hyperliquid", badgeColor: "text-teal-300", chain: "address" },
+      { id: "arc",          label: "USDC",       token: "USDC", icon: "🟣", badge: "Arc",       badgeColor: "text-violet-300", chain: "address" },
       { id: "litecoin",     label: "Litecoin",   token: "LTC",  icon: "Ł",  badge: "LTC",       badgeColor: "text-gray-300",   chain: "address" },
       { id: "dogecoin",     label: "Dogecoin",   token: "DOGE", icon: "🐕", badge: "DOGE",      badgeColor: "text-yellow-300", chain: "address" },
       { id: "dash",         label: "Dash",       token: "DASH", icon: "🔹", badge: "DASH",      badgeColor: "text-blue-300",   chain: "address" },
@@ -652,6 +659,12 @@ const PAYMENT_METHOD_GROUPS: { label: string; methods: PaymentMethodDef[] }[] = 
 ];
 
 const ALL_PAYMENT_METHODS = PAYMENT_METHOD_GROUPS.flatMap((g) => g.methods);
+
+/** Bluvfi-only methods routed through bluvfi-xrpl — never in Bitrefill's own supported lists, valid for any product. */
+const BLUVFI_ROUTED = new Set(["xrp", "zcash", "hyperliquid", "arc"]);
+function isChainMethod(id: string): id is PurchaseChain {
+  return id === "zcash" || id === "hyperliquid" || id === "arc";
+}
 
 function getPaymentMethod(id: string): PaymentMethodDef {
   return ALL_PAYMENT_METHODS.find((m) => m.id === id) ?? ALL_PAYMENT_METHODS[0];
@@ -847,6 +860,12 @@ function CheckoutSheet({
   const [xrpRecoverableXrp, setXrpRecoverableXrp]         = useState<number | null>(null);
   const [xrpRecovering, setXrpRecovering]                 = useState(false);
   const [xrpRecovered, setXrpRecovered]                   = useState(false);
+  // Zcash / Hyperliquid / Arc (chain-purchase.ts). Their swap id reuses
+  // xrpWalletRequestId and their deadline xrpSwapExpiresAt, so the existing
+  // status poll and countdown cover them too.
+  const [chainRefundAddress, setChainRefundAddress] = useState("");
+  const [chainMemo, setChainMemo]                   = useState<string | null>(null);
+  const [arcStage, setArcStage]                     = useState<string | null>(null);
 
   // XRP swap countdown — separate from the underlying Bitrefill invoice's own
   // expiry (expirySecsLeft below); the 450s swap deadline is shorter and is
@@ -989,7 +1008,7 @@ function CheckoutSheet({
           // "xrp" is a Bluvfi-only pseudo-method never listed in Bitrefill's
           // own supported set — don't auto-switch away from it if selected.
           setPaymentMethodId((cur) =>
-            cur === "xrp" || supported.has(cur) ? cur : (supported.values().next().value ?? cur)
+            BLUVFI_ROUTED.has(cur) || supported.has(cur) ? cur : (supported.values().next().value ?? cur)
           );
         }
         // Update prepayment form fields if the detailed response has them
@@ -1195,7 +1214,10 @@ function CheckoutSheet({
   // would stare at a stale countdown the whole time with zero indication
   // their payment already hit a dead end. This catches that immediately.
   useEffect(() => {
-    if (step !== "address" || paymentMethodId !== "xrp" || !xrpWalletRequestId) return;
+    const chainMethod = isChainMethod(paymentMethodId);
+    if (paymentMethodId !== "xrp" && !chainMethod) return;
+    // Arc skips the deposit step and goes straight to "polling".
+    if (!xrpWalletRequestId || !(step === "address" || (chainMethod && step === "polling"))) return;
 
     const FAILURE_STATUSES = new Set(["FAILED", "REFUNDED", "EXPIRED"]);
 
@@ -1224,7 +1246,9 @@ function CheckoutSheet({
             : raw.includes("underpaying") || raw.includes("guaranteed floor")
               ? "The exchange rate moved right as your payment was processing, so it couldn't be completed safely."
               : "Something went wrong completing your payment.";
-        setErrMsg(friendly);
+        setErrMsg(chainMethod
+          ? `${friendly} Anything you sent is refunded automatically to ${paymentMethodId === "arc" ? "your Bluvfi wallet on Arc" : "the refund address you gave"}.`
+          : friendly);
         setStep("error");
       } catch { /* keep polling on transient errors */ }
     };
@@ -1347,8 +1371,62 @@ function CheckoutSheet({
     // a retry can be triggered directly from the error screen, not just via
     // the back button, so this can't only live in the back-button handler.
     setXrpRecoverableXrp(null); setXrpSwapFailedMsg(null); setXrpRecovered(false);
+    setChainMemo(null); setArcStage(null);
     try {
       const paymentMethod = paymentMethodId;
+
+      // Zcash / Hyperliquid / Arc through bluvfi-xrpl (src/lib/chain-purchase.ts).
+      // Zcash + Hyperliquid reuse the deposit-address step; Arc is signed here
+      // by the Bluvfi wallet and goes straight to order polling.
+      if (isChainMethod(paymentMethod)) {
+        const ui = PURCHASE_CHAIN_UI[paymentMethod];
+        const arcWallet = paymentMethod === "arc" ? pickPrivyWalletOrThrow(wallets) : null;
+        const refundAddress = arcWallet ? arcWallet.address : chainRefundAddress.trim();
+        if (!ui.refundPattern.test(refundAddress)) {
+          throw new Error(`Enter ${ui.refundHint} so a failed payment can be refunded.`);
+        }
+        const purchase = await startChainPurchase({
+          chain: paymentMethod,
+          refundAddress,
+          productId:      product.id,
+          packageId:      isFixed ? (selectedPkg ? pkgDisplayValue(selectedPkg) : undefined) : undefined,
+          customValue:    !isFixed ? customValue : undefined,
+          recipientEmail: recipientEmail.trim(),
+          sendTo:         isTopup ? e164Phone
+                        : (isAccountType || isUsernameType || isEmailRecipient) ? refillInput.trim()
+                        : undefined,
+        }, getAccessToken);
+        setInvoiceAccessToken(purchase.invoiceAccessToken ?? null);
+        setXrpWalletRequestId(purchase.walletRequestId);
+        if (arcWallet) {
+          try {
+            await payArcPurchase({
+              purchase,
+              wallet: arcWallet,
+              sendTransaction,
+              getAccessToken,
+              onStage: (stage) => setArcStage(
+                stage === "approving" ? "Approving USDC on Arc…"
+                : stage === "paying" ? `Paying ${purchase.amount} USDC on Arc…`
+                : "Confirming on Arc…",
+              ),
+            });
+          } catch (err) {
+            throw new Error(friendlyEvmError(err, "Arc"));
+          }
+          setArcStage(null);
+          setStep("polling");
+        } else {
+          setDepositAddress(purchase.depositAddress);
+          setDepositAmount(purchase.amount);
+          setDepositPaymentUri(null);
+          setChainMemo(purchase.depositMemo);
+          setXrpSwapExpiresAt(purchase.expiresAt);
+          setStep("address");
+        }
+        pollInvoice(purchase.invoiceId, purchase.invoiceAccessToken ?? null, null, purchase.expirationMinutes ?? null);
+        return;
+      }
 
       // "Pay with XRP" — multi-step flow (invoice → quote → XRPL swap wallet),
       // orchestrated server-side in one call. Reuses the normal address-based
@@ -1717,7 +1795,7 @@ function CheckoutSheet({
       setErrMsg(friendly);
       setStep("error");
     }
-  }, [isTopup, phoneNumber, countryCode, isAccountType, isUsernameType, isEmailRecipient, refillInput, paymentMethodId, product, selectedPkg, customValue, isFixed, recipientEmail, billPaymentId, wallets, sendTransaction, pollInvoice, isGift, giftRecipientName, giftRecipientEmail, giftMessage, giftTheme, getAccessToken]);
+  }, [isTopup, phoneNumber, countryCode, isAccountType, isUsernameType, isEmailRecipient, refillInput, paymentMethodId, product, selectedPkg, customValue, isFixed, recipientEmail, billPaymentId, wallets, sendTransaction, pollInvoice, isGift, giftRecipientName, giftRecipientEmail, giftMessage, giftTheme, getAccessToken, chainRefundAddress]);
 
   const typeLabel = isEsim ? "Data Plan" : isTopup ? "Phone Top-Up" : "Digital Card";
 
@@ -2080,7 +2158,7 @@ function CheckoutSheet({
                 .map((g) => ({
                   ...g,
                   methods: supported
-                    ? g.methods.filter((m) => m.id === "xrp" || supported.has(m.id))
+                    ? g.methods.filter((m) => BLUVFI_ROUTED.has(m.id) || supported.has(m.id))
                     : g.methods,
                 }))
                 .filter((g) => g.methods.length > 0);
@@ -2127,6 +2205,35 @@ function CheckoutSheet({
                 </div>
               );
             })()}
+
+            {/* Zcash / Hyperliquid: the user's own address, where a failed payment is refunded */}
+            {(paymentMethodId === "zcash" || paymentMethodId === "hyperliquid") && (() => {
+              const ui = PURCHASE_CHAIN_UI[paymentMethodId];
+              const v = chainRefundAddress.trim();
+              const bad = !!v && !ui.refundPattern.test(v);
+              return (
+                <div className="mb-4">
+                  <p className="mb-1.5 text-xs font-medium text-[#A7A79A]">Refund address</p>
+                  <input
+                    value={chainRefundAddress}
+                    onChange={(e) => setChainRefundAddress(e.target.value)}
+                    placeholder={ui.refundPlaceholder}
+                    spellCheck={false}
+                    className="w-full rounded-xl border border-[#2A2B27] bg-[#141513] px-3 py-2.5 font-mono text-xs text-[#F2F0E8] placeholder:text-[#A7A79A]/50 outline-none focus:border-[#8FAE82]"
+                  />
+                  <p className={`mt-1 text-[10px] ${bad ? "text-red-400" : "text-[#5C5D58]"}`}>
+                    {bad
+                      ? `That isn't ${ui.refundHint}.`
+                      : `If the payment can't complete, your ${ui.symbol} is returned here. ${ui.howToPay}`}
+                  </p>
+                </div>
+              );
+            })()}
+            {paymentMethodId === "arc" && (
+              <p className="mb-4 rounded-xl bg-white/[0.03] px-3 py-2 text-[11px] text-[#A7A79A]">
+                {PURCHASE_CHAIN_UI.arc.howToPay} Top up from the Wallet sheet&apos;s Arc tab if needed.
+              </p>
+            )}
 
             {/* Phone + email badges */}
             {isTopup && phoneNumber && (
@@ -2217,11 +2324,16 @@ function CheckoutSheet({
 
             <button
               onClick={handleConfirm}
-              disabled={isFixed ? !selectedPkg : customValue <= 0}
+              disabled={
+                (isFixed ? !selectedPkg : customValue <= 0) ||
+                ((paymentMethodId === "zcash" || paymentMethodId === "hyperliquid") &&
+                  !PURCHASE_CHAIN_UI[paymentMethodId].refundPattern.test(chainRefundAddress.trim()))
+              }
               className="w-full rounded-2xl bg-[#8FAE82] py-3.5 text-sm font-semibold text-[#141513] disabled:opacity-60"
             >
               {(() => {
                 const pm = getPaymentMethod(paymentMethodId);
+                if (pm.id === "arc") return "Pay with USDC on Arc";
                 if (pm.chain === "address") return `Get ${pm.token} Deposit Address · ${pm.badge}`;
                 if (pm.chain === "link") return `Continue on Bitrefill · ${pm.label}`;
                 return `Pay ${formatAmount(displayAmount)} · ${pm.token} on ${pm.label}`;
@@ -2340,6 +2452,7 @@ function CheckoutSheet({
               <p className="mt-1 text-sm text-[#A7A79A]">
                 {(() => {
                   const pm = getPaymentMethod(paymentMethodId);
+                  if (pm.id === "arc") return arcStage ?? "Preparing your Arc payment…";
                   if (pm.chain === "address") return `Generating ${pm.token} deposit address…`;
                   if (pm.chain === "link") return `Opening ${pm.label} checkout…`;
                   return `Sending ${formatAmount(displayAmount)} · ${pm.token} on ${pm.label}`;
@@ -2520,9 +2633,39 @@ function CheckoutSheet({
                   </>
                 )}
 
-                {/* Status / expiry — skipped for XRP, which has its own single
-                    status/countdown above (no second, competing deadline). */}
-                {paymentMethodId !== "xrp" && (
+                {/* Zcash / Hyperliquid: memo (if any), how to pay, one deadline */}
+                {isChainMethod(paymentMethodId) && (
+                  <>
+                    {chainMemo && (
+                      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+                        <p className="text-xs font-semibold text-amber-400">Include this memo, or the payment can&apos;t be matched</p>
+                        <p className="mt-1 font-mono text-xs text-[#F2F0E8] break-all">{chainMemo}</p>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(chainMemo)}
+                          className="mt-2 w-full rounded-xl bg-white/[0.06] py-1.5 text-xs font-semibold text-[#F2F0E8]"
+                        >
+                          Copy memo
+                        </button>
+                      </div>
+                    )}
+                    <p className="text-center text-[11px] text-[#A7A79A]">
+                      {PURCHASE_CHAIN_UI[paymentMethodId].howToPay} Send exactly the amount shown. If it can&apos;t complete, it&apos;s refunded to your address ending {chainRefundAddress.trim().slice(-6)}.
+                    </p>
+                    {pollStatus && pollStatus !== "unpaid" ? (
+                      <p className="text-center text-xs font-medium text-[#8FAE82]">Processing your payment…</p>
+                    ) : xrpSwapSecsLeft !== null && (
+                      <p className={`text-center text-xs ${xrpSwapSecsLeft < 120 ? "text-amber-400 font-medium" : "text-[#A7A79A]"}`}>
+                        {xrpSwapSecsLeft > 0
+                          ? `⏳ Time left to send: ${Math.floor(xrpSwapSecsLeft / 60)}:${String(xrpSwapSecsLeft % 60).padStart(2, "0")}`
+                          : "⚠️ Payment window expired · Please start a new purchase"}
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {/* Status / expiry — skipped for XRP and the chains above, which
+                    have their own single status/countdown (no competing deadline). */}
+                {paymentMethodId !== "xrp" && !isChainMethod(paymentMethodId) && (
                   pollStatus && pollStatus !== "unpaid" ? (
                     <p className="text-center text-xs font-medium text-[#8FAE82]">
                       ✓ {invoiceStatusLabel(pollStatus)}
@@ -2651,7 +2794,7 @@ function ProductDetailSheet({
   // include it regardless of what Bitrefill reports as supported.
   const supportedUi = PAYMENT_METHOD_GROUPS
     .flatMap((g) => g.methods)
-    .filter((m) => m.id === "xrp" || allSupported.includes(m.id));
+    .filter((m) => BLUVFI_ROUTED.has(m.id) || allSupported.includes(m.id));
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 backdrop-blur-sm">

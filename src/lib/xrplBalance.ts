@@ -73,6 +73,9 @@ export const MIN_RECOVERABLE_XRP = 0.01;
  * a drop off the amount.
  */
 export function recoverableXrpFromWallet(wallet: XrplWallet & { activities: unknown[] }): number {
+  // Zcash / Hyperliquid / Arc rows are direct deposits: no wallet of ours holds
+  // anything — NEAR Intents / LI.FI refund straight to the user's own address.
+  if (wallet.chain && wallet.chain !== "xrpl") return 0;
   const required = Number(wallet.requiredActivationDrops);
   const swap = Number(wallet.swapAmountDrops ?? 0);
   if (!Number.isFinite(required) || !Number.isFinite(swap)) return 0;

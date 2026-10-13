@@ -104,10 +104,41 @@ export type XrplSwapStatus =
   | "PROCESSING" | "COMPLETED" | "REFUNDED" | "EXPIRED" | "FAILED";
 export type XrplServiceConfirmationStatus = "NOT_APPLICABLE" | "CONFIRMED" | "FAILED";
 
+/** Chains bluvfi-xrpl can swap FROM. Only xrpl uses a wallet of ours (and the sidebar wallet). */
+export type XrplChain = "xrpl" | "zcash" | "hyperliquid" | "arc";
+
+/** Arc (LI.FI) only: what the user's own wallet must sign — approve first, then send transactionRequest. */
+export interface LifiPayment {
+  type: "lifi-transaction";
+  chainId: number;
+  from: string | null;
+  approval: { token: string; spender: string; amount: string } | null;
+  transactionRequest: { to: string; data: string; value?: string; from?: string; chainId?: number; gasLimit?: string; gasPrice?: string };
+  expiresAt: string | null;
+}
+
 export interface XrplWallet {
   id: string;
+  /** XRPL: our wallet. zcash/hyperliquid: NEAR Intents' deposit address (the user pays it). arc: unused. */
   address: string;
-  sourceTag: number;
+  /** Null on non-XRPL chains. */
+  sourceTag: number | null;
+  /** Present on bluvfi-xrpl versions with multi-chain support (absent = xrpl). */
+  chain?: XrplChain;
+  /** Ticker of what the user pays: "XRP", "ZEC", "USDC". */
+  nativeSymbol?: string;
+  /** True for zcash/hyperliquid/arc — no wallet or key of ours exists for the row. */
+  directDeposit?: boolean;
+  /** Direct deposits: the user's own address a failed swap is refunded to (arc: the sender). */
+  refundAddress?: string | null;
+  /** Direct deposits: memo the payment MUST include, if NEAR Intents asked for one. */
+  depositMemo?: string | null;
+  /** Arc only, while the quote is payable: approval + transaction for the user's wallet to sign. */
+  payment?: LifiPayment | null;
+  /** Arc only: the route LI.FI chose and what it guarantees. */
+  route?: { tool: string; toAmount: string; toAmountMin: string; executionDurationSeconds: number | null } | null;
+  /** Any chain: what the user must pay / the wallet needs, as a decimal string in nativeSymbol. */
+  requiredActivationAmount?: string;
   status: XrplWalletStatus;
   expectedAmount: string | null;
   requiredActivationDrops: string;
@@ -177,8 +208,17 @@ export interface CreateWalletRequestParams {
   metadata?: Record<string, unknown>;
   /** Safe to call repeatedly with the same (privyDid, idempotencyKey) pair */
   idempotencyKey?: string;
-  /** Decimal XRP string, e.g. "2.5" — required together with swapRecipient */
+  /** Which chain the user pays from. Defaults to "xrpl". */
+  chain?: XrplChain;
+  /** zcash/hyperliquid/arc: the user's own address on the origin chain (refund target; for arc, the sender). */
+  refundAddress?: string;
+  /** Decimal XRP string, e.g. "2.5" — required together with swapRecipient (xrpl only) */
   swapAmountXrp?: string;
+  /** Non-XRPL chains: decimal amount of the origin asset (max 8 dp), e.g. "0.0105" ZEC */
+  swapAmount?: string;
+  /** arc only: LI.FI destination chain id/key (e.g. "8453") and token (address or symbol, e.g. "USDC") */
+  swapDestinationChain?: string;
+  swapDestinationToken?: string;
   /** Destination-chain address the calling app controls */
   swapRecipient?: string;
   /** NEAR Intents assetId, e.g. "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near" — defaults to USDC on Solana if omitted */
@@ -243,9 +283,14 @@ export async function recheckWalletRequest(id: string): Promise<XrplWallet> {
 
 export interface GetQuoteParams {
   swapType: "EXACT_OUTPUT" | "EXACT_INPUT";
-  /** Whole-number string: drops for EXACT_INPUT, destinationAsset's smallest unit for EXACT_OUTPUT */
+  /** Whole-number string: origin smallest unit for EXACT_INPUT, destinationAsset's smallest unit for EXACT_OUTPUT */
   amount: string;
+  /** Origin chain (default xrpl). Units: drops / zatoshis (zcash) / 8-dp (hyperliquid USDC) / 6-dp (arc USDC). */
+  chain?: XrplChain;
   destinationAsset?: string;
+  /** arc only (EXACT_INPUT only): LI.FI destination chain + token */
+  destinationChain?: string;
+  destinationToken?: string;
   recipient: string;
   /** Optional but strongly recommended — see rate-limit note in API_DOCUMENTATION.md */
   privyDid?: string;
@@ -274,6 +319,20 @@ export interface QuoteResult {
 
 export async function getQuote(params: GetQuoteParams): Promise<QuoteResult> {
   return request<QuoteResult>("POST", "/api/xrpl/quote", params as unknown as Record<string, unknown>);
+}
+
+/**
+ * Arc (LI.FI) only: report the hash the user's wallet produced after signing
+ * wallet.payment.transactionRequest — the only way bluvfi-xrpl can track the swap.
+ * Reporting the same hash twice is fine; a different hash for the same row is a 409.
+ */
+export async function reportRouteTransaction(walletRequestId: string, txHash: string): Promise<XrplWallet> {
+  const res = await request<{ message: string; wallet: XrplWallet }>(
+    "POST",
+    `/api/xrpl/wallet-requests/${encodeURIComponent(walletRequestId)}/transaction`,
+    { txHash },
+  );
+  return res.wallet;
 }
 
 // ── Service confirmation ──────────────────────────────────────────────────────
