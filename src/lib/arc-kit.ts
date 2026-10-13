@@ -31,8 +31,20 @@ export const BRIDGE_SOURCE_OPTIONS = [
   { value: BridgeChain.Polygon,  label: "Polygon",   icon: "🟣", disabled: false },
   { value: BridgeChain.Linea,    label: "Linea",     icon: "⬜", disabled: false },
   { value: BridgeChain.Base,     label: "Base",      icon: "🔷", disabled: false },
+  { value: BridgeChain.Arc,      label: "Arc",       icon: "🟣", disabled: false },
   { value: BridgeChain.Solana,   label: "Solana",    icon: "◎",  disabled: !SOLANA_ARC_MAINNET_ENABLED },
 ] as const;
 
 export type BridgeSourceOption = (typeof BRIDGE_SOURCE_OPTIONS)[number];
 export type BridgeSourceChain  = BridgeSourceOption["value"];
+
+// ── Bridge destinations ───────────────────────────────────────────────────────
+// Where the Bridge tab can land USDC in the user's Bluvfi wallet. Arc mainnet
+// (Circle's USDC-gas L1, CCTP domain 26) uses Circle's Forwarding Service, so
+// Circle's relayer mints on Arc and the user needs no Arc gas to receive.
+export const BRIDGE_DESTINATIONS = [
+  { value: BridgeChain.Base, label: "Base", icon: "🔷", useForwarder: false },
+  { value: BridgeChain.Arc,  label: "Arc",  icon: "🟣", useForwarder: true  },
+] as const;
+
+export type BridgeDestinationChain = (typeof BRIDGE_DESTINATIONS)[number]["value"];

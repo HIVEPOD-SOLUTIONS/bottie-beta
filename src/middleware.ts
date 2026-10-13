@@ -115,6 +115,8 @@ function buildCSP(): string {
       "https://*.alchemy.com",
       // Doma chain — balance checks + approve/pay for domain orders paid from chat
       "https://rpc.doma.xyz",
+      // Arc mainnet (Circle's USDC-gas chain) — balances, sends, bridge completion
+      "https://rpc.mainnet.arc.io",
       "https://eth-mainnet.g.alchemy.com",
       "https://polygon-mainnet.g.alchemy.com",
       "https://opt-mainnet.g.alchemy.com",
@@ -150,6 +152,8 @@ function buildCSP(): string {
       // Circle App Kit (stablecoin balance fetches + telemetry)
       "https://gateway-api.circle.com",
       "https://api.circle.com",
+      // CCTP attestations — App Kit polls this to complete a bridge (incl. to Arc)
+      "https://iris-api.circle.com",
       // WalletConnect
       "https://explorer-api.walletconnect.com",
       "https://*.walletconnect.com",

@@ -27,6 +27,8 @@ import { AuthServiceUnavailableError, authFetch } from "@/lib/api-auth-fetch";
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ALCHEMY_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ?? "";
 
+// Arc is read separately (hooks/use-arc-balance.ts), so it is deliberately absent here:
+// chains without an RPC entry are skipped, which keeps these totals the same on every source.
 const EVM_RPC: Record<string, string> = {
   Base:      `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
   Ethereum:  `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
@@ -261,7 +263,8 @@ async function fetchViaAlchemyRPC(
             if (!rpc) return [];
             return [
               fetchErc20(rpc, EVM_USDC[chain]!, evmAddress).then((v) => ({ token: "usdc", v })),
-              fetchErc20(rpc, EVM_USDT[chain]!, evmAddress).then((v) => ({ token: "usdt", v })),
+              // Arc has no USDT.
+              ...(EVM_USDT[chain] ? [fetchErc20(rpc, EVM_USDT[chain]!, evmAddress).then((v) => ({ token: "usdt", v }))] : []),
             ];
           }),
         )

@@ -7,7 +7,10 @@ import { useFundWallet as useFundSolanaWallet } from "@privy-io/react-auth/solan
 import { base, mainnet, arbitrum, optimism, polygon, avalanche } from "viem/chains";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS, SOLANA_ARC_MAINNET_ENABLED } from "@/lib/arc-kit";
+import { arcKit, AGENT_CHAIN, BRIDGE_SOURCE_OPTIONS, BRIDGE_DESTINATIONS, SOLANA_ARC_MAINNET_ENABLED, type BridgeDestinationChain } from "@/lib/arc-kit";
+import { payEvmTransfer, pickPrivyWalletOrThrow, waitForEvmTx, friendlyEvmError } from "@/lib/evm-pay";
+import { arcChain, ARC_USDC, arcTxUrl, arcAddressUrl } from "@/lib/arc-chain";
+import { useArcUsdcBalance } from "@/hooks/use-arc-balance";
 import type { BridgeSourceChain } from "@/lib/arc-kit";
 import { UnifiedBalanceCard } from "./unified-balance-card";
 import { useSolanaBalance } from "@/hooks/use-solana-balance";
@@ -542,18 +545,141 @@ function SendTab({ agentAddress }: { agentAddress: string }) {
   );
 }
 
+// ─── Arc tab ──────────────────────────────────────────────────────────────────
+//
+// Arc mainnet in one place: the user's USDC on Arc, sending it from their
+// Bluvfi wallet (USDC is also Arc's gas token, so nothing else is needed), and
+// a shortcut to bridge USDC in. Sends use the shared 3-layer payment helper.
+
+function ArcTab({ onBridgeToArc }: { onBridgeToArc: () => void }) {
+  const { getAccessToken, sendTransaction } = usePrivy();
+  const { wallets } = useWallets();
+  const { arcUsdc, address, refresh } = useArcUsdcBalance(15_000);
+  const [recipient, setRecipient] = useState("");
+  const [amount, setAmount] = useState("");
+  const [txState, setTxState] = useState<TxState>({ status: "idle" });
+  const amountNum = Number(amount);
+  const validRecipient = /^0x[0-9a-fA-F]{40}$/.test(recipient);
+  const tooMuch = arcUsdc !== null && amountNum > arcUsdc;
+  const canSend = validRecipient && amountNum > 0 && !tooMuch && txState.status !== "pending";
+
+  const send = async () => {
+    if (!canSend) return;
+    setTxState({ status: "pending", label: "Confirm in your wallet…" });
+    try {
+      const { hash } = await payEvmTransfer({
+        chainId: arcChain.id,
+        token: ARC_USDC,
+        symbol: "USDC",
+        decimals: 6,
+        recipient: recipient as `0x${string}`,
+        amount,
+        wallet: pickPrivyWalletOrThrow(wallets),
+        sendTransaction,
+        label: "arc-tab",
+      });
+      setTxState({ status: "pending", label: "Confirming on Arc…" });
+      await waitForEvmTx(arcChain.id, hash);
+      setTxState({ status: "success", explorerUrl: arcTxUrl(hash), message: "" } as TxState);
+      void refresh();
+      authFetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "transfer",
+          referenceId: hash,
+          description: `Sent ${amount} USDC on Arc to ${recipient.slice(0, 6)}…${recipient.slice(-4)}`,
+          amountUsdc: amount,
+          status: "completed",
+          txHash: hash,
+          chain: "arc",
+        }),
+      }, getAccessToken).catch(() => {});
+    } catch (err) {
+      setTxState({ status: "error", message: friendlyEvmError(err, "Arc") } as TxState);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3">
+        <p className="text-xs text-[#A7A79A]">Your USDC on Arc</p>
+        <p className="mt-1 text-2xl font-semibold text-[#F2F0E8]">{arcUsdc === null ? "…" : `${arcUsdc.toFixed(2)}`}</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-[#A7A79A]">
+          Arc is Circle&apos;s stablecoin network. USDC pays for both the payment and the network cost, so USDC is all you need here.
+        </p>
+        {address && (
+          <a href={arcAddressUrl(address)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[11px] text-[#8FAE82] underline">
+            View wallet on Arc explorer ↗
+          </a>
+        )}
+      </div>
+
+      <button onClick={onBridgeToArc} className="rounded-xl border border-[#8FAE82]/40 py-2.5 text-xs font-semibold text-[#DCE8D5]">
+        ⇌ Bring USDC to Arc (bridge)
+      </button>
+
+      <div className="flex flex-col gap-3">
+        <p className="text-xs font-medium text-[#A7A79A]">Send USDC on Arc</p>
+        <input
+          value={recipient}
+          onChange={(e) => setRecipient(e.target.value.trim())}
+          placeholder="Recipient address (0x…)"
+          className="w-full rounded-xl border border-[#2A2B27] bg-[#141513] px-4 py-2.5 font-mono text-xs text-[#F2F0E8] placeholder:text-[#A7A79A]/50 outline-none focus:border-[#8FAE82]"
+        />
+        <div className="flex gap-2">
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Amount (USDC)"
+            className="flex-1 rounded-xl border border-[#2A2B27] bg-[#141513] px-4 py-2.5 text-sm text-[#F2F0E8] placeholder:text-[#A7A79A]/50 outline-none focus:border-[#8FAE82]"
+          />
+          <button
+            onClick={() => arcUsdc !== null && setAmount((Math.floor(arcUsdc * 100) / 100).toFixed(2))}
+            className="rounded-xl bg-white/[0.06] px-3 text-xs font-semibold text-[#F2F0E8]"
+          >
+            Max
+          </button>
+        </div>
+        {recipient.length > 0 && !validRecipient && <p className="text-[11px] text-red-400">That isn&apos;t a valid address.</p>}
+        {tooMuch && <p className="text-[11px] text-red-400">More than your Arc balance.</p>}
+        <TxResult state={txState} onReset={() => setTxState({ status: "idle" })} />
+        {txState.status !== "success" && (
+          <button
+            onClick={send}
+            disabled={!canSend}
+            className="w-full rounded-xl bg-[#8FAE82] py-3 text-sm font-semibold text-[#141513] disabled:opacity-40"
+          >
+            {txState.status === "pending" ? txState.label : `Send ${amount || "0.00"} USDC on Arc`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Bridge tab ───────────────────────────────────────────────────────────────
 
-function BridgeTab({ agentAddress }: { agentAddress: string }) {
+function BridgeTab({ agentAddress, initialDestination }: { agentAddress: string; initialDestination?: BridgeDestinationChain }) {
   const { getAccessToken } = usePrivy();
   const { options, connected, connect, disconnect, connecting } = useFundingWallets();
   const [sourceChain, setSourceChain] = useState<BridgeSourceChain>(
     BRIDGE_SOURCE_OPTIONS[0].value
   );
+  const [destination, setDestination] = useState<BridgeDestinationChain>(initialDestination ?? BRIDGE_DESTINATIONS[0].value);
   const [amount, setAmount] = useState("");
   const [txState, setTxState] = useState<TxState>({ status: "idle" });
 
   const selectedSource = BRIDGE_SOURCE_OPTIONS.find((o) => o.value === sourceChain)!;
+  const selectedDest = BRIDGE_DESTINATIONS.find((d) => d.value === destination)!;
+  // Can't bridge a chain to itself — pick another source when the destination changes.
+  const sourceOptions = BRIDGE_SOURCE_OPTIONS.filter((o) => o.value !== destination);
+  useEffect(() => {
+    if (sourceChain === destination) setSourceChain(sourceOptions[0].value as BridgeSourceChain);
+  }, [destination]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBridge = async () => {
     if (!connected || !amount || Number(amount) <= 0 || txState.status === "pending") return;
@@ -566,11 +692,10 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
       setTxState({ status: "pending", label: "Confirm in your wallet…" });
       const result = await arcKit.bridge({
         from: { adapter, chain: sourceChain },
-        to: {
-          adapter,
-          chain: AGENT_CHAIN,
-          recipientAddress: agentAddress,
-        },
+        // Arc: Circle's Forwarding Service mints on Arc, so no Arc gas is needed to receive.
+        to: selectedDest.useForwarder
+          ? { chain: destination, recipientAddress: agentAddress, useForwarder: true }
+          : { adapter, chain: AGENT_CHAIN, recipientAddress: agentAddress },
         amount,
         token: "USDC",
       });
@@ -590,11 +715,11 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
           body: JSON.stringify({
             type: "bridge",
             referenceId: (result as any).hash ?? (result as any).transactionHash ?? null,
-            description: `Arc bridge: ${amount} USDC from ${selectedSource.label} → Base`,
+            description: `Bridge: ${amount} USDC from ${selectedSource.label} → ${selectedDest.label}`,
             amountUsdc: amount,
             status: "completed",
             txHash: (result as any).hash ?? (result as any).transactionHash ?? null,
-            chain: "evm",
+            chain: selectedDest.label === "Arc" || selectedSource.label === "Arc" ? "arc" : "evm",
           }),
         }, getAccessToken).catch(() => {});
       }
@@ -613,7 +738,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
     <div className="flex flex-col gap-4">
       {/* Info blurb */}
       <div className="rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3 text-xs text-[#A7A79A] leading-relaxed">
-        Bridge moves funds from another network into your wallet on Base automatically — no manual steps needed.
+        Bridge moves USDC from another network into your wallet on {selectedDest.label} automatically — no manual steps needed.{destination === "Arc" && " On Arc, USDC is also the gas token, so you only ever need USDC there."}
       </div>
 
       {/* Source chain selector */}
@@ -622,7 +747,7 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
           From network
         </label>
         <div className="flex flex-wrap gap-2">
-          {BRIDGE_SOURCE_OPTIONS.map((opt) => (
+          {sourceOptions.map((opt) => (
             <div key={opt.value} className="relative group">
               <button
                 onClick={() => !opt.disabled && setSourceChain(opt.value as BridgeSourceChain)}
@@ -656,11 +781,23 @@ function BridgeTab({ agentAddress }: { agentAddress: string }) {
         </div>
       </div>
 
-      {/* Destination display */}
+      {/* Destination selector */}
       <div className="flex items-center justify-between rounded-xl bg-[#141513] border border-[#2A2B27] px-4 py-3">
         <div>
           <p className="text-xs text-[#A7A79A]">To network</p>
-          <p className="text-sm font-medium text-[#F2F0E8]">🔷 Base</p>
+          <div className="mt-1 flex gap-1.5">
+            {BRIDGE_DESTINATIONS.map((d) => (
+              <button
+                key={d.value}
+                onClick={() => setDestination(d.value)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  destination === d.value ? "bg-[#F2F0E8] text-[#141513]" : "bg-white/[0.06] text-[#A7A79A] hover:bg-white/[0.10]"
+                }`}
+              >
+                {d.icon} {d.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="text-right">
           <p className="text-xs text-[#A7A79A]">Recipient</p>
@@ -784,18 +921,21 @@ interface FundWalletSheetProps {
 }
 
 export function FundWalletSheet({ agentAddress, solanaAddress, onClose }: FundWalletSheetProps) {
-  type Tab = "buy" | "balances" | "send" | "bridge" | "solana";
+  type Tab = "buy" | "balances" | "send" | "bridge" | "arc" | "solana";
   // Defaults to "buy" — this sheet's only caller (the low-balance "Add
   // Funds" banner in app/page.tsx) opens it specifically to get the user
   // funded, and buying with a card needs no external wallet, unlike
   // Send/Bridge below.
   const [tab, setTab] = useState<Tab>("buy");
+  // The Arc tab's "Bring USDC to Arc" opens Bridge with Arc already chosen.
+  const [bridgeDest, setBridgeDest] = useState<BridgeDestinationChain | undefined>(undefined);
 
   const TABS: { key: Tab; label: string }[] = [
     { key: "buy",      label: "💳 Buy"      },
     { key: "balances", label: "⊞ Balances" },
     { key: "send",     label: "↗ Send"     },
     { key: "bridge",   label: "⇌ Bridge"   },
+    { key: "arc",      label: "🟣 Arc"      },
     ...(solanaAddress ? [{ key: "solana" as Tab, label: "◎ Solana" }] : []),
   ];
 
@@ -841,7 +981,8 @@ export function FundWalletSheet({ agentAddress, solanaAddress, onClose }: FundWa
             <UnifiedBalanceCard onBridge={() => setTab("bridge")} />
           )}
           {tab === "send"     && <SendTab agentAddress={agentAddress} />}
-          {tab === "bridge"   && <BridgeTab agentAddress={agentAddress} />}
+          {tab === "bridge"   && <BridgeTab key={bridgeDest ?? "default"} agentAddress={agentAddress} initialDestination={bridgeDest} />}
+          {tab === "arc"      && <ArcTab onBridgeToArc={() => { setBridgeDest(BRIDGE_DESTINATIONS[1].value); setTab("bridge"); }} />}
           {tab === "solana"   && solanaAddress && (
             <SolanaReceiveTab solanaAddress={solanaAddress} />
           )}

@@ -2,6 +2,7 @@ import type { PrivyClientConfig } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { base, mainnet, polygon, arbitrum, optimism } from "viem/chains";
 import { domaChain } from "@/lib/doma-chain";
+import { arcChain } from "@/lib/arc-chain";
 
 export const privyConfig: PrivyClientConfig = {
   loginMethods: ["email", "passkey"],
@@ -30,5 +31,6 @@ export const privyConfig: PrivyClientConfig = {
   // Base is the default; Polygon, Arbitrum, Optimism, and Ethereum are added so
   // wallet_switchEthereumChain succeeds when the user pays on those networks.
   // Doma is for paying domain orders from the AI chat (see doma-payment-card.tsx).
-  supportedChains: [base, polygon, arbitrum, optimism, mainnet, domaChain],
+  // Arc is Circle's USDC-gas chain: hold, send and bridge USDC there (see lib/arc-chain.ts).
+  supportedChains: [base, polygon, arbitrum, optimism, mainnet, domaChain, arcChain],
 };

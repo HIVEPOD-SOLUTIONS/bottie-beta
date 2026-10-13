@@ -13,6 +13,7 @@ export const EVM_BALANCE_CHAINS = [
   "Optimism",
   "Polygon",
   "Avalanche",
+  "Arc", // Circle's USDC-gas L1 (UnifiedBalanceChain.Arc, App Kit ≥ 1.15)
 ] as const;
 
 // Always "Solana" (mainnet) — SOLANA_ARC_MAINNET_ENABLED = true.
@@ -26,6 +27,7 @@ export const CHAIN_META: Record<string, { label: string; icon: string; color: st
   Optimism:  { label: "Optimism",  icon: "🔴", color: "#FF0420" },
   Polygon:   { label: "Polygon",   icon: "🟣", color: "#8247E5" },
   Avalanche: { label: "Avalanche", icon: "🔺", color: "#E84142" },
+  Arc:       { label: "Arc",       icon: "🟣", color: "#7B61FF" },
   Solana:    { label: "Solana",    icon: "◎",  color: "#9945FF" },
 };
 

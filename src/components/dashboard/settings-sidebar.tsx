@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 import { formatUsd } from "@/lib/format";
 import { getUserFirstName } from "@/lib/user-display-name";
 import { useStablecoinBalances } from "@/hooks/use-stablecoin-balances";
+import { useArcUsdcBalance } from "@/hooks/use-arc-balance";
+import { arcAddressUrl } from "@/lib/arc-chain";
 import { useXrpBalance } from "@/hooks/use-xrp-balance";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 import { isCapacitorApp } from "@/hooks/use-admob";
@@ -70,6 +72,7 @@ export function SettingsSidebar({
 
   const { evmAddress, solanaAddress, smartWalletAddress } = getPrivyEmbeddedWallets(user as any, wallets);
   const { evmUsdc, evmUsdt, solUsdc, solUsdt, isLoading: sbLoading } = useStablecoinBalances();
+  const { arcUsdc } = useArcUsdcBalance();
 
   // Persistent XRPL wallet — created lazily (idempotent) on first load, then cached.
   const [xrplAddress, setXrplAddress] = useState<string | null>(null);
@@ -234,6 +237,15 @@ export function SettingsSidebar({
                   <span className="font-mono text-xs text-ink-light">EVM USDT</span>
                   <span className="font-display text-sm font-semibold text-ink">
                     {sbLoading ? "…" : formatUsd(evmUsdt)}
+                  </span>
+                </div>
+                {/* Arc USDC — Circle's USDC-gas chain; links to the explorer for proof */}
+                <div className="flex items-center justify-between">
+                  <a href={arcAddressUrl(displayEvmAddress)} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-ink-light underline decoration-dotted">
+                    Arc USDC
+                  </a>
+                  <span className="font-display text-sm font-semibold text-ink">
+                    {arcUsdc === null ? "…" : formatUsd(arcUsdc)}
                   </span>
                 </div>
               </>

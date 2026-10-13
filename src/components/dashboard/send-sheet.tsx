@@ -5,14 +5,19 @@ import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { parseUnits, parseEther, encodeFunctionData, erc20Abi } from "viem";
 import type { Address, Hex } from "viem";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { payEvmTransfer, pickPrivyWalletOrThrow, friendlyEvmError } from "@/lib/evm-pay";
+import { arcChain, ARC_USDC, arcTxUrl } from "@/lib/arc-chain";
+import { useArcUsdcBalance } from "@/hooks/use-arc-balance";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useChatSheet } from "@/contexts/chat-context";
 
 const USDC_BASE: Address = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 type Step = "idle" | "processing" | "success" | "error";
-type Token = "ETH" | "USDC";
+/** "ARC_USDC" = USDC on Arc mainnet, where USDC is also the gas token. */
+type Token = "ETH" | "USDC" | "ARC_USDC";
+const TOKEN_LABEL: Record<Token, string> = { ETH: "ETH", USDC: "USDC", ARC_USDC: "USDC · Arc" };
 
 interface SendSheetProps {
   walletBalanceUsd: number;
@@ -22,7 +27,10 @@ interface SendSheetProps {
 }
 
 export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) {
-  const { user } = usePrivy();
+  const { user, sendTransaction } = usePrivy();
+  const { wallets } = useWallets();
+  const { arcUsdc, refresh: refreshArc } = useArcUsdcBalance();
+  const [errMsg, setErrMsg] = useState<string | null>(null);
   const { client } = useSmartWallets();
   const walletAddress = (user?.smartWallet?.address ?? user?.wallet?.address) as Address | undefined;
 
@@ -34,19 +42,36 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
 
   const ethBalance = walletAssets.find((a) => a.symbol === "ETH")?.balance ?? "0";
   const usdcBalance = walletAssets.find((a) => a.symbol === "USDC")?.balance ?? "0";
-  const selectedBalance = token === "ETH" ? ethBalance : usdcBalance;
+  const selectedBalance = token === "ETH" ? ethBalance : token === "ARC_USDC" ? String(arcUsdc ?? 0) : usdcBalance;
 
   const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(recipient);
   const amountNum = parseFloat(amount) || 0;
   const exceedsBalance = amountNum > parseFloat(selectedBalance);
-  const canSend = isValidAddress && amountNum > 0 && !exceedsBalance && step === "idle" && !!client;
+  // Arc sends go from the Privy wallet through the shared payment helper, so they don't need the smart-wallet client.
+  const canSend = isValidAddress && amountNum > 0 && !exceedsBalance && step === "idle" && (token === "ARC_USDC" || !!client);
 
   const handleSend = useCallback(async () => {
-    if (!canSend || !client || !walletAddress) return;
+    if (!canSend || (token !== "ARC_USDC" && (!client || !walletAddress))) return;
     setStep("processing");
+    setErrMsg(null);
     try {
       let txHash: Hex;
-      if (token === "ETH") {
+      if (token === "ARC_USDC") {
+        // Arc mainnet: USDC pays for the transfer and the gas (shared 3-layer fallback).
+        ({ hash: txHash } = await payEvmTransfer({
+          chainId: arcChain.id,
+          token: ARC_USDC,
+          symbol: "USDC",
+          decimals: 6,
+          recipient: recipient as Address,
+          amount,
+          wallet: pickPrivyWalletOrThrow(wallets),
+          sendTransaction,
+          label: "send-arc",
+        }));
+        void refreshArc();
+      } else if (token === "ETH") {
+        if (!client) throw new Error("Wallet not ready.");
         txHash = await client.sendTransaction({
           calls: [{
             to: recipient as Address,
@@ -59,6 +84,7 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
           functionName: "transfer",
           args: [recipient as Address, parseUnits(amount, 6)],
         });
+        if (!client) throw new Error("Wallet not ready.");
         txHash = await client.sendTransaction({
           calls: [{
             to: USDC_BASE,
@@ -69,10 +95,11 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
       setHash(txHash);
       setStep("success");
       onSuccess();
-    } catch {
+    } catch (err) {
+      setErrMsg(friendlyEvmError(err, token === "ARC_USDC" ? "Arc" : "Base"));
       setStep("error");
     }
-  }, [canSend, client, walletAddress, token, recipient, amount, onSuccess]);
+  }, [canSend, client, walletAddress, token, recipient, amount, onSuccess, wallets, sendTransaction, refreshArc]);
 
   // Sync to chat bar
   const { setActiveSheet } = useChatSheet();
@@ -144,7 +171,7 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
             <p className="font-display text-2xl text-ink">Sent!</p>
             {hash && (
               <a
-                href={`https://basescan.org/tx/${hash}`}
+                href={token === "ARC_USDC" ? arcTxUrl(hash) : `https://basescan.org/tx/${hash}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-mono text-[10px] text-sage underline"
@@ -157,7 +184,7 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
           <>
             {/* Token selector */}
             <div className="mt-6 flex gap-2">
-              {(["ETH", "USDC"] as Token[]).map((t) => (
+              {(["ETH", "USDC", "ARC_USDC"] as Token[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setToken(t)}
@@ -167,10 +194,13 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
                       : "bg-cream-dark text-ink-light"
                   }`}
                 >
-                  {t}
+                  {TOKEN_LABEL[t]}
                 </button>
               ))}
             </div>
+            {token === "ARC_USDC" && (
+              <p className="mt-2 font-mono text-[10px] text-ink-light">On Arc, USDC is also the gas token — you only need USDC.</p>
+            )}
 
             {/* Amount */}
             <div className="mt-5">
@@ -189,7 +219,7 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
               />
               <div className="mt-1.5 flex items-center justify-between">
                 <span className="font-mono text-[10px] text-ink-light">
-                  Balance: {parseFloat(selectedBalance).toLocaleString("en-US", { maximumFractionDigits: 6 })} {token}
+                  Balance: {parseFloat(selectedBalance).toLocaleString("en-US", { maximumFractionDigits: 6 })} {TOKEN_LABEL[token]}
                 </span>
                 <button
                   onClick={() => setAmount(selectedBalance)}
@@ -221,7 +251,7 @@ export function SendSheet({ walletAssets, onClose, onSuccess }: SendSheetProps) 
 
             {step === "error" && (
               <p className="mt-4 text-center font-mono text-xs text-fail">
-                Transaction failed. Try again.
+                {errMsg ?? "Transaction failed. Try again."}
               </p>
             )}
           </>

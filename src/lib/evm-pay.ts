@@ -15,6 +15,7 @@ import {
 import { arbitrum, base, mainnet, optimism, polygon } from "viem/chains";
 import type { ConnectedWallet, usePrivy } from "@privy-io/react-auth";
 import { domaChain } from "@/lib/doma-chain";
+import { arcChain } from "@/lib/arc-chain";
 
 /**
  * Every EVM payment from the user's Privy wallet goes through here, so all
@@ -40,12 +41,13 @@ const ALCHEMY_SUBDOMAIN: Record<number, string> = {
 };
 
 const CHAINS: Record<number, Chain> = {
-  1: mainnet, 8453: base, 137: polygon, 42161: arbitrum, 10: optimism, [domaChain.id]: domaChain,
+  1: mainnet, 8453: base, 137: polygon, 42161: arbitrum, 10: optimism, [domaChain.id]: domaChain, [arcChain.id]: arcChain,
 };
 
 // ArcKit's Blockchain enum values for the chains it supports (Layer 3).
+// Arc mainnet needs @circle-fin/app-kit ≥ 1.15.
 const ARCKIT_CHAINS: Record<number, string> = {
-  1: "Ethereum", 8453: "Base", 137: "Polygon", 42161: "Arbitrum", 10: "Optimism",
+  1: "Ethereum", 8453: "Base", 137: "Polygon", 42161: "Arbitrum", 10: "Optimism", [arcChain.id]: "Arc",
 };
 
 // USDT's transfer() on some chains returns nothing — a stripped ABI avoids decode errors.
