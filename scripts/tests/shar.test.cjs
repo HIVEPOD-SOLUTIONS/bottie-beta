@@ -27,6 +27,7 @@ async function freshDb({ migrate = true } = {}) {
   const db = drizzle(client, { schema });
   const load = makeLoader({ ...stubs, "@/lib/db": { db } });
   load("src/lib/shar-rules.ts").SHAR.minClaimShar = 50; // this copy only: shar.ts below reads the same object
+  load("src/lib/shar-spark-rules.ts").WEEKLY_PRIZE_SHAR.splice(0); // this copy only: these checks are about claims and balances, so weekly prizes are off here (shar-spark.test.cjs covers them)
   const shar = load("src/lib/shar.ts");
   return { client, db, shar };
 }

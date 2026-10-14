@@ -15,11 +15,12 @@ const drizzle = (client, opts) =>
 
 const schema = makeLoader({})("src/lib/db/schema.ts");
 const rules = makeLoader({})("src/lib/shar-spark-rules.ts");
+const sharRules = makeLoader({})("src/lib/shar-rules.ts");
 const PAYMENTS_SQL = `create table payments (id uuid primary key default gen_random_uuid(), user_id text not null, type text not null, reference_id text, description text not null, amount_usdc text not null, status text not null, tx_hash text, chain text, created_at timestamp default now() not null)`;
 
 const holders = new Set(); // who the stubbed Seeker check says holds a Seeker Genesis Token
 
-async function freshDb({ sparksTable = true } = {}) {
+async function freshDb({ sparksTable = true, realFromWeek = false } = {}) {
   const client = new PGlite();
   await client.exec(PAYMENTS_SQL);
   for (const stmt of migrations.statements) await client.exec(stmt);
@@ -30,6 +31,8 @@ async function freshDb({ sparksTable = true } = {}) {
     "@/lib/server-env": { getServerEnv: () => undefined },
     "@/lib/seeker-sgt": { isSeekerHolder: async (u) => holders.has(u) },
   });
+  // The fixtures here are weeks in September and early October, before prizes began, so open the window for them (one test keeps the real date).
+  if (!realFromWeek) load("src/lib/shar-spark-rules.ts").WEEKLY_PRIZE_FROM_WEEK = "2000-01-01";
   return { client, load, shar: load("src/lib/shar.ts") };
 }
 
@@ -51,7 +54,7 @@ const at = (iso) => new Date(`${iso}T12:00:00Z`);
   check("streak: collected today keeps its streak and does not go up again", R.liveStreak({ day: "2026-10-07", streak: 5 }, "2026-10-07").collectedToday && R.streakAfterCollecting({ day: "2026-10-07", streak: 5 }, "2026-10-07") === 5);
   check("streak: a missed day (two days ago) resets it to 0, and collecting starts at 1; no history starts at 1", R.liveStreak({ day: "2026-10-05", streak: 9 }, "2026-10-07").streak === 0 && R.streakAfterCollecting({ day: "2026-10-05", streak: 9 }, "2026-10-07") === 1 && R.streakAfterCollecting(null, "2026-10-07") === 1);
   check("days: a made-up day string is rejected", R.isDay("2026-10-07") && !R.isDay("2026-13-45") && !R.isDay("tomorrow") && !R.isDay(5));
-  check("prizes: no prize is promised or paid until the team sets one", Array.isArray(R.WEEKLY_PRIZE_SHAR) && R.WEEKLY_PRIZE_SHAR.length === 0 && R.WEEKLY_PRIZE_MIN_SHAR >= 1);
+  check("prizes: set to 50, 30 and 20 Shar (100 a week at most, 90 SKR), with a 20 Shar minimum to win one", JSON.stringify(R.WEEKLY_PRIZE_SHAR) === "[50,30,20]" && R.WEEKLY_PRIZE_MIN_SHAR === 20 && R.WEEKLY_PRIZE_SHAR.reduce((a, b) => a + b, 0) === 100);
   const none = { sparks: 0, bestStreak: 0, purchases: 0, referred: 0, providersOwned: 0, claims: 0, seeker: false, inSquad: false };
   check("badges: none earned with nothing done, and each one needs its own thing", R.badgesFor(none).every((b) => !b.earned) && R.badgesFor(none).length === 9);
   const got = (facts) => R.badgesFor({ ...none, ...facts }).filter((b) => b.earned).map((b) => b.key).join();
@@ -130,40 +133,68 @@ const at = (iso) => new Date(`${iso}T12:00:00Z`);
   const mine = board.top.find((r) => r.you);
   check("board: sparks count toward the weekly board and the person is ranked", !!mine && mine.shar === 7 + 25 && board.me.rank !== null, JSON.stringify(board.top.slice(0, 3)));
   check("board: the Seeker holder is marked, others are not", board.top.find((r) => r.seeker) && board.top.filter((r) => r.seeker).length === 1);
-  check("board: no prize is shown when none is set", board.prizes.length === 0 && board.top.every((r) => r.prizeShar === null));
+  check("board: the prizes are listed, and only the top three with at least 20 Shar are marked as on course for one", board.prizes.length === 3 && board.top.every((r, i) => r.prizeShar === ([50, 30, 20][i] !== undefined && r.shar >= 20 ? [50, 30, 20][i] : null)) && board.top.filter((r) => r.prizeShar).length >= 1);
   const nextWeek = await shar.getLeaderboard(A, at("2026-10-13"));
   check("board: it resets on Monday, so last week's sparks are gone", nextWeek.top.length === 0 || nextWeek.me.shar === 0);
 
-  // ── weekly prizes (the list is set on this test's own copy of the rules, so nothing in src/ changes)
+  // ── weekly prizes, at the REAL amounts (50, 30, 20): nothing is patched for these checks
   {
     const p = await freshDb();
-    p.load("src/lib/shar-spark-rules.ts").WEEKLY_PRIZE_SHAR.push(100, 60, 40);
     const lastWeek = "2026-09-30 10:00:00"; // the week of Mon 2026-09-28; NOW is Wed 2026-10-07, so the week of 10-05 is current
-    const buy = (u, usd, when, status = "completed") => p.client.query("insert into payments (user_id,type,status,amount_usdc,description,created_at) values ($1,'bill',$2,$3,'Netflix',$4)", [u, status, String(usd), when]);
-    await buy("p1", 200, lastWeek);
-    await buy("p2", 100, lastWeek);
-    await buy("p3", 12, lastWeek); // under the minimum Shar for a prize
-    await buy("p4", 300, "2026-10-06 09:00:00"); // this week: must not count for last week
-    await buy("p5", 500, lastWeek, "pending"); // not completed: must not count
-    const [a, b, c] = await Promise.all([p.shar.getSummary("p1", NOW), p.shar.getSummary("p2", NOW), p.shar.getSummary("p1", NOW)]);
+    const buy = (db, u, usd, when, status = "completed") => db.client.query("insert into payments (user_id,type,status,amount_usdc,description,created_at) values ($1,'bill',$2,$3,'Netflix',$4)", [u, status, String(usd), when]);
+    await buy(p, "p1", 200, lastWeek);
+    await buy(p, "p2", 100, lastWeek);
+    await buy(p, "p3", 60, lastWeek);
+    await buy(p, "p6", 40, lastWeek); // fourth: there is no fourth prize
+    await buy(p, "p7", 12, lastWeek); // under the 10 dollar purchase minimum, so no Shar at all
+    await buy(p, "p4", 300, "2026-10-06 09:00:00"); // this week: must not count for last week
+    await buy(p, "p5", 500, lastWeek, "pending"); // not completed: must not count
+    const [a1, b1, c1] = await Promise.all([p.shar.getSummary("p1", NOW), p.shar.getSummary("p2", NOW), p.shar.getSummary("p1", NOW)]);
     const awards = (await p.client.query("select user_id, place, shar, to_char(week_start,'YYYY-MM-DD') as wk from shar_weekly_awards order by place")).rows;
-    check("prizes: last week's top places are paid once, in order, and only for completed purchases from that week", awards.length === 2 && awards[0].user_id === "p1" && awards[0].place === 1 && awards[0].shar === 100 && awards[1].user_id === "p2" && awards[1].shar === 60 && awards.every((r) => r.wk === "2026-09-28"), JSON.stringify(awards));
-    check("prizes: someone under the minimum Shar for the week wins nothing, and this week's purchases are not last week's", !awards.some((r) => r.user_id === "p3" || r.user_id === "p4" || r.user_id === "p5"));
-    check("prizes: three people loading at the same moment still pay each place once", awards.length === 2);
-    check("prizes: the prize is real Shar, counted in the balance and the rank (200 spent + 100 prize)", a.available === 300 && a.lifetime === 300 && c.available === 300 && b.available === 160);
-    check("prizes: it shows in the journey log as the weekly trial place", a.activity.some((x) => x.kind === "prize" && x.title === "Weekly trial · place #1" && x.shar === 100));
+    check("prizes: last week's top three are paid 50, 30 and 20 Shar, in order, for that week", awards.length === 3 && awards.map((r) => r.user_id).join() === "p1,p2,p3" && awards.map((r) => r.shar).join() === "50,30,20" && awards.map((r) => r.place).join() === "1,2,3" && awards.every((r) => r.wk === "2026-09-28"), JSON.stringify(awards));
+    check("prizes: fourth place and below win nothing, and neither do this week's purchases or a payment that isn't completed", !awards.some((r) => ["p4", "p5", "p6", "p7"].includes(r.user_id)));
+    check("prizes: three people loading at the same moment still pay each place once, and the whole week costs 100 Shar at most", awards.length === 3 && awards.reduce((s, r) => s + r.shar, 0) === 100);
+    check("prizes: the prize is real Shar, counted in the balance and the rank (200 spent + 50 prize)", a1.available === 250 && a1.lifetime === 250 && c1.available === 250 && b1.available === 130, `${a1.available}/${b1.available}`);
+    check("prizes: it shows in the journey log as the weekly trial place, and is worth 45 SKR at the fixed rate", a1.activity.some((x) => x.kind === "prize" && x.title === "Weekly trial · place #1" && x.shar === 50) && sharRules.skrForShar(50) === "45" && sharRules.skrForShar(30) === "27" && sharRules.skrForShar(20) === "18");
     await p.shar.getSummary("p1", NOW);
-    check("prizes: loading again pays nothing more", (await p.client.query("select count(*)::int as n from shar_weekly_awards")).rows[0].n === 2);
-    const later = await p.shar.getSummary("p1", new Date("2026-10-14T12:00:00Z"));
-    check("prizes: the next week settles the week after it, not the same one twice", (await p.client.query("select count(*)::int as n from shar_weekly_awards where week_start = '2026-09-28'")).rows[0].n === 2 && later.available >= 300);
+    check("prizes: loading again pays nothing more", (await p.client.query("select count(*)::int as n from shar_weekly_awards")).rows[0].n === 3);
+    const later = await p.shar.getSummary("p4", new Date("2026-10-14T12:00:00Z"));
+    check("prizes: the next week settles the week after it (p4's 300 Shar from Oct 6 wins first place) and doesn't pay the old week again", (await p.client.query("select count(*)::int as n from shar_weekly_awards where week_start = '2026-09-28'")).rows[0].n === 3 && (await p.client.query("select shar from shar_weekly_awards where user_id = 'p4' and week_start = '2026-10-05'")).rows[0]?.shar === 50 && later.available === 350);
     const pb = await p.shar.getLeaderboard("p4", NOW);
-    check("prizes: the board lists the amounts (Shar and the SKR they convert to) and who is on course for them", pb.prizes.length === 3 && pb.prizes[0].shar === 100 && pb.prizes[0].skr === "90" && pb.top[0].user_id === undefined && pb.top[0].prizeShar === 100 && pb.top[0].shar === 300);
-    const none2 = await freshDb();
-    await none2.client.query("insert into payments (user_id,type,status,amount_usdc,description,created_at) values ('q1','bill','completed','200','Netflix','2026-09-30 10:00:00')");
-    await none2.shar.getSummary("q1", NOW);
-    check("prizes: with no prizes set (the default) nothing is ever paid", (await none2.client.query("select count(*)::int as n from shar_weekly_awards")).rows[0].n === 0);
+    check("prizes: the board lists 50, 30 and 20 (and what they are in SKR), the minimum, and who is on course for the first", pb.prizes.map((x) => x.shar).join() === "50,30,20" && pb.prizes.map((x) => x.skr).join() === "45,27,18" && pb.prizeMinShar === 20 && pb.top[0].prizeShar === 50 && pb.top[0].shar === 300);
+    const lowDb = await freshDb();
+    await buy(lowDb, "w1", 200, lastWeek);
+    await buy(lowDb, "w2", 100, lastWeek);
+    await lowDb.client.query("insert into shar_sparks (user_id, day, shar, streak) values ('w3', '2026-09-30', 15, 1)");
+    await lowDb.shar.getSummary("w1", NOW);
+    check("prizes: a third place that earned under 20 Shar that week wins nothing (here 15)", (await lowDb.client.query("select user_id from shar_weekly_awards order by place")).rows.map((r) => r.user_id).join() === "w1,w2");
+    const tieDb = await freshDb();
+    await buy(tieDb, "t2", 100, lastWeek);
+    await buy(tieDb, "t1", 100, lastWeek);
+    await buy(tieDb, "t3", 100, lastWeek);
+    await buy(tieDb, "t4", 100, lastWeek);
+    await tieDb.shar.getSummary("t1", NOW);
+    check("prizes: a tie is settled the same way every time (by id), so the same people win however many times it is calculated", (await tieDb.client.query("select user_id, shar from shar_weekly_awards order by place")).rows.map((r) => r.user_id + ":" + r.shar).join() === "t1:50,t2:30,t3:20");
+    const sparkDb = await freshDb();
+    await sparkDb.client.query("insert into shar_sparks (user_id, day, shar, streak) values ('s1', '2026-09-29', 30, 7)");
+    await buy(sparkDb, "s2", 25, lastWeek);
+    await sparkDb.shar.getSummary("s1", NOW);
+    check("prizes: Daily Sparks count toward the week like any other Shar", (await sparkDb.client.query("select user_id from shar_weekly_awards order by place")).rows.map((r) => r.user_id).join() === "s1,s2");
+    const retro = await freshDb({ realFromWeek: true });
+    await buy(retro, "r1", 200, "2026-10-06 10:00:00"); // the week of Oct 5, before prizes began
+    await retro.shar.getSummary("r1", new Date("2026-10-14T12:00:00Z"));
+    const before = (await retro.client.query("select count(*)::int as n from shar_weekly_awards")).rows[0].n;
+    await buy(retro, "r1", 200, "2026-10-14 10:00:00"); // the week of Oct 12, the first one with prizes
+    await buy(retro, "r2", 100, "2026-10-15 10:00:00");
+    await retro.shar.getSummary("r1", new Date("2026-10-21T12:00:00Z"));
+    const after = (await retro.client.query("select user_id, shar, to_char(week_start,'YYYY-MM-DD') as wk from shar_weekly_awards order by place")).rows;
+    check("prizes: a week before they began (Oct 5 to 11) is never paid after the fact, and the first paid week is Oct 12 to 18", R.WEEKLY_PRIZE_FROM_WEEK === "2026-10-12" && before === 0 && after.map((x) => x.user_id + ":" + x.shar + ":" + x.wk).join() === "r1:50:2026-10-12,r2:30:2026-10-12");
+    const offDb = await freshDb();
+    offDb.load("src/lib/shar-spark-rules.ts").WEEKLY_PRIZE_SHAR.splice(0); // this test's own copy: prizes turned off
+    await buy(offDb, "q1", 200, lastWeek);
+    await offDb.shar.getSummary("q1", NOW);
+    check("prizes: with the list emptied (prizes off) nothing is ever paid", (await offDb.client.query("select count(*)::int as n from shar_weekly_awards")).rows[0].n === 0 && (await offDb.shar.getLeaderboard("q1", NOW)).prizes.length === 0);
     const noTable = await freshDb();
-    noTable.load("src/lib/shar-spark-rules.ts").WEEKLY_PRIZE_SHAR.push(100);
     await noTable.client.exec("drop table shar_weekly_awards");
     const nt = await noTable.shar.getSummary("q1", NOW);
     check("prizes: before the migration is applied the summary still loads and claims stay on", nt.ready === true);

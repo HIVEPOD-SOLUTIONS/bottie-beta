@@ -27,12 +27,17 @@ export const SPARK = {
 } as const;
 
 /**
- * Weekly prizes: Shar awarded to the top places of last week's board, first place first. EMPTY until the team decides: nothing is
- * promised or paid while it is. The prize is paid as Shar, which is then claimed as SKR through the normal claim (1 Shar = 0.9 SKR, the
- * team reviews each claim), so prizes ride on the same checks as every other payout. Example: [100, 60, 40, 25, 25, 15, 15, 10, 10, 10].
- * The most it can cost in a week is the sum of this list.
+ * Weekly prizes: Shar awarded to the top places of last week's board, first place first. Set to 50, 30 and 20 (decided 2026-10-14); an
+ * empty list turns prizes off, and nothing is promised or paid while it is. The prize is paid as Shar, which is then claimed as SKR
+ * through the normal claim (1 Shar = 0.9 SKR, the team reviews each claim), so prizes ride on the same checks as every other payout.
+ * The most it can cost in a week is the sum of this list: 100 Shar, which is 90 SKR. A change only affects weeks that haven't closed.
  */
-export const WEEKLY_PRIZE_SHAR: readonly number[] = [];
+export const WEEKLY_PRIZE_SHAR: readonly number[] = [50, 30, 20];
+/**
+ * The first week (its Monday, UTC) that can win a prize. Prizes were decided on 2026-10-14, so the week of Oct 12 is the first one anybody
+ * played knowing about them; earlier weeks are never paid after the fact. Weeks closed before this date are skipped.
+ */
+export const WEEKLY_PRIZE_FROM_WEEK = "2026-10-12";
 /** A place only wins its prize if the person earned at least this much Shar that week, so an empty or idle board pays nothing. */
 export const WEEKLY_PRIZE_MIN_SHAR = 20;
 

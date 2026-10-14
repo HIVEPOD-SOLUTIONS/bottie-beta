@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { sharClaims, sharProfiles } from "@/lib/db/schema";
 import {
   SPARK,
+  WEEKLY_PRIZE_FROM_WEEK,
   WEEKLY_PRIZE_MIN_SHAR,
   WEEKLY_PRIZE_SHAR,
   badgesFor,
@@ -484,6 +485,7 @@ export async function settleLastWeek(now: Date = new Date()): Promise<number> {
   const last = new Date(thisWeek);
   last.setUTCDate(last.getUTCDate() - 7);
   const lastDay = last.toISOString().slice(0, 10);
+  if (lastDay < WEEKLY_PRIZE_FROM_WEEK) return 0; // a week before prizes began is never paid after the fact
   try {
     if (rowsOf<{ one: number }>(await db.execute(sql`select 1 as one from shar_weekly_awards where week_start = ${lastDay}::date limit 1`)).length > 0) return 0;
     const winners = (await weeklyTotals({ from: last, to: thisWeek }, { limit: WEEKLY_PRIZE_SHAR.length }))
