@@ -14,13 +14,14 @@ import { ThinkingIndicator } from "./thinking-indicator";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { ToolResultCard } from "./tool-result-card";
 import { payEvmTransfer, pickPrivyWalletOrThrow, friendlyEvmError } from "@/lib/evm-pay";
-import { startChainPurchase, payArcPurchase } from "@/lib/chain-purchase-client";
+import { startChainPurchase, payArcPurchase, retryPendingRouteReports, PURCHASE_CHAIN_UI } from "@/lib/chain-purchase-client";
 import { CryptorefillsPaymentCard } from "./cryptorefills-payment-card";
 import { StockTradeCard } from "./stock-trade-card";
 import { GetEquityPaymentCard } from "./getequity-payment-card";
 import { DomaPaymentCard } from "./doma-payment-card";
 import { DomaListingCard } from "./doma-listing-card";
 import { ArcSendCard } from "./arc-send-card";
+import { ChainTopUpCard } from "./chain-topup-card";
 
 function OpenFundWalletTrigger({ toolCallId }: { toolCallId: string }) {
   useEffect(() => {
@@ -72,7 +73,7 @@ function BitrefillPaymentCard({
     paymentCurrency: string;
     isTopup?: boolean;
     expiresInMinutes?: number;
-    /** paymentMethod "arc" only: what to buy — the invoice is created when the user taps Pay. */
+    /** paymentMethod "arc" / "tempo" only: what to buy — the invoice is created when the user taps Pay. */
     arcCheckout?: { productId: string; packageId: string; recipientEmail?: string; recipientName?: string; sendTo?: string };
   };
   addToolResult: (args: { tool?: string; toolCallId: string; output: unknown }) => void;
@@ -97,22 +98,25 @@ function BitrefillPaymentCard({
     output.paymentCurrency ||
     (pm.includes("usdt") ? "USDT" : "USDC");
 
-  // Arc (via bluvfi-xrpl / LI.FI): create the invoice + route now, sign it
-  // with the Privy wallet, report the hash. See src/lib/chain-purchase.ts.
+  // Arc / Tempo (via bluvfi-xrpl / LI.FI): create the invoice + route now, sign
+  // it with the Privy wallet, report the hash. See src/lib/chain-purchase.ts.
+  const routeChain = pm === "tempo" ? "tempo" : "arc";
+  const routeUi = PURCHASE_CHAIN_UI[routeChain];
+  const isRoute = pm === "arc" || pm === "tempo";
   const payArc = async () => {
     if (!output.arcCheckout) throw new Error("Missing checkout details — ask me to start the purchase again.");
     const wallet = pickPrivyWalletOrThrow(wallets);
-    const purchase = await startChainPurchase({ ...output.arcCheckout, chain: "arc", refundAddress: wallet.address }, getAccessToken);
+    const purchase = await startChainPurchase({ ...output.arcCheckout, chain: routeChain, refundAddress: wallet.address }, getAccessToken);
     try {
       await payArcPurchase({
         purchase,
         wallet,
         sendTransaction: privySendTransaction,
         getAccessToken,
-        onStage: (s) => setArcStage(s === "approving" ? "Approving USDC…" : s === "paying" ? `Paying ${purchase.amount} USDC…` : "Confirming…"),
+        onStage: (s) => setArcStage(s === "approving" ? `Approving ${routeUi.symbol}…` : s === "paying" ? `Paying ${purchase.amount} ${routeUi.symbol}…` : "Confirming…"),
       });
     } catch (err) {
-      throw new Error(friendlyEvmError(err, "Arc"));
+      throw new Error(friendlyEvmError(err, routeUi.label));
     }
     setState("done");
     addToolResult({
@@ -121,9 +125,9 @@ function BitrefillPaymentCard({
       output: {
         paid: true,
         invoiceId: purchase.invoiceId,
-        paidWith: `${purchase.amount} USDC on Arc`,
+        paidWith: `${purchase.amount} ${routeUi.symbol} on ${routeUi.label}`,
         isTopup: output.isTopup,
-        tip: `Paid ${purchase.amount} USDC on Arc from the user's Bluvfi wallet (it is converted and delivered to Bitrefill, usually within a minute or two). Call poll_bitrefill_order(invoiceId="${purchase.invoiceId}", isTopup=${!!output.isTopup}) now and keep retrying every ~10 s until complete/failed/expired. If it fails, the USDC is refunded to the user's Bluvfi wallet on Arc.`,
+        tip: `Paid ${purchase.amount} ${routeUi.symbol} on ${routeUi.label} from the user's Bluvfi wallet (it is converted and delivered to Bitrefill, usually within a minute or two). Call poll_bitrefill_order(invoiceId="${purchase.invoiceId}", isTopup=${!!output.isTopup}) now and keep retrying every ~10 s until complete/failed/expired. If it fails, it is refunded to the user's Bluvfi wallet on ${routeUi.label}.`,
       },
     });
   };
@@ -136,7 +140,7 @@ function BitrefillPaymentCard({
       // server. Nothing is signed in this browser: show the destination and
       // let the user send XRP from their XRPL wallet, then continue polling
       // the invoice once they confirm the send.
-      if (pm === "arc") {
+      if (isRoute) {
         await payArc();
         return;
       }
@@ -441,14 +445,14 @@ function BitrefillPaymentCard({
         )}
       </div>
       <div className="rounded-lg bg-[#141513] px-3 py-2 flex items-center justify-between">
-        <span className="text-xs text-[#A7A79A]">{pm === "arc" ? "Pay with" : "Amount"}</span>
+        <span className="text-xs text-[#A7A79A]">{isRoute ? "Pay with" : "Amount"}</span>
         <span className="font-mono text-sm font-bold text-[#F2F0E8]">
-          {pm === "arc" ? "USDC on Arc" : `${output.paymentAmount} ${currencyLabel}`}
+          {isRoute ? `${routeUi.symbol} on ${routeUi.label}` : `${output.paymentAmount} ${currencyLabel}`}
         </span>
       </div>
-      {pm === "arc" && (
+      {isRoute && (
         <p className="text-[10px] text-[#A7A79A]">
-          {arcStage ?? "Priced live when you tap Pay (a little above the item price to cover conversion). USDC also covers Arc's network fee."}
+          {arcStage ?? `Priced live when you tap Pay (a little above the item price to cover conversion). ${pm === "tempo" ? "Keep a little stablecoin on Tempo for its network fee." : "USDC also covers Arc's network fee."}`}
         </p>
       )}
       {errMsg && <p className="text-xs text-red-400">{errMsg}</p>}
@@ -465,7 +469,7 @@ function BitrefillPaymentCard({
           disabled={state === "paying"}
           className="flex-1 rounded-xl bg-[#8FAE82] py-2.5 text-xs font-semibold text-[#141513] disabled:opacity-50 transition-opacity"
         >
-          {state === "paying" ? (arcStage ?? "Sending…") : pm === "arc" ? "Pay with USDC on Arc" : `Pay ${output.paymentAmount} ${currencyLabel}`}
+          {state === "paying" ? (arcStage ?? "Sending…") : isRoute ? `Pay with ${routeUi.symbol} on ${routeUi.label}` : `Pay ${output.paymentAmount} ${currencyLabel}`}
         </button>
       </div>
     </div>
@@ -487,6 +491,10 @@ export function ChatSheet({ visible }: ChatSheetProps) {
     setChatInput,
   } = useChatSheet();
   const { user, getAccessToken } = usePrivy();
+  // Any Arc/Tempo payment hash this browser signed but couldn't hand to the server.
+  useEffect(() => {
+    if (user) void retryPendingRouteReports(getAccessToken);
+  }, [user, getAccessToken]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
 
@@ -840,6 +848,18 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                       if (tp.state === "output-available" && (tp.output as any)?.domaPayment === true) {
                         return (
                           <DomaPaymentCard
+                            key={tp.toolCallId}
+                            toolCallId={tp.toolCallId}
+                            output={tp.output as any}
+                            addToolResult={addToolResult as any}
+                          />
+                        );
+                      }
+
+                      // Top up the Base wallet from Arc / Tempo / Robinhood / Zcash / Hyperliquid
+                      if (tp.state === "output-available" && (tp.output as any)?.chainTopUp === true) {
+                        return (
+                          <ChainTopUpCard
                             key={tp.toolCallId}
                             toolCallId={tp.toolCallId}
                             output={tp.output as any}

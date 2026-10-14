@@ -53,6 +53,8 @@ function networkLabel(type: string, chain?: string | null) {
   if (chain === "arc")         return "🟣 Arc";
   if (chain === "zcash")       return "🛡️ Zcash";
   if (chain === "hyperliquid") return "🌊 Hyperliquid";
+  if (chain === "robinhood")   return "🪶 Robinhood Chain";
+  if (chain === "tempo")       return "⚡ Tempo";
   if (chain === "doma")        return "🌐 Doma";
   if (chain === "backpack")    return "🎒 Backpack";
   return TYPE_META[type]?.network ?? "";

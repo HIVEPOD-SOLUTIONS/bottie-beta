@@ -16,6 +16,7 @@ import { arbitrum, base, mainnet, optimism, polygon } from "viem/chains";
 import type { ConnectedWallet, usePrivy } from "@privy-io/react-auth";
 import { domaChain } from "@/lib/doma-chain";
 import { arcChain } from "@/lib/arc-chain";
+import { robinhoodChain, tempoChain } from "@/lib/swap-chains";
 
 /**
  * Every EVM payment from the user's Privy wallet goes through here, so all
@@ -42,6 +43,7 @@ const ALCHEMY_SUBDOMAIN: Record<number, string> = {
 
 const CHAINS: Record<number, Chain> = {
   1: mainnet, 8453: base, 137: polygon, 42161: arbitrum, 10: optimism, [domaChain.id]: domaChain, [arcChain.id]: arcChain,
+  [robinhoodChain.id]: robinhoodChain, [tempoChain.id]: tempoChain,
 };
 
 // ArcKit's Blockchain enum values for the chains it supports (Layer 3).
@@ -131,8 +133,11 @@ export async function payEvm(opts: {
     const account = wallet.address as Hex;
     // Privy's confirm UI estimates gas in an unawaited promise that throws if
     // the wallet has no native token — check first so we fail cleanly.
-    const gas = await evmPublicClient(payment.chainId).getBalance({ address: account });
-    if (gas === BigInt(0)) throw new Error(`No native gas: no ${chain.nativeCurrency.symbol} on ${chain.name}`);
+    // Tempo has no native gas token (fees are paid in a stablecoin), so there is no balance to check.
+    if (payment.chainId !== tempoChain.id) {
+      const gas = await evmPublicClient(payment.chainId).getBalance({ address: account });
+      if (gas === BigInt(0)) throw new Error(`No native gas: no ${chain.nativeCurrency.symbol} on ${chain.name}`);
+    }
     await wallet.switchChain(payment.chainId);
     const client = createWalletClient({ account, chain, transport: custom(await wallet.getEthereumProvider()) });
     const hash = await client.sendTransaction({ account, chain, to: payment.to, data: payment.data, value: payment.value });

@@ -84,10 +84,10 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
     ...createCmcTools(),
 
     // ── Cryptorefills (USDC on Base, x402) — see lib/ai/cryptorefills-tools.ts ─
-    ...createCryptorefillsTools(userId),
+    ...createCryptorefillsTools(userId, client),
 
     // ── US stocks & ETFs (Backpack) — see lib/ai/stocks-tools.ts ───────────────
-    ...createStocksTools(userId),
+    ...createStocksTools(userId, client),
 
     // ── Shar rewards & the open provider network: mobile app only. The website chat never gets these tools. ──
     ...(client === "expo-android" ? createNetworkTools(userId) : {}),
@@ -266,9 +266,11 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             `user sends XRP and it's converted automatically. Deposit address + a short time-to-send countdown (~7.5 min) shown to user. Minimum item price ~$${MIN_XRP_BRIDGE_USD.toFixed(2)} — for anything cheaper, tell the user upfront and suggest a different payment method instead of calling this tool. ` +
             "IMPORTANT: never say 'swap', 'bridge', 'NEAR Intents', or explain the underlying conversion mechanism to the user — describe this only as \"paying with XRP\"; if something fails, say the payment couldn't be completed, not that a swap/bridge failed. " +
             "Do not check this one against get_product_details's supported_payment_methods — it works for any product. " +
-            "'zcash' (ZEC), 'hyperliquid' (USDC on Hyperliquid) and 'arc' (USDC on Arc) — also Bluvfi-only, work for any product, same 'never say swap/bridge' rule. " +
+            "'zcash' (ZEC), 'hyperliquid' (USDC on Hyperliquid), 'robinhood' (ETH on Robinhood Chain) and 'arc' (USDC on Arc) — also Bluvfi-only, work for any product, same 'never say swap/bridge' rule. " +
+            "'tempo' (USDC.e on Tempo): Bluvfi-only, works for ANY product — paid from the Bluvfi wallet like 'arc' (card prices it live; keep a little stablecoin on Tempo for its fee). Prefer it over usdc_tempo/usdt_tempo, which only some products accept. " +
+            "'robinhood': deposit address shown; the user can send ETH on Robinhood Chain from their Bluvfi wallet in one tap or from any wallet; refunds go to their Bluvfi wallet (no refund address needed). " +
             "'zcash' / 'hyperliquid': the user pays from their OWN Zcash wallet / Hyperliquid account to a deposit address shown in chat — you MUST first ask for their refundAddress there (Zcash: transparent t1…/t3… address; Hyperliquid: their 0x… account) and pass it. " +
-            `Minimum item price ~$${MIN_XRP_BRIDGE_USD.toFixed(2)} for these two. ` +
+            `Minimum item price ~$${MIN_XRP_BRIDGE_USD.toFixed(2)} for zcash, hyperliquid and robinhood. ` +
             "'arc': paid automatically from the user's Bluvfi wallet USDC on Arc (USDC is also Arc's gas) — no refund address needed; the card asks them to confirm and prices it live (slightly above the item price). " +
             "Bitrefill's support for the other ids varies per product (especially usdt_base/usdt_optimism/usdc_optimism) — " +
             "call get_product_details first and only pass a value present in its supported_payment_methods list. " +
@@ -299,29 +301,41 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         // Arc: the chat card creates the invoice and signs the route with the
         // user's Privy wallet when they tap Pay (the server can't know which
         // wallet will sign — see chain-purchase-client.ts).
-        if (resolvedMethod === "arc") {
+        if ((resolvedMethod === "arc" || resolvedMethod === "tempo") && client === "expo-android") {
+          return { error: `Paying with ${resolvedMethod === "arc" ? "USDC on Arc" : "USDC.e on Tempo"} is on bluvfi.xyz, not in the app yet. Offer another payment method.` };
+        }
+        if (resolvedMethod === "arc" || resolvedMethod === "tempo") {
+          const label = resolvedMethod === "arc" ? "USDC on Arc" : "USDC.e on Tempo";
           return {
             pendingBitrefillPayment: true,
-            paymentMethod:  "arc",
-            paymentCurrency: "USDC",
+            paymentMethod:  resolvedMethod,
+            paymentCurrency: resolvedMethod === "arc" ? "USDC" : "USDC.e",
             isAddressBased: false,
             isTopup:        !!isTopup,
             recipientEmail,
             productId,
             packageValue,
             arcCheckout:    { productId, packageId: packageValue, recipientEmail, recipientName, sendTo },
-            tip: "A 'Pay with USDC on Arc' card is shown — wait for the user to confirm it. Its result carries the invoiceId to poll. Never say swap/bridge/LI.FI; this is just paying with USDC on Arc.",
+            tip: `A 'Pay with ${label}' card is shown — wait for the user to confirm it. Its result carries the invoiceId to poll. Never say swap/bridge/LI.FI; this is just paying with ${label}.`,
           };
         }
 
-        // Zcash / Hyperliquid: deposit address from bluvfi-xrpl, paid by the
-        // user from their own wallet; refunds go to their refundAddress.
-        if (resolvedMethod === "zcash" || resolvedMethod === "hyperliquid") {
+        // Zcash / Hyperliquid / Robinhood Chain: deposit address from bluvfi-xrpl.
+        // Zcash/Hyperliquid are paid from the user's own wallet (refunds to their
+        // refundAddress); Robinhood Chain ETH can be sent from the Bluvfi wallet
+        // and refunds to it.
+        if (resolvedMethod === "zcash" || resolvedMethod === "hyperliquid" || resolvedMethod === "robinhood") {
+          if (resolvedMethod === "robinhood" && !refundAddress && userId) {
+            const { getUserEmbeddedEvmAddress } = await import("@/lib/auth");
+            refundAddress = (await getUserEmbeddedEvmAddress(userId).catch(() => null)) ?? undefined;
+          }
           if (!refundAddress) {
             return {
               error: resolvedMethod === "zcash"
                 ? "Ask the user for their own transparent Zcash address (t1… or t3…) for refunds, then call this again with refundAddress."
-                : "Ask the user for their Hyperliquid account address (0x…) for refunds, then call this again with refundAddress.",
+                : resolvedMethod === "robinhood"
+                  ? "No Bluvfi EVM wallet found for refunds — ask the user for an 0x address they control on Robinhood Chain and pass it as refundAddress."
+                  : "Ask the user for their Hyperliquid account address (0x…) for refunds, then call this again with refundAddress.",
             };
           }
           try {
@@ -349,11 +363,12 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
               paymentCurrency:  p.symbol,
               depositMemo:      p.depositMemo,
               refundAddress:    p.refundAddress,
+              walletRequestId:  p.walletRequestId,
               isAddressBased:   true,
               isTopup:          !!isTopup,
               recipientEmail,
               expiresInMinutes: minutes,
-              tip: `Deposit address shown to the user — they must send exactly ${p.amount} ${p.symbol}${resolvedMethod === "hyperliquid" ? " from their Hyperliquid spot balance" : " (transparent send) from their own Zcash wallet"}${p.depositMemo ? ` WITH memo ${p.depositMemo}` : ""} within about ${minutes} minutes. If it can't complete, it's refunded to ${p.refundAddress}. Once they say it's sent, call poll_bitrefill_order(invoiceId="${p.invoiceId}"${isTopup ? ", isTopup=true" : ""}) and keep polling (${resolvedMethod === "zcash" ? "Zcash confirmations take a few minutes" : "usually quick"}). Never mention swap/bridge/NEAR Intents.`,
+              tip: `Deposit address shown to the user — they must send exactly ${p.amount} ${p.symbol}${resolvedMethod === "hyperliquid" ? " from their Hyperliquid spot balance" : resolvedMethod === "robinhood" ? " on Robinhood Chain (the card has a one-tap 'Send from your Bluvfi wallet' button, or any wallet works)" : " (transparent send) from their own Zcash wallet"}${p.depositMemo ? ` WITH memo ${p.depositMemo}` : ""} within about ${minutes} minutes. If it can't complete, it's refunded to ${p.refundAddress}. Once they say it's sent, call poll_bitrefill_order(invoiceId="${p.invoiceId}"${isTopup ? ", isTopup=true" : ""}) and keep polling (${resolvedMethod === "zcash" ? "Zcash confirmations take a few minutes" : "usually quick"}). Never mention swap/bridge/NEAR Intents.`,
             };
           } catch (err: unknown) {
             return { error: err instanceof Error ? err.message : "Purchase failed" };
@@ -1449,10 +1464,28 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
       inputSchema: z.object({
         name: z.string().optional().describe("Domain to buy, e.g. 'software.ai'. Picks its cheapest active listing."),
         listingId: z.string().optional().describe("A specific listing: its externalId (0x…) or numeric id from doma_get_listings"),
+        fundFrom: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional()
+          .describe("Base listings priced in ETH or USDC only, when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
+        refundAddress: z.string().max(128).optional()
+          .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
-      execute: async ({ name, listingId }) => {
+      execute: async ({ name, listingId, fundFrom: fundFromIn, refundAddress }) => {
         try {
-          if (!walletAddress) return { error: "No EVM wallet available for this user." };
+          if (fundFromIn && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
+          const fundFrom = fundFromIn;
+          if ((fundFrom === "zcash" || fundFrom === "hyperliquid") && !refundAddress) {
+            return { error: fundFrom === "zcash"
+              ? "Ask the user for their own transparent Zcash address (t1…/t3…) for refunds, then call again with refundAddress."
+              : "Ask the user for their Hyperliquid account address (0x…) for refunds, then call again with refundAddress." };
+          }
+          // The card signs with the Privy embedded wallet, and Doma's zone signature is
+          // bound to the buyer — so price for that wallet, not a smart-wallet address.
+          let buyerAddress = walletAddress;
+          if (userId) {
+            const { getUserEmbeddedEvmAddress } = await import("@/lib/auth");
+            buyerAddress = (await getUserEmbeddedEvmAddress(userId).catch(() => null)) ?? walletAddress;
+          }
+          if (!buyerAddress) return { error: "No EVM wallet available for this user." };
           if (!name && !listingId) return { error: "Ask which domain (or listing) the user wants to buy." };
           const { getDomaListings, getDomaListingFulfillment } = await import("@/lib/doma");
           const { listingPayment, SUPPORTED_LISTING_CHAINS } = await import("@/lib/doma-chain");
@@ -1472,7 +1505,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           const usable = listings
             .filter((l) => !l.expiresAt || new Date(l.expiresAt).getTime() > now)
             .filter((l) => SUPPORTED_LISTING_CHAINS.includes(Number(l.chain?.networkId?.split(":")[1])))
-            .filter((l) => l.offererAddress?.toLowerCase() !== walletAddress.toLowerCase())
+            .filter((l) => l.offererAddress?.toLowerCase() !== buyerAddress.toLowerCase())
             .sort((a, b) => Number(a.price) - Number(b.price));
           if (!usable.length) {
             return { error: listings.length
@@ -1482,7 +1515,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           const l = usable[0];
           const chainId = Number(l.chain!.networkId!.split(":")[1]);
           // Priced for THIS user's wallet — Doma's zone signature is bound to the buyer address.
-          const fulfillment = await getDomaListingFulfillment({ orderId: l.externalId, buyer: walletAddress });
+          const fulfillment = await getDomaListingFulfillment({ orderId: l.externalId, buyer: buyerAddress });
           const payment = listingPayment(fulfillment as any);
           const decimals = l.currency?.decimals ?? 18;
           return {
@@ -1499,8 +1532,11 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
               priceDisplay: Number(payment.amount) / 10 ** decimals,
             },
             payment: { token: payment.token, amount: payment.amount.toString() },
-            buyer: walletAddress,
-            tip: 'BUY CARD SHOWN. Output only: "A payment card has been shown. Please confirm the purchase." Then STOP. When it reports {paid:true}, tell the user the domain is theirs (it may take a minute to show). If {paid:false}, relay the error.',
+            buyer: buyerAddress,
+            ...(fundFrom && chainId === 8453 ? { fundFrom, refundAddress } : {}),
+            tip: 'BUY CARD SHOWN. Output only: "A payment card has been shown. Please confirm the purchase." Then STOP. When it reports {paid:true}, tell the user the domain is theirs (it may take a minute to show). If {paid:false}, relay the error.' +
+              (fundFrom && chainId !== 8453 ? " NOTE: this listing is not on Base, so paying from another chain isn't available for it — tell the user it's paid from their wallet on its own chain." : "") +
+              (fundFrom && chainId === 8453 ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card buys the domain by itself. Never say swap/bridge." : ""),
           };
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
@@ -1696,9 +1732,10 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         "'onramp' (INR→crypto via UPI — starts pending, completed by webhook), " +
         "'offramp' (crypto→INR via bank — starts pending, completed by webhook). " +
         "'investment' also covers real Backpack stock/ETF fills (chain='backpack'), 'domain' is a Doma registration or marketplace buy (chain='doma', or 'evm' for Base listings; amountUsdc is 0 when paid in ETH — the description has the price). " +
-        "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid' or 'arc' was paid with XRP / ZEC / Hyperliquid USDC / Arc USDC — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
+        "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid', 'robinhood' or 'arc' was paid with XRP / ZEC / Hyperliquid USDC / Robinhood Chain ETH / Arc USDC — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
+        "A 'bridge' record whose description starts 'Top-up:' funded the Base wallet from that chain (arc/tempo/robinhood/zcash/hyperliquid) for a Cryptorefills, stock or Doma payment. " +
         "'transfer' / 'bridge' with chain='arc' happened on Arc. " +
-        "Each record includes chain ('evm'|'solana'|'xrpl'|'arc'|'zcash'|'hyperliquid'|'doma'|'backpack'), amountUsdc, status, txHash, and createdAt.",
+        "Each record includes chain ('evm'|'solana'|'xrpl'|'arc'|'tempo'|'robinhood'|'zcash'|'hyperliquid'|'doma'|'backpack'), amountUsdc, status, txHash, and createdAt.",
       inputSchema: z.object({
         limit: z
           .number()
@@ -1774,6 +1811,120 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           };
         } catch (err: unknown) {
           return { error: err instanceof Error ? err.message : "Couldn't read the Arc balance" };
+        }
+      },
+    }),
+
+    get_chain_payments: tool({
+      description:
+        "The user's payments from Zcash, Hyperliquid, Arc, Robinhood Chain and Tempo (Bitrefill purchases and wallet top-ups for Cryptorefills, stocks and Doma), " +
+        "refreshed live. Each has status (awaiting_payment | processing | completed | failed | expired), what was paid and received, the deposit and refund " +
+        "addresses, the user's own tx hash, the delivery/refund tx, and a plain 'fundsAt' line saying where the money is. " +
+        "Each item says what it was for (e.g. the product, stock or domain a top-up paid for). " +
+        "Call this whenever the user asks about a stuck, missing, pending or refunded payment on one of these chains.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(30).optional().describe("How many recent payments (default 10)"),
+      }),
+      execute: async ({ limit }) => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const { listUserChainSwaps, describeChainSwap } = await import("@/lib/chain-swaps");
+          const rows = await listUserChainSwaps(userId, limit ?? 10);
+          return {
+            payments: rows.map((r) => ({
+              id: r.walletRequestId,
+              for: r.purpose === "bitrefill" ? `Bitrefill invoice ${r.reference}` : `${r.purpose === "wallet" ? "Wallet top-up" : `Wallet top-up for ${r.purpose}`}${r.reference ? ` (${r.reference})` : ""}`,
+              chain: r.chain,
+              status: r.status,
+              paid: `${r.payAmount} ${r.paySymbol}`,
+              receive: `${r.receiveAmount} ${r.receiveAsset}`,
+              depositAddress: r.depositAddress,
+              depositMemo: r.depositMemo,
+              refundAddress: r.refundAddress,
+              userTxHash: r.userTxHash,
+              deliveryOrRefundTx: r.swapTxHash,
+              createdAt: r.createdAt,
+              ...describeChainSwap(r),
+            })),
+            tip: "Explain each in plain words using summary/fundsAt (never say swap/bridge/NEAR Intents/LI.FI). Failed/expired ones are refunded automatically to refundAddress — no recovery action is needed or possible from Bluvfi. A completed top-up means the funds are in the Bluvfi wallet on Base even if the purchase wasn't finished; offer to complete it. If something looks wrong for over an hour, suggest contacting Bluvfi support with the id and tx hash.",
+          };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Couldn't load these payments" };
+        }
+      },
+    }),
+
+    fund_wallet_from_chain: tool({
+      description:
+        "Add USDC (or ETH) to the user's Bluvfi wallet on Base by paying from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. " +
+        "Shows a panel in chat — nothing moves until the user acts there. Only the shortfall is topped up (it reads their Base balance). " +
+        "Use when the user wants to fund their wallet from one of those chains, or to pay something not covered by a fundFrom option. " +
+        "Zcash/Hyperliquid need the user's own refund address (ask). Deposit-address chains (Zcash, Hyperliquid, Robinhood) start at about $3.20.",
+      inputSchema: z.object({
+        amount: z.string().regex(/^d+(.d+)?$/).describe("How much should end up on Base, in the token below, e.g. '25'"),
+        token: z.enum(["usdc", "eth"]).optional().describe("What to receive on Base (default usdc)"),
+        amountUsd: z.number().positive().optional().describe("token 'eth' only: the USD value of amount (use a live ETH price)"),
+        chain: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional().describe("Chain to pay from, if the user said; otherwise they pick in the panel"),
+        refundAddress: z.string().max(128).optional().describe("chain 'zcash' / 'hyperliquid': the user's own address there"),
+      }),
+      execute: async ({ amount, token = "usdc", amountUsd, chain, refundAddress }) => {
+        const usdValue = token === "usdc" ? Number(amount) : amountUsd;
+        if (!usdValue || !(usdValue > 0)) return { error: "For an ETH top-up, get a live ETH price and pass amountUsd." };
+        if ((chain === "zcash" || chain === "hyperliquid") && !refundAddress) {
+          return { error: chain === "zcash" ? "Ask for the user's own transparent Zcash address (t1…/t3…) for refunds." : "Ask for the user's Hyperliquid account address (0x…) for refunds." };
+        }
+        return {
+          chainTopUp: true,
+          chain,
+          token,
+          amount,
+          amountUsd: Number(usdValue.toFixed(2)),
+          refundAddress,
+          tip: "A top-up panel is shown. Wait for it to report {funded:true}; then continue (e.g. pay the thing they wanted). Never say swap/bridge.",
+        };
+      },
+    }),
+
+    get_other_chain_balances: tool({
+      description:
+        "Live balances of the user's Bluvfi wallet on Arc (USDC), Tempo (USDC.e) and Robinhood Chain (ETH) — the chains it can pay from directly " +
+        "(Zcash and Hyperliquid are paid from the user's own wallets, so there is nothing of theirs to read). Read on-chain for the wallet Privy reports.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const [{ getUserEmbeddedEvmAddress }, chains, viem] = await Promise.all([
+            import("@/lib/auth"),
+            import("@/lib/swap-chains"),
+            import("viem"),
+          ]);
+          const { arcChain } = await import("@/lib/arc-chain");
+          const address = await getUserEmbeddedEvmAddress(userId);
+          if (!address) return { error: "No Bluvfi EVM wallet on this account yet." };
+          const defs = [
+            { chain: arcChain, key: "arc" as const },
+            { chain: chains.tempoChain, key: "tempo" as const },
+            { chain: chains.robinhoodChain, key: "robinhood" as const },
+          ];
+          const balances = await Promise.all(defs.map(async ({ chain, key }) => {
+            const w = chains.SWAP_CHAIN_META[key].wallet!;
+            try {
+              const client = viem.createPublicClient({ chain, transport: viem.http() });
+              const raw = w.token === "native"
+                ? await client.getBalance({ address: address as `0x${string}` })
+                : await client.readContract({ address: w.token, abi: viem.erc20Abi, functionName: "balanceOf", args: [address as `0x${string}`] });
+              return { chain: chains.SWAP_CHAIN_META[key].label, asset: chains.SWAP_CHAIN_META[key].symbol, balance: viem.formatUnits(raw, w.tokenDecimals) };
+            } catch {
+              return { chain: chains.SWAP_CHAIN_META[key].label, asset: chains.SWAP_CHAIN_META[key].symbol, balance: null, error: "couldn't read" };
+            }
+          }));
+          return {
+            wallet: address,
+            balances,
+            tip: "These can pay Bitrefill (Arc, Robinhood), and Cryptorefills / Backpack / Doma Base listings via fundFrom. Tempo also needs a little stablecoin for its fee.",
+          };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : "Couldn't read balances" };
         }
       },
     }),

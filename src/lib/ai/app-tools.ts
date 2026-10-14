@@ -79,6 +79,11 @@ export const APP_DENIED_NAMES: Readonly<Record<string, string>> = {
   create_goal: "savings goals have no screen in the app",
   delete_goal: "savings goals have no screen in the app",
   get_goals: "savings goals have no screen in the app",
+  get_arc_balance: "Arc has no screen in the app yet (website Wallet → Arc tab)",
+  get_other_chain_balances: "Arc, Tempo and Robinhood Chain have no screen in the app yet",
+  send_usdc_arc: "its confirm card exists only on the website",
+  fund_wallet_from_chain: "the top-up panel exists only on the website",
+  get_chain_payments: "payments from other chains are made on the website, which has their status",
 };
 
 export function isAppTool(name: string): boolean {

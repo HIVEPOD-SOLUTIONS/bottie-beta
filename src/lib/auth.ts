@@ -77,6 +77,20 @@ export async function getUserWalletAddresses(userId: string): Promise<{ evm: str
   return { evm, solana };
 }
 
+/**
+ * The user's Privy embedded EVM wallet (the EOA that signs in the app), as
+ * Privy reports it — never a smart-wallet contract address, which may not
+ * exist on chains like Robinhood Chain. Null if the user has none.
+ */
+export async function getUserEmbeddedEvmAddress(userId: string): Promise<string | null> {
+  const user = await getPrivyClient().getUserById(userId);
+  for (const a of user.linkedAccounts) {
+    const acct = a as { type: string; address?: string; chainType?: string; walletClientType?: string };
+    if (acct.type === "wallet" && acct.walletClientType === "privy" && acct.chainType !== "solana" && acct.address) return acct.address;
+  }
+  return null;
+}
+
 export async function verifyAuth(): Promise<{ userId: string }> {
   // 1. Try Authorization: Bearer header first (explicit token from client)
   let token: string | undefined;

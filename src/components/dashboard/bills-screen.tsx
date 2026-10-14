@@ -8,7 +8,7 @@ import { useDemoState } from "@/contexts/demo-state-context";
 import { usePaymentsContext } from "@/contexts/payments-context";
 import { useChatSheet } from "@/contexts/chat-context";
 import { payEvmTransfer, pickPrivyWalletOrThrow, friendlyEvmError } from "@/lib/evm-pay";
-import { PURCHASE_CHAIN_UI, startChainPurchase, payArcPurchase, type PurchaseChain } from "@/lib/chain-purchase-client";
+import { PURCHASE_CHAIN_UI, startChainPurchase, payArcPurchase, payDepositFromWallet, type PurchaseChain } from "@/lib/chain-purchase-client";
 import type { MCPProduct, MCPPackage, MCPInvoice } from "@/lib/bitrefill-mcp";
 import { authFetch } from "@/lib/api-auth-fetch";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -637,6 +637,10 @@ const PAYMENT_METHOD_GROUPS: { label: string; methods: PaymentMethodDef[] }[] = 
       { id: "zcash",        label: "Zcash",      token: "ZEC",  icon: "🛡️", badge: "ZEC",       badgeColor: "text-yellow-300", chain: "address" },
       { id: "hyperliquid",  label: "USDC",       token: "USDC", icon: "🌊", badge: "Hyperliquid", badgeColor: "text-teal-300", chain: "address" },
       { id: "arc",          label: "USDC",       token: "USDC", icon: "🟣", badge: "Arc",       badgeColor: "text-violet-300", chain: "address" },
+      // Tempo through bluvfi-xrpl: signed by the Bluvfi wallet like Arc, so it works for
+      // every product (Bitrefill's own usdc_tempo/usdt_tempo above only for some).
+      { id: "tempo",        label: "USDC.e",     token: "USDC.e", icon: "⚡", badge: "Tempo · wallet", badgeColor: "text-green-400", chain: "address" },
+      { id: "robinhood",    label: "ETH",        token: "ETH",  icon: "🪶", badge: "Robinhood", badgeColor: "text-lime-300",   chain: "address" },
       { id: "litecoin",     label: "Litecoin",   token: "LTC",  icon: "Ł",  badge: "LTC",       badgeColor: "text-gray-300",   chain: "address" },
       { id: "dogecoin",     label: "Dogecoin",   token: "DOGE", icon: "🐕", badge: "DOGE",      badgeColor: "text-yellow-300", chain: "address" },
       { id: "dash",         label: "Dash",       token: "DASH", icon: "🔹", badge: "DASH",      badgeColor: "text-blue-300",   chain: "address" },
@@ -661,9 +665,13 @@ const PAYMENT_METHOD_GROUPS: { label: string; methods: PaymentMethodDef[] }[] = 
 const ALL_PAYMENT_METHODS = PAYMENT_METHOD_GROUPS.flatMap((g) => g.methods);
 
 /** Bluvfi-only methods routed through bluvfi-xrpl — never in Bitrefill's own supported lists, valid for any product. */
-const BLUVFI_ROUTED = new Set(["xrp", "zcash", "hyperliquid", "arc"]);
+const BLUVFI_ROUTED = new Set(["xrp", "zcash", "hyperliquid", "arc", "tempo", "robinhood"]);
 function isChainMethod(id: string): id is PurchaseChain {
-  return id === "zcash" || id === "hyperliquid" || id === "arc";
+  return id === "zcash" || id === "hyperliquid" || id === "arc" || id === "tempo" || id === "robinhood";
+}
+/** Signed by the Bluvfi wallet (no deposit address): Arc and Tempo. */
+function isRouteMethod(id: string): id is "arc" | "tempo" {
+  return id === "arc" || id === "tempo";
 }
 
 function getPaymentMethod(id: string): PaymentMethodDef {
@@ -866,6 +874,8 @@ function CheckoutSheet({
   const [chainRefundAddress, setChainRefundAddress] = useState("");
   const [chainMemo, setChainMemo]                   = useState<string | null>(null);
   const [arcStage, setArcStage]                     = useState<string | null>(null);
+  const [chainRefundUsed, setChainRefundUsed]       = useState<string>("");
+  const [chainWalletSending, setChainWalletSending] = useState(false);
 
   // XRP swap countdown — separate from the underlying Bitrefill invoice's own
   // expiry (expirySecsLeft below); the 450s swap deadline is shorter and is
@@ -1247,7 +1257,7 @@ function CheckoutSheet({
               ? "The exchange rate moved right as your payment was processing, so it couldn't be completed safely."
               : "Something went wrong completing your payment.";
         setErrMsg(chainMethod
-          ? `${friendly} Anything you sent is refunded automatically to ${paymentMethodId === "arc" ? "your Bluvfi wallet on Arc" : "the refund address you gave"}.`
+          ? `${friendly} Anything you sent is refunded automatically to ${isRouteMethod(paymentMethodId) ? `your Bluvfi wallet on ${PURCHASE_CHAIN_UI[paymentMethodId].label}` : paymentMethodId === "robinhood" ? "your Bluvfi wallet on Robinhood Chain" : "the refund address you gave"}.`
           : friendly);
         setStep("error");
       } catch { /* keep polling on transient errors */ }
@@ -1380,8 +1390,12 @@ function CheckoutSheet({
       // by the Bluvfi wallet and goes straight to order polling.
       if (isChainMethod(paymentMethod)) {
         const ui = PURCHASE_CHAIN_UI[paymentMethod];
-        const arcWallet = paymentMethod === "arc" ? pickPrivyWalletOrThrow(wallets) : null;
-        const refundAddress = arcWallet ? arcWallet.address : chainRefundAddress.trim();
+        const arcWallet = isRouteMethod(paymentMethod) ? pickPrivyWalletOrThrow(wallets) : null;
+        // Robinhood Chain refunds go back to the Bluvfi wallet (an EVM address it controls there).
+        const refundAddress = arcWallet ? arcWallet.address
+          : paymentMethod === "robinhood" ? pickPrivyWalletOrThrow(wallets).address
+          : chainRefundAddress.trim();
+        setChainRefundUsed(refundAddress);
         if (!ui.refundPattern.test(refundAddress)) {
           throw new Error(`Enter ${ui.refundHint} so a failed payment can be refunded.`);
         }
@@ -1406,13 +1420,13 @@ function CheckoutSheet({
               sendTransaction,
               getAccessToken,
               onStage: (stage) => setArcStage(
-                stage === "approving" ? "Approving USDC on Arc…"
-                : stage === "paying" ? `Paying ${purchase.amount} USDC on Arc…`
-                : "Confirming on Arc…",
+                stage === "approving" ? `Approving ${ui.symbol} on ${ui.label}…`
+                : stage === "paying" ? `Paying ${purchase.amount} ${ui.symbol} on ${ui.label}…`
+                : `Confirming on ${ui.label}…`,
               ),
             });
           } catch (err) {
-            throw new Error(friendlyEvmError(err, "Arc"));
+            throw new Error(friendlyEvmError(err, ui.label));
           }
           setArcStage(null);
           setStep("polling");
@@ -2234,6 +2248,11 @@ function CheckoutSheet({
                 {PURCHASE_CHAIN_UI.arc.howToPay} Top up from the Wallet sheet&apos;s Arc tab if needed.
               </p>
             )}
+            {paymentMethodId === "tempo" && (
+              <p className="mb-4 rounded-xl bg-white/[0.03] px-3 py-2 text-[11px] text-[#A7A79A]">
+                {PURCHASE_CHAIN_UI.tempo.howToPay}
+              </p>
+            )}
 
             {/* Phone + email badges */}
             {isTopup && phoneNumber && (
@@ -2334,6 +2353,7 @@ function CheckoutSheet({
               {(() => {
                 const pm = getPaymentMethod(paymentMethodId);
                 if (pm.id === "arc") return "Pay with USDC on Arc";
+                if (pm.id === "tempo") return "Pay with USDC.e on Tempo";
                 if (pm.chain === "address") return `Get ${pm.token} Deposit Address · ${pm.badge}`;
                 if (pm.chain === "link") return `Continue on Bitrefill · ${pm.label}`;
                 return `Pay ${formatAmount(displayAmount)} · ${pm.token} on ${pm.label}`;
@@ -2452,7 +2472,7 @@ function CheckoutSheet({
               <p className="mt-1 text-sm text-[#A7A79A]">
                 {(() => {
                   const pm = getPaymentMethod(paymentMethodId);
-                  if (pm.id === "arc") return arcStage ?? "Preparing your Arc payment…";
+                  if (isRouteMethod(pm.id)) return arcStage ?? `Preparing your ${PURCHASE_CHAIN_UI[pm.id].label} payment…`;
                   if (pm.chain === "address") return `Generating ${pm.token} deposit address…`;
                   if (pm.chain === "link") return `Opening ${pm.label} checkout…`;
                   return `Sending ${formatAmount(displayAmount)} · ${pm.token} on ${pm.label}`;
@@ -2649,8 +2669,32 @@ function CheckoutSheet({
                       </div>
                     )}
                     <p className="text-center text-[11px] text-[#A7A79A]">
-                      {PURCHASE_CHAIN_UI[paymentMethodId].howToPay} Send exactly the amount shown. If it can&apos;t complete, it&apos;s refunded to your address ending {chainRefundAddress.trim().slice(-6)}.
+                      {PURCHASE_CHAIN_UI[paymentMethodId].howToPay} Send exactly the amount shown. If it can&apos;t complete, it&apos;s refunded to your address ending {chainRefundUsed.slice(-6)}.
                     </p>
+                    {paymentMethodId === "robinhood" && depositAddress && depositAmount && (!pollStatus || pollStatus === "unpaid") && (
+                      <button
+                        disabled={chainWalletSending}
+                        onClick={async () => {
+                          setChainWalletSending(true);
+                          setErrMsg(null);
+                          try {
+                            await payDepositFromWallet({
+                              chain: "robinhood", depositAddress, amount: depositAmount, wallet: pickPrivyWalletOrThrow(wallets), sendTransaction,
+                              ...(xrpWalletRequestId ? { track: { walletRequestId: xrpWalletRequestId, getAccessToken } } : {}),
+                            });
+                            setStep("polling");
+                          } catch (err) {
+                            setErrMsg(friendlyEvmError(err, "Robinhood Chain"));
+                          } finally {
+                            setChainWalletSending(false);
+                          }
+                        }}
+                        className="w-full rounded-2xl bg-[#8FAE82] py-2.5 text-center text-xs font-semibold text-[#141513] disabled:opacity-50"
+                      >
+                        {chainWalletSending ? "Sending…" : `Send ${depositAmount} ETH from your Bluvfi wallet`}
+                      </button>
+                    )}
+                    {errMsg && <p className="text-center text-[11px] text-red-400">{errMsg}</p>}
                     {pollStatus && pollStatus !== "unpaid" ? (
                       <p className="text-center text-xs font-medium text-[#8FAE82]">Processing your payment…</p>
                     ) : xrpSwapSecsLeft !== null && (

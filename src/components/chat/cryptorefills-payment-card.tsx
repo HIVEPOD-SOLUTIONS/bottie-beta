@@ -17,6 +17,8 @@ import {
   type CrPayStep,
 } from "@/lib/cryptorefills-client";
 import { Delivered, DepositPanel, usd } from "@/components/dashboard/cryptorefills-section";
+import { ChainTopUpPanel } from "@/components/dashboard/chain-topup-panel";
+import { isSwapChain, type SwapChain } from "@/lib/swap-chains";
 import type { CrOrderRequest, CrOrderStatus, CrPartnerOrder, CrPartnerRequest, CrPartnerStatus, CrRail } from "@/lib/cryptorefills";
 
 /**
@@ -43,6 +45,9 @@ type Output = {
   rail?: CrRail;
   order?: CrOrderRequest;
   partnerOrder?: CrPartnerRequest;
+  /** Pay from Arc / Tempo / Robinhood / Zcash / Hyperliquid: top up the Base wallet first, then pay gaslessly on Base. */
+  fundFrom?: SwapChain;
+  refundAddress?: string;
   // Set after the card reports back:
   paid?: boolean;
   orderId?: string;
@@ -77,6 +82,7 @@ export function CryptorefillsPaymentCard({
   const [deposit, setDeposit] = useState<CrPartnerOrder | null>(output.deposit ?? null);
   const [depositState, setDepositState] = useState("awaiting_payment");
   const [priceConfirm, setPriceConfirm] = useState<{ amount: number; resolve: (ok: boolean) => void } | null>(null);
+  const [showTopUp, setShowTopUp] = useState(isSwapChain(output.fundFrom));
   const abort = useRef(new AbortController());
 
   useEffect(() => () => abort.current.abort(), []);
@@ -192,6 +198,20 @@ export function CryptorefillsPaymentCard({
     }
   };
 
+  // After a top-up from another chain the USDC is on Base, so pay on Base.
+  const confirmAfterTopUp = async () => {
+    setMsg(null);
+    setShowTopUp(false);
+    try {
+      await confirmGasless("base");
+    } catch (e) {
+      const m = friendlyPayError(e);
+      setState("error");
+      setMsg(m);
+      report({ paid: false, error: m });
+    }
+  };
+
   const busy = state === "quoting" || state === "signing" || state === "settling" || state === "polling";
   const payLabel = payWith === "other"
     ? `${output.partnerOrder?.coin ?? ""} · ${output.partnerOrder?.network ?? ""}`
@@ -214,7 +234,28 @@ export function CryptorefillsPaymentCard({
         </div>
       </div>
 
-      {state === "idle" && (
+      {state === "idle" && !isOther && showTopUp && (
+        <div className="mt-3">
+          <ChainTopUpPanel
+            token="usdc"
+            amount={output.priceUsd.toFixed(2)}
+            amountUsd={output.priceUsd}
+            purpose="cryptorefills"
+            reference={`${output.productName} → ${output.recipient}`}
+            initialChain={isSwapChain(output.fundFrom) ? output.fundFrom : undefined}
+            initialRefundAddress={output.refundAddress}
+            onFunded={() => void confirmAfterTopUp()}
+          />
+        </div>
+      )}
+
+      {state === "idle" && !isOther && !showTopUp && (
+        <button onClick={() => setShowTopUp(true)} className="mt-2 text-[11px] text-[#8FAE82] underline">
+          Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+        </button>
+      )}
+
+      {state === "idle" && !(showTopUp && !isOther) && (
         <div className="mt-3 flex gap-2">
           <button
             onClick={() => { setState("error"); setMsg("Cancelled. Nothing was charged."); report({ paid: false, error: "Cancelled by user" }); }}

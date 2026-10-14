@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWallets } from "@privy-io/react-auth";
 import { encodeFunctionData, erc20Abi, type Hex } from "viem";
 import { payEvm, waitForEvmTx, evmPublicClient, friendlyEvmError } from "@/lib/evm-pay";
 import { authFetch } from "@/lib/api-auth-fetch";
+import { ChainTopUpPanel } from "@/components/dashboard/chain-topup-panel";
+import { isSwapChain, type SwapChain } from "@/lib/swap-chains";
 import { usePrivy } from "@privy-io/react-auth";
 import {
   LISTING_CHAINS,
@@ -45,6 +47,9 @@ type Output = {
   };
   payment: { token: Hex | "native"; amount: string };
   buyer: string;
+  /** Base listings only: top up the Base wallet from Arc / Tempo / Robinhood / Zcash / Hyperliquid first. */
+  fundFrom?: SwapChain;
+  refundAddress?: string;
   paid?: boolean;
   txHash?: string;
   error?: string;
@@ -74,6 +79,23 @@ export function DomaListingCard({
 
   const report = (result: Record<string, unknown>) =>
     addToolResult({ tool: "doma_buy_listing", toolCallId, output: { ...output, ...result } });
+
+  // Base listings priced in ETH or USDC can be funded from another chain.
+  const topUpToken = listing.chainId === 8453 ? (output.payment.token === "native" ? "eth" : /usdc/i.test(listing.symbol) ? "usdc" : null) : null;
+  const topUpAmount = topUpToken ? (Number(BigInt(output.payment.amount)) / 10 ** listing.decimals).toFixed(topUpToken === "eth" ? 6 : 2) : "0";
+  const [showTopUp, setShowTopUp] = useState(!!topUpToken && isSwapChain(output.fundFrom));
+  const [ethUsd, setEthUsd] = useState<number | null>(null);
+  useEffect(() => {
+    if (topUpToken !== "eth" || !showTopUp || ethUsd !== null) return;
+    authFetch("/api/prices", undefined, getAccessToken)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { prices?: { symbol: string; priceUsd: number }[] } | null) => {
+        const p = d?.prices?.find((x) => x.symbol === "ETH")?.priceUsd;
+        if (p) setEthUsd(p);
+      })
+      .catch(() => {});
+  }, [topUpToken, showTopUp, ethUsd, getAccessToken]);
+  const topUpUsd = topUpToken === "usdc" ? Number(topUpAmount) : ethUsd ? Number(topUpAmount) * ethUsd : null;
 
   const buy = async () => {
     setMsg(null);
@@ -198,7 +220,30 @@ export function DomaListingCard({
             <p className="mt-3 text-[11px] text-[#A7A79A]">
               Paid from your wallet on {listing.chainName}{output.payment.token === "native" ? "" : " (approve, then buy)"}. The domain is sent to your wallet.
             </p>
-            <div className="mt-3 flex gap-2">
+            {topUpToken && showTopUp && (
+              <div className="mt-3">
+                {topUpUsd === null ? (
+                  <p className="text-[11px] text-[#A7A79A]">Getting the ETH price…</p>
+                ) : (
+                  <ChainTopUpPanel
+                    token={topUpToken}
+                    amount={topUpAmount}
+                    amountUsd={topUpUsd}
+                    purpose="doma"
+                    reference={`${listing.name} (${price})`}
+                    initialChain={isSwapChain(output.fundFrom) ? output.fundFrom : undefined}
+                    initialRefundAddress={output.refundAddress}
+                    onFunded={() => { setShowTopUp(false); void buy(); }}
+                  />
+                )}
+              </div>
+            )}
+            {topUpToken && !showTopUp && (
+              <button onClick={() => setShowTopUp(true)} className="mt-2 text-[11px] text-[#8FAE82] underline">
+                Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+              </button>
+            )}
+            <div className={`mt-3 flex gap-2 ${topUpToken && showTopUp ? "hidden" : ""}`}>
               <button
                 onClick={() => { setState("error"); setMsg("Cancelled. Nothing was sent."); report({ paid: false, error: "Cancelled by user" }); }}
                 className="flex-1 rounded-xl bg-white/[0.06] py-2.5 text-xs font-semibold text-[#F2F0E8]"

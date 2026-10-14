@@ -38,7 +38,7 @@ const countrySchema = z.string().regex(/^[a-zA-Z]{2}$/).describe("ISO 3166-1 alp
 // Gasless x402 rows store chain "evm"/"solana"; deposit-address (partner) rows store the network name.
 const isGaslessChain = (chain: string | null) => chain === "evm" || chain === "solana";
 
-export function createCryptorefillsTools(userId?: string) {
+export function createCryptorefillsTools(userId?: string, client?: string) {
   return {
     search_cryptorefills: tool({
       description:
@@ -159,8 +159,20 @@ export function createCryptorefillsTools(userId?: string) {
           .describe("'base' (default) or 'solana' = gasless USDC; 'other' = coin/network below via deposit address"),
         coin: z.string().max(12).optional().describe("payWith='other' only: coin, e.g. 'USDT'"),
         network: z.string().max(40).optional().describe("payWith='other' only: exact network from get_cryptorefills_payment_methods, e.g. 'Tron'"),
+        fundFrom: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional()
+          .describe("Only when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
+        refundAddress: z.string().max(128).optional()
+          .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
-      execute: async ({ country, brand, productId, productValue, email, phone, payWith = "base", coin, network }) => {
+      execute: async ({ country, brand, productId, productValue, email, phone, payWith: payWithIn = "base", coin, network, fundFrom, refundAddress }) => {
+        // Paying from another chain tops up the Base wallet, then pays gaslessly on Base (website card only).
+        if (fundFrom && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
+        const payWith = fundFrom ? "base" : payWithIn;
+        if ((fundFrom === "zcash" || fundFrom === "hyperliquid") && !refundAddress) {
+          return { error: fundFrom === "zcash"
+            ? "Ask the user for their own transparent Zcash address (t1…/t3…) for refunds, then call again with refundAddress."
+            : "Ask the user for their Hyperliquid account address (0x…) for refunds, then call again with refundAddress." };
+        }
         try {
           const [items, brands] = await Promise.all([listCatalog(country, brand), listBrands(country)]);
           const item = items.find((it) => it.product_id === productId);
@@ -266,10 +278,12 @@ export function createCryptorefillsTools(userId?: string) {
             payWith,
             rail: payWith,
             order,
+            ...(fundFrom ? { fundFrom, refundAddress } : {}),
             tip:
               'PAYMENT CARD SHOWN. Output only: "A payment card has been shown. Please confirm the payment." Then STOP. ' +
               "The card handles signing, delivery and shows the code itself. When it reports back with {paid:true, orderId}, " +
-              "tell the user it's done (code shown in the card and emailed). If it reports {paid:false}, relay the error.",
+              "tell the user it's done (code shown in the card and emailed). If it reports {paid:false}, relay the error." +
+              (fundFrom ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card pays the order by itself. Never say swap/bridge." : ""),
           };
         } catch (err) {
           return { error: describeCryptorefillsError(err) };

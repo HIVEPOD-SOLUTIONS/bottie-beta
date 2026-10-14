@@ -26,6 +26,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Couldn't report the transaction";
     console.error("[bitrefill/chain-purchase/transaction]", message);
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

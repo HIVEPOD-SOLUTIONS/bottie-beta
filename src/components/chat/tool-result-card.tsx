@@ -7,9 +7,48 @@ import { useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { walletRailFor, sendFromWallet } from "@/lib/wallet-send";
-import { pickPrivyWallet } from "@/lib/evm-pay";
+import { pickPrivyWallet, pickPrivyWalletOrThrow, friendlyEvmError } from "@/lib/evm-pay";
+import { payDepositFromWallet } from "@/lib/chain-purchase-client";
 
 /** Shows the right number of decimal places for any USDC amount down to $0.000001. */
+/** Robinhood Chain deposits: send the ETH straight from the Bluvfi wallet. */
+function RobinhoodWalletPay({ address, amount, invoiceId, walletRequestId }: { address: string; amount: string; invoiceId?: string; walletRequestId?: string }) {
+  const { sendTransaction, getAccessToken } = usePrivy();
+  const { wallets } = useWallets();
+  const key = `rh_paid_${invoiceId ?? address}`;
+  const [sent, setSent] = useState<boolean>(() => { try { return !!sessionStorage.getItem(key); } catch { return false; } });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  if (sent) return <p className="text-[10px] text-green-400">✓ Sent from your Bluvfi wallet — confirming…</p>;
+  return (
+    <div className="space-y-1">
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setErr(null);
+          try {
+            await payDepositFromWallet({
+              chain: "robinhood", depositAddress: address, amount, wallet: pickPrivyWalletOrThrow(wallets), sendTransaction,
+              ...(walletRequestId ? { track: { walletRequestId, getAccessToken } } : {}),
+            });
+            try { sessionStorage.setItem(key, "1"); } catch { /* ignore */ }
+            setSent(true);
+          } catch (e) {
+            setErr(friendlyEvmError(e, "Robinhood Chain"));
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="w-full rounded-lg bg-[#8FAE82] py-2 text-[11px] font-semibold text-[#141513] disabled:opacity-50"
+      >
+        {busy ? "Sending…" : `Send ${amount} ETH from my Bluvfi wallet`}
+      </button>
+      {err && <p className="text-[10px] text-red-400">{err}</p>}
+    </div>
+  );
+}
+
 function fmtUsdc(n: number): string {
   if (n >= 0.01) return n.toFixed(2);
   if (n >= 0.0001) return n.toFixed(4);
@@ -119,7 +158,9 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
       xrp:           { icon: "🌐", label: "XRP" },
       zcash:         { icon: "🛡️", label: "Zcash (ZEC)" },
       hyperliquid:   { icon: "🌊", label: "Hyperliquid (USDC)" },
+      robinhood:     { icon: "🪶", label: "Robinhood Chain (ETH)" },
       arc:           { icon: "🟣", label: "Arc (USDC)" },
+      tempo:         { icon: "⚡", label: "Tempo (USDC.e)" },
     };
     const pmMeta = PM_LABELS[pm] ?? { icon: "💳", label: pm };
     const isAddressBased = data.isAddressBased;
@@ -155,7 +196,11 @@ export function ToolResultCard({ toolName, result }: ToolResultCardProps) {
                   Send exactly <span className="text-[#F2F0E8] font-mono">{data.paymentAmount} {data.paymentCurrency}</span> to the address above.
                   {pm === "zcash" && " Use a transparent send from your own Zcash wallet."}
                   {pm === "hyperliquid" && " Send from your Hyperliquid spot balance (Send → paste the address)."}
+                  {pm === "robinhood" && " Send ETH on Robinhood Chain — one tap from your Bluvfi wallet below, or from any wallet."}
                 </p>
+                {pm === "robinhood" && data.paymentAddress && (
+                  <RobinhoodWalletPay address={data.paymentAddress} amount={String(data.paymentAmount)} invoiceId={data.invoiceId} walletRequestId={data.walletRequestId} />
+                )}
                 {data.depositMemo && (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
                     <p className="text-[10px] font-semibold text-amber-400">Include this memo, or the payment can&apos;t be matched</p>

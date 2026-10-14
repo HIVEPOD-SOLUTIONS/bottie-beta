@@ -37,7 +37,7 @@ function errorResult(err: unknown) {
   return { error: "Stock data is temporarily unavailable. Try again shortly." };
 }
 
-export function createStocksTools(userId?: string) {
+export function createStocksTools(userId?: string, client?: string) {
   return {
     search_stocks: tool({
       description:
@@ -192,8 +192,18 @@ export function createStocksTools(userId?: string) {
         amountUsd: z.number().positive().optional().describe("Buy only: how many dollars to invest, e.g. 50"),
         shares: z.number().positive().optional().describe("Sell (or buy by shares): number of shares, fractions allowed"),
         all: z.boolean().optional().describe("Sell only: sell every share the user holds"),
+        fundFrom: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional()
+          .describe("Only when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
+        refundAddress: z.string().max(128).optional()
+          .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
-      execute: async ({ ticker, side, amountUsd, shares, all }) => {
+      execute: async ({ ticker, side, amountUsd, shares, all, fundFrom, refundAddress }) => {
+        if (fundFrom && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
+        if (fundFrom && side === "buy" && (fundFrom === "zcash" || fundFrom === "hyperliquid") && !refundAddress) {
+          return { error: fundFrom === "zcash"
+            ? "Ask the user for their own transparent Zcash address (t1…/t3…) for refunds, then call again with refundAddress."
+            : "Ask the user for their Hyperliquid account address (0x…) for refunds, then call again with refundAddress." };
+        }
         if (!backpackConfigured()) return { error: "Stock trading isn't switched on yet. Prices and charts are available." };
         if (!userId) return { error: "Not authenticated" };
         try {
@@ -222,10 +232,12 @@ export function createStocksTools(userId?: string) {
             name: quote.name,
             side,
             quote,
+            ...(fundFrom && side === "buy" ? { fundFrom, refundAddress } : {}),
             tip:
               'CONFIRM CARD SHOWN. Output only: "Here\'s your order — tap Confirm to place it." Then STOP. ' +
               "The card pays, places the order and shows the result. When it reports {done:true}, summarize what filled. " +
-              "If it reports {done:false}, relay the error plainly.",
+              "If it reports {done:false}, relay the error plainly." +
+              (fundFrom && side === "buy" ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card places the order by itself. Never say swap/bridge." : ""),
           };
         } catch (err) {
           return errorResult(err);

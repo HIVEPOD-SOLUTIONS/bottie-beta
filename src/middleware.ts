@@ -53,6 +53,7 @@ const RATE_LIMITS: { path: string; windowMs: number; max: number }[] = [
   { path: "/api/stocks/trade",     windowMs: 60_000, max: 10  }, // real trades on the shared Backpack account
   { path: "/api/stocks/withdraw",  windowMs: 60_000, max: 5   },
   { path: "/api/stocks",           windowMs: 60_000, max: 120 }, // quotes/prices poll while the sheet is open
+  { path: "/api/chain-topup",      windowMs: 60_000, max: 30  }, // status polls every 6 s; creation hits the swap service
 ];
 
 function applyRateLimit(request: NextRequest): NextResponse | null {
@@ -117,6 +118,8 @@ function buildCSP(): string {
       "https://rpc.doma.xyz",
       // Arc mainnet (Circle's USDC-gas chain) — balances, sends, bridge completion
       "https://rpc.mainnet.arc.io",
+      "https://rpc.mainnet.chain.robinhood.com",
+      "https://rpc.tempo.xyz",
       "https://eth-mainnet.g.alchemy.com",
       "https://polygon-mainnet.g.alchemy.com",
       "https://opt-mainnet.g.alchemy.com",

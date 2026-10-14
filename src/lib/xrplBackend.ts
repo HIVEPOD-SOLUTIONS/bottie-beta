@@ -105,7 +105,7 @@ export type XrplSwapStatus =
 export type XrplServiceConfirmationStatus = "NOT_APPLICABLE" | "CONFIRMED" | "FAILED";
 
 /** Chains bluvfi-xrpl can swap FROM. Only xrpl uses a wallet of ours (and the sidebar wallet). */
-export type XrplChain = "xrpl" | "zcash" | "hyperliquid" | "arc";
+export type XrplChain = "xrpl" | "zcash" | "hyperliquid" | "arc" | "robinhood" | "tempo";
 
 /** Arc (LI.FI) only: what the user's own wallet must sign — approve first, then send transactionRequest. */
 export interface LifiPayment {

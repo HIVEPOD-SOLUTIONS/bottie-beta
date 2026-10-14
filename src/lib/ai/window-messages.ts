@@ -12,6 +12,8 @@ const ACTION_TOOLS = new Set([
   "withdraw_stock_credit",
   "doma_buy_listing",
   "send_usdc_arc",
+  "fund_wallet_from_chain",
+  "get_chain_payments",
   "fund_xrp_purchase_from_wallet",
   "recover_xrp_order",
   "buy_investment",
@@ -179,8 +181,8 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         line = `Paid Bitrefill invoice ${p.invoiceId ?? "?"}${p.paidWith ? ` with ${p.paidWith}` : ""} — poll_bitrefill_order next`;
       } else if (p?.paid === false) {
         line = `Bitrefill payment not completed for ${input.productId}: ${p.error ?? "unknown error"}`;
-      } else if (p?.pendingBitrefillPayment && p.paymentMethod === "arc") {
-        line = `Arc USDC payment card shown for ${input.productId}${emailNote} (priced when the user confirms)`;
+      } else if (p?.pendingBitrefillPayment && (p.paymentMethod === "arc" || p.paymentMethod === "tempo")) {
+        line = `${p.paymentMethod === "arc" ? "Arc USDC" : "Tempo USDC.e"} payment card shown for ${input.productId}${emailNote} (priced when the user confirms)`;
       } else if (p?.pendingBitrefillPayment) {
         const method = p.paymentMethod ?? (input.network === "solana" ? "usdc_solana" : "usdc_base");
         const amount = p.paymentAmount ?? "?";
@@ -819,6 +821,22 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
         : `Stock credit withdrawal not done: ${p?.error ?? "unknown error"}`;
       break;
     }
+    case "get_chain_payments": {
+      const p = parsed as any;
+      const list = Array.isArray(p?.payments) ? p.payments : [];
+      line = p?.error
+        ? `Chain payments lookup failed: ${p.error}`
+        : `Checked ${list.length} payment(s) from other chains${list.length ? `: ${list.slice(0, 3).map((x: any) => `${x.chain} ${x.status}`).join(", ")}` : ""}`;
+      break;
+    }
+    case "fund_wallet_from_chain": {
+      const p = parsed as any;
+      line = !p?.chainTopUp
+        ? `Wallet top-up not prepared: ${p?.error ?? "unknown error"}`
+        : p.funded === true ? `Topped up ${p.amount} ${p.token === "eth" ? "ETH" : "USDC"} on Base${p.chain ? ` from ${p.chain}` : ""}`
+        : `Top-up panel shown — ${p.amount} ${p.token === "eth" ? "ETH" : "USDC"} to Base${p.chain ? ` from ${p.chain}` : ""}`;
+      break;
+    }
     case "send_usdc_arc": {
       const p = parsed as any;
       line = !p?.arcSend
@@ -847,7 +865,7 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
           ? `Stock order ${p.orderId} ${p.status === "filled" ? `filled — ${what} at $${p.fillPrice}` : `placed, settling — ${what}`}`
           : p.done === false
             ? `Stock trade not completed (${what}): ${p.error ?? "unknown error"}`
-            : `Stock trade confirm card shown — ${what}, est. $${p.quote?.estimateUsdc}`;
+            : `Stock trade confirm card shown — ${what}, est. $${p.quote?.estimateUsdc}${p.fundFrom ? `, paid from ${p.fundFrom}` : ""}`;
       break;
     }
     case "buy_cryptorefills_product": {

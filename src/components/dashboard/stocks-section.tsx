@@ -12,6 +12,7 @@ import {
   walletShare,
   type StockQuote as Quote,
 } from "@/lib/stocks-client";
+import { ChainTopUpPanel } from "./chain-topup-panel";
 
 /**
  * Invest → Stocks / ETFs. US stocks and ETFs traded through Backpack Exchange
@@ -308,6 +309,8 @@ function StockSheet({
   const [step, setStep] = useState<TradeStep>("form");
   const [msg, setMsg] = useState<string | null>(null);
   const [result, setResult] = useState<{ status: string; fillPrice?: string | null; fillQuantity?: string | null } | null>(null);
+  // Buy funded from Arc / Tempo / Robinhood / Zcash / Hyperliquid (tops up the Base wallet first).
+  const [showTopUp, setShowTopUp] = useState(false);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -420,11 +423,27 @@ function StockSheet({
                 ? "Filled at or better than your max price; anything unused is kept as credit for your next buy."
                 : "Filled at or better than your min price; the money goes straight to your wallet."}
             </p>
-            <div className="flex gap-2">
-              <button onClick={() => setStep("form")} className="flex-1 rounded-2xl bg-white/[0.06] py-3 text-sm font-semibold text-[#F2F0E8]">Back</button>
-              <button onClick={confirm} className="flex-1 rounded-2xl bg-[#8FAE82] py-3 text-sm font-semibold text-[#141513]">
-                Confirm {quote.side}
+            {quote.side === "buy" && fromWallet > 0 && (showTopUp ? (
+              <ChainTopUpPanel
+                token="usdc"
+                amount={fromWallet.toFixed(2)}
+                amountUsd={fromWallet}
+                purpose="stocks"
+                reference={`Buy ${Number(quote.quantity)} ${stock.ticker}`}
+                onFunded={() => { setShowTopUp(false); void confirm(); }}
+              />
+            ) : (
+              <button onClick={() => setShowTopUp(true)} className="text-center text-[11px] text-[#8FAE82] underline">
+                Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
               </button>
+            ))}
+            <div className="flex gap-2">
+              <button onClick={() => { setShowTopUp(false); setStep("form"); }} className="flex-1 rounded-2xl bg-white/[0.06] py-3 text-sm font-semibold text-[#F2F0E8]">Back</button>
+              {!(showTopUp && quote.side === "buy" && fromWallet > 0) && (
+                <button onClick={confirm} className="flex-1 rounded-2xl bg-[#8FAE82] py-3 text-sm font-semibold text-[#141513]">
+                  Confirm {quote.side}
+                </button>
+              )}
             </div>
           </div>
         ) : (

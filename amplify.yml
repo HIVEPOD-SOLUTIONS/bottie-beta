@@ -40,6 +40,7 @@ frontend:
           # fails the build if the schema is in an unexpected state, so code is
           # never deployed ahead of its tables.
           node scripts/apply-stocks-migration.mjs
+          node scripts/apply-chain-swaps-migration.mjs
 
           if command -v bun >/dev/null 2>&1; then
             bun run build

@@ -91,7 +91,7 @@ export const payments = pgTable("payments", {
   amountUsdc: text("amount_usdc").notNull(),
   status: text("status").notNull(), // "pending" | "completed" | "failed"
   txHash: text("tx_hash"),
-  // Network that settled it: "evm" | "solana" | "xrpl" | "arc" | "zcash" | "hyperliquid" | "doma" | "backpack"
+  // Network that settled it: "evm" | "solana" | "xrpl" | "arc" | "tempo" | "robinhood" | "zcash" | "hyperliquid" | "doma" | "backpack"
   chain: text("chain"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
@@ -112,7 +112,7 @@ export const bitrefillOrders = pgTable("bitrefill_orders", {
   productId: text("product_id").notNull(),
   productName: text("product_name"),
   packageValue: text("package_value").notNull(),
-  paymentMethod: text("payment_method").notNull(),   // e.g. "usdc_base", "bitcoin"; Bluvfi-only: "xrp" | "zcash" | "hyperliquid" | "arc"
+  paymentMethod: text("payment_method").notNull(),   // e.g. "usdc_base", "bitcoin"; Bluvfi-only: "xrp" | "zcash" | "hyperliquid" | "robinhood" | "arc"
   isAddressBased: boolean("is_address_based").notNull().default(false),
   paymentAddress: text("payment_address"),           // deposit address (address-based methods)
   paymentAmount: text("payment_amount"),             // amount in payment currency
@@ -282,6 +282,46 @@ export const stockLedger = pgTable("stock_ledger", {
 }, (table) => [
   uniqueIndex("stock_ledger_kind_ref_asset_idx").on(table.kind, table.ref, table.asset),
   index("stock_ledger_user_created_idx").on(table.userId, table.createdAt),
+]);
+
+/**
+ * chain_swaps — one row per bluvfi-xrpl swap from Zcash, Hyperliquid, Arc,
+ * Robinhood Chain or Tempo (Bitrefill purchases and Base-wallet top-ups), so
+ * every such payment can be traced and its funds accounted for even if the
+ * user closed the app mid-way. bluvfi-xrpl stays the source of truth; this is
+ * Bluvfi's copy (kept fresh by the xrpl webhook, status polls and listings).
+ * Table created by scripts/apply-chain-swaps-migration.mjs (drizzle/0016).
+ */
+export const chainSwaps = pgTable("chain_swaps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  walletRequestId: text("wallet_request_id").notNull(),  // bluvfi-xrpl wallet-request id
+  purpose: text("purpose").notNull(),                      // bitrefill | cryptorefills | stocks | doma | wallet
+  reference: text("reference"),                            // e.g. Bitrefill invoice id
+  chain: text("chain").notNull(),                          // zcash | hyperliquid | arc | robinhood | tempo
+  kind: text("kind").notNull(),                            // deposit | route
+  depositAddress: text("deposit_address"),
+  depositMemo: text("deposit_memo"),
+  refundAddress: text("refund_address").notNull(),         // where a failed swap is refunded
+  payAmount: text("pay_amount").notNull(),                 // what the user pays, decimal
+  paySymbol: text("pay_symbol").notNull(),
+  recipient: text("recipient").notNull(),                  // invoice address or the user's Base wallet
+  receiveAmount: text("receive_amount").notNull(),         // what must arrive, decimal
+  receiveAsset: text("receive_asset").notNull(),           // e.g. "USDC on Base"
+  amountUsd: text("amount_usd"),
+  status: text("status").notNull().default("awaiting_payment"), // awaiting_payment | processing | completed | failed | expired
+  swapStatus: text("swap_status"),                         // bluvfi-xrpl's raw swapStatus
+  userTxHash: text("user_tx_hash"),                        // the user's own payment (route tx, or wallet send to the deposit)
+  reportedAt: timestamp("reported_at"),                    // route tx hash accepted by bluvfi-xrpl
+  swapTxHash: text("swap_tx_hash"),                        // delivery / refund tx reported by bluvfi-xrpl
+  error: text("error"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("chain_swaps_wallet_request_idx").on(table.walletRequestId),
+  index("chain_swaps_user_created_idx").on(table.userId, table.createdAt),
+  index("chain_swaps_status_idx").on(table.status),
 ]);
 
 export const stockOrders = pgTable("stock_orders", {

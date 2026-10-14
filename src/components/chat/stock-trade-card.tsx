@@ -14,6 +14,8 @@ import {
   type TradeStep,
 } from "@/lib/stocks-client";
 import { StockLogo } from "@/components/dashboard/stocks-section";
+import { ChainTopUpPanel } from "@/components/dashboard/chain-topup-panel";
+import { isSwapChain, type SwapChain } from "@/lib/swap-chains";
 
 /**
  * Confirm card for the AI's trade_stock tool — the same trade as Invest →
@@ -28,6 +30,9 @@ type Output = {
   ticker: string;
   name: string;
   side: "buy" | "sell";
+  /** Buy paid from Arc / Tempo / Robinhood / Zcash / Hyperliquid: top up the Base wallet first. */
+  fundFrom?: SwapChain;
+  refundAddress?: string;
   quote: StockQuote;
   // Set after the card reports back:
   done?: boolean;
@@ -60,6 +65,7 @@ export function StockTradeCard({
   const [order, setOrder] = useState<{ status: string; fillPrice?: string | null; fillQuantity?: string | null } | null>(
     output.done ? { status: output.status ?? "pending", fillPrice: output.fillPrice, fillQuantity: output.fillQuantity } : null,
   );
+  const [showTopUp, setShowTopUp] = useState(output.side === "buy" && isSwapChain(output.fundFrom));
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -145,7 +151,26 @@ export function StockTradeCard({
               <div key={k} className="flex justify-between"><span className="text-[#A7A79A]">{k}</span><span className="text-[#F2F0E8]">{v}</span></div>
             ))}
           </div>
-          <div className="mt-3 flex gap-2">
+          {output.side === "buy" && fromWallet > 0 && showTopUp && (
+            <div className="mt-3">
+              <ChainTopUpPanel
+                token="usdc"
+                amount={fromWallet.toFixed(2)}
+                amountUsd={fromWallet}
+                purpose="stocks"
+                reference={`Buy ${Number(quote.quantity)} ${output.ticker}`}
+                initialChain={isSwapChain(output.fundFrom) ? output.fundFrom : undefined}
+                initialRefundAddress={output.refundAddress}
+                onFunded={() => { setShowTopUp(false); void confirm(); }}
+              />
+            </div>
+          )}
+          {output.side === "buy" && fromWallet > 0 && !showTopUp && (
+            <button onClick={() => setShowTopUp(true)} className="mt-2 text-[11px] text-[#8FAE82] underline">
+              Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+            </button>
+          )}
+          <div className={`mt-3 flex gap-2 ${showTopUp && fromWallet > 0 ? "hidden" : ""}`}>
             <button
               onClick={() => { setState("error"); setMsg("Cancelled. Nothing was traded."); report({ done: false, error: "Cancelled by user" }); }}
               className="flex-1 rounded-xl bg-white/[0.06] py-2.5 text-xs font-semibold text-[#F2F0E8]"

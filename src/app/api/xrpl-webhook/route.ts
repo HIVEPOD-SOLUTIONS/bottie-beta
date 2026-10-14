@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { markXrpPurchaseFailed } from "@/lib/xrp-purchase";
+import { refreshByWalletRequestId } from "@/lib/chain-swaps";
 
 /**
  * POST /api/xrpl-webhook
@@ -129,6 +130,12 @@ export async function POST(req: NextRequest) {
     `[xrpl-webhook] walletRequestId=${walletRequestId} event=${event} activityId=${activityId}` +
     (errorDetail ? ` errorMessage=${JSON.stringify(errorDetail)}` : ""),
   );
+
+  // Zcash / Hyperliquid / Arc / Robinhood / Tempo swaps: refresh the ledger row
+  // from bluvfi-xrpl on every event (no-op if this swap isn't one of them), so
+  // their status is right even when nobody has the app open.
+  await refreshByWalletRequestId(walletRequestId)
+    .catch((e: unknown) => console.error("[xrpl-webhook] chain swap refresh error", e));
 
   const dbStatus = FAILURE_STATUS_MAP[event];
   if (dbStatus) {

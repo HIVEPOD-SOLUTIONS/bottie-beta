@@ -19,10 +19,15 @@ import { usePaymentsContext } from "@/contexts/payments-context";
 import { walletRailFor, sendFromWallet } from "@/lib/wallet-send";
 import { COUNTRIES, CountrySelector, getCountry, type CountryEntry } from "./bills-countries";
 import { kindOf, cardCategoryOf, type CrCardCategory } from "@/lib/cryptorefills-categories";
+import { ChainTopUpPanel } from "./chain-topup-panel";
 import type { CrBrand, CrCatalogItem, CrDelivery, CrOrderStatus, CrPaymentMethod, CrPartnerOrder, CrRail } from "@/lib/cryptorefills";
 
-/** "base"/"solana" = gasless USDC over x402; "other" = any coin via deposit address (partner API). */
-type PayWith = CrRail | "other";
+/**
+ * "base"/"solana" = gasless USDC over x402; "other" = any coin via deposit
+ * address (partner API); "chain" = top up the Bluvfi wallet on Base from Arc,
+ * Tempo, Robinhood Chain, Zcash or Hyperliquid, then pay gaslessly on Base.
+ */
+type PayWith = CrRail | "other" | "chain";
 
 /**
  * Cryptorefills under Bills → Browse. Gift cards, phone refills and eSIMs paid
@@ -426,7 +431,7 @@ function CryptorefillsCheckout({
         },
         productName,
         expectedUsd: priceUsd,
-        rail: payWith,
+        rail: payWith === "chain" ? "base" : payWith,
         evmWallet: pickEvmWallet(wallets),
         solanaWallet: solanaWallets[0],
         getAccessToken,
@@ -584,10 +589,11 @@ function CryptorefillsCheckout({
 
               <div>
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[#A7A79A]">Pay with</p>
-                <div className={`grid gap-2 ${partnerEnabled ? "grid-cols-3" : "grid-cols-2"}`}>
+                <div className={`grid gap-2 ${partnerEnabled ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
                   {([
                     { key: "base", title: "USDC", sub: "Base · no gas" },
                     { key: "solana", title: "USDC", sub: "Solana · no gas" },
+                    { key: "chain", title: "Other chain", sub: "Arc · Tempo · Robinhood · ZEC · HL" },
                     ...(partnerEnabled ? [{ key: "other", title: "Other crypto", sub: `${coins.length} coins` }] : []),
                   ] as { key: PayWith; title: string; sub: string }[]).map((o) => (
                     <button
@@ -624,7 +630,22 @@ function CryptorefillsCheckout({
 
               {msg && <p className="text-xs text-red-400">{msg}</p>}
 
-              <button
+              {payWith === "chain" && canPay && priceUsd !== null && /^[^s@]+@[^s@]+.[^s@]+$/.test(email.trim()) && (
+                <ChainTopUpPanel
+                  token="usdc"
+                  amount={priceUsd.toFixed(2)}
+                  amountUsd={priceUsd}
+                  purpose="cryptorefills"
+                  reference={picked ? `${picked.product_name ?? brand.brand_name}` : brand.brand_name}
+                  title={`Pay ${usd(priceUsd)} from another chain`}
+                  onFunded={() => void pay()}
+                />
+              )}
+              {payWith === "chain" && !(canPay && /^[^s@]+@[^s@]+.[^s@]+$/.test(email.trim())) && (
+                <p className="text-[11px] text-[#A7A79A]">Choose an amount and enter your email to continue.</p>
+              )}
+
+              {payWith !== "chain" && <button
                 onClick={pay}
                 disabled={!canPay || (payWith === "other" && !network)}
                 className="w-full rounded-2xl bg-[#8FAE82] py-3.5 text-sm font-semibold text-[#141513] disabled:opacity-40"
@@ -632,11 +653,13 @@ function CryptorefillsCheckout({
                 {priceUsd === null || !picked ? "Choose an amount"
                   : payWith === "other" ? `Get ${coin} payment address · ${usd(priceUsd)}`
                   : `Pay ${usd(priceUsd)} USDC`}
-              </button>
-              <p className="-mt-2 text-center text-[11px] text-[#A7A79A]">
+              </button>}
+              <p className={`${payWith === "chain" ? "" : "-mt-2 "}text-center text-[11px] text-[#A7A79A]`}>
                 {payWith === "other"
                   ? `You send ${coin} on ${network || "the chosen network"} from any wallet or exchange · network fee applies`
-                  : `USDC on ${RAIL_LABEL[payWith]} · you sign once, no gas`} · digital goods are non-refundable once delivered
+                  : payWith === "chain"
+                    ? "Your Bluvfi wallet on Base is topped up first, then you sign once on Base"
+                    : `USDC on ${RAIL_LABEL[payWith]} · you sign once, no gas`} · digital goods are non-refundable once delivered
               </p>
             </div>
           )}
