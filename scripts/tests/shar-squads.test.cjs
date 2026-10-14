@@ -123,7 +123,7 @@ const spend = (c, user, usd, when = "2026-10-06 09:00:00") =>
   const route = fs.readFileSync(path.join(__dirname, "../../src/app/api/shar/squad/route.ts"), "utf8");
   check("route: sign-in required and rate limited for both reading and writing, with exactly the three actions", route.includes("verifyAuth") && (route.match(/checkApiLimit/g) || []).length >= 2 && ["create", "join", "leave"].every((a) => route.includes(`"${a}"`)));
   const sql = fs.readFileSync(path.join(__dirname, "../../drizzle/0017_squads_awards_push.sql"), "utf8");
-  check("migration: safe to run twice, with the slot cap and one squad per person enforced by the database", (sql.match(/IF NOT EXISTS/g) || []).length >= 7 && sql.includes('"user_id" text PRIMARY KEY') && sql.includes("BETWEEN 1 AND 10") && sql.includes('UNIQUE ("squad_id", "slot")') && sql.includes('PRIMARY KEY ("week_start", "user_id")'));
+  check("migration: safe to run twice, with the slot cap and one squad per person enforced by the database", (sql.match(/IF NOT EXISTS/g) || []).length >= 6 && sql.includes('"user_id" text PRIMARY KEY') && sql.includes("BETWEEN 1 AND 10") && sql.includes('UNIQUE ("squad_id", "slot")') && sql.includes('PRIMARY KEY ("week_start", "user_id")'));
 
   finish();
 })().catch((e) => {

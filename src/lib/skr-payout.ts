@@ -420,7 +420,7 @@ export async function reconcilePayout(kind: PayoutKind, id: string, chain?: Payo
 
 /** Tells the person their payout was paid or declined. Fire and forget: a notification must never hold up or break a payout. */
 function tellPayout(kind: PayoutKind, id: string, outcome: "paid" | "rejected"): void {
-  void import("@/lib/push").then((m) => m.notifyPayout(kind, id, outcome)).catch(() => {});
+  void import("@/lib/inbox").then((m) => m.notifyPayout(kind, id, outcome)).catch(() => {});
 }
 
 // ── Rejecting ─────────────────────────────────────────────────────────────────

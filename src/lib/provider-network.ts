@@ -860,7 +860,7 @@ export async function recordUsage(
 /** Lets the owner know their provider was used by someone else. Fire and forget, and never for their own tests. */
 function tellOwner(listing: Pick<Listing, "id" | "ownerUserId">, callerUserId: string): void {
   if (callerUserId === listing.ownerUserId) return;
-  void import("@/lib/push").then((m) => m.notifyProviderUsed(listing.ownerUserId, listing.id)).catch(() => {});
+  void import("@/lib/inbox").then((m) => m.notifyProviderUsed(listing.ownerUserId, listing.id)).catch(() => {});
 }
 
 // ── One call, free or paid ────────────────────────────────────────────────────

@@ -656,11 +656,20 @@ export const sharWeeklyAwards = pgTable("shar_weekly_awards", {
   primaryKey({ columns: [table.weekStart, table.userId], name: "shar_weekly_awards_pk" }),
 ]);
 
-/** A phone's push address (Firebase Cloud Messaging token) and whose it is. */
-export const pushTokens = pgTable("push_tokens", {
-  token: text("token").primaryKey(),
+/** What to tell a person (a claim paid, a provider used). The app fetches these and shows them as notifications; see drizzle/0018. */
+export const notificationInbox = pgTable("notification_inbox", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
   userId: text("user_id").notNull(),
-  platform: text("platform").notNull().default("android"),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  url: text("url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** The secret a phone reads its inbox with, kept only as a hash. */
+export const inboxKeys = pgTable("inbox_keys", {
+  keyHash: text("key_hash").primaryKey(),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at"),
 });
