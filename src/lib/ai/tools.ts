@@ -298,12 +298,9 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
       execute: async ({ productId, packageValue, recipientEmail, recipientName, paymentMethod, sendTo, isTopup, refundAddress }) => {
         const resolvedMethod = paymentMethod ?? "usdc_base";
 
-        // Arc: the chat card creates the invoice and signs the route with the
-        // user's Privy wallet when they tap Pay (the server can't know which
-        // wallet will sign — see chain-purchase-client.ts).
-        if ((resolvedMethod === "arc" || resolvedMethod === "tempo") && client === "expo-android") {
-          return { error: `Paying with ${resolvedMethod === "arc" ? "USDC on Arc" : "USDC.e on Tempo"} is on bluvfi.xyz, not in the app yet. Offer another payment method.` };
-        }
+        // Arc / Tempo: the chat card (on the website and in the app) creates the invoice and signs the route
+        // with the user's Privy wallet when they tap Pay (the server can't know which wallet will sign — see
+        // chain-purchase-client.ts, and the app's chain-swap-client.ts).
         if (resolvedMethod === "arc" || resolvedMethod === "tempo") {
           const label = resolvedMethod === "arc" ? "USDC on Arc" : "USDC.e on Tempo";
           return {
@@ -1471,7 +1468,6 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
       }),
       execute: async ({ name, listingId, fundFrom: fundFromIn, refundAddress }) => {
         try {
-          if (fundFromIn && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
           const fundFrom = fundFromIn;
           if ((fundFrom === "zcash" || fundFrom === "hyperliquid") && !refundAddress) {
             return { error: fundFrom === "zcash"

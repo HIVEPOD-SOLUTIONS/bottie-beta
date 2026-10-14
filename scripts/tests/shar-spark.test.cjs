@@ -200,6 +200,20 @@ const at = (iso) => new Date(`${iso}T12:00:00Z`);
     check("prizes: before the migration is applied the summary still loads and claims stay on", nt.ready === true);
   }
 
+  // ── Backpack trades never earn Shar: a stock can be sold straight back, so buying one is not spending
+  {
+    const bp = await freshDb();
+    const add = (chain, desc, usd) => bp.client.query("insert into payments (user_id,type,status,amount_usdc,description,chain,created_at) values ('bp1','investment','completed',$1,$2,$3,'2026-10-06 10:00:00')", [String(usd), desc, chain]);
+    await add("backpack", "Bought 1 AAPL (Backpack)", 200);
+    await add("backpack", "Sold 1 AAPL (Backpack)", 198);
+    await bp.client.query("insert into payments (user_id,type,status,amount_usdc,description,chain,created_at) values ('bp1','bill','completed','25','Netflix','evm','2026-10-06 10:00:00')");
+    const bsum = await bp.shar.getSummary("bp1", NOW);
+    check("backpack: a stock buy and the sell straight back earn no Shar, while a gift card bought the same day does (25)", bsum.available === 25 && bsum.week === 25, String(bsum.available));
+    const bb = await bp.shar.getLeaderboard("bp1", NOW);
+    check("backpack: nor do they count toward the weekly board or its prizes", bb.top[0].shar === 25 && bb.me.shar === 25);
+    check("backpack: the pure rule agrees, and other investments (and unlabelled rows) still count", sharRules.sharForPayment({ type: "investment", status: "completed", amountUsdc: "200", chain: "backpack" }).shar === 0 && sharRules.sharForPayment({ type: "investment", status: "completed", amountUsdc: "200", chain: "evm" }).shar === 200 && sharRules.sharForPayment({ type: "investment", status: "completed", amountUsdc: "200" }).shar === 200 && sharRules.SHAR.excludedChains.join() === "backpack");
+  }
+
   // ── before the migration has been applied
   const old = await freshDb({ sparksTable: false });
   const oldSum = await old.shar.getSummary("x", NOW);

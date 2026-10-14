@@ -2,7 +2,7 @@
  * The shape of the activity feed and the small rules around it: which sources exist, how a page is requested, how a position in
  * the feed (a cursor) is written, and the wording and state of each kind of entry. No database access here.
  *
- * The feed is one history across everything that moves for a person: Shar (purchases, provider use, claims), credits (top-ups, paid
+ * The feed is one history across everything that moves for a person: Shar (purchases, provider use, Daily Sparks, weekly prizes, claims), credits (top-ups, paid
  * calls, refunds) and commission (what their providers earned, and withdrawals). Amounts are whole numbers: Shar as itself, money
  * as micro-USDC.
  */
@@ -12,7 +12,7 @@ export type ActivitySource = (typeof SOURCES)[number];
 
 export const ACTIVITY = { defaultLimit: 25, maxLimit: 50 } as const;
 
-export type ActivityKind = "purchase" | "provider" | "claim" | "topup" | "call" | "refund" | "earned" | "withdrawal";
+export type ActivityKind = "purchase" | "provider" | "claim" | "spark" | "prize" | "topup" | "call" | "refund" | "earned" | "withdrawal";
 /** done: settled. pending: counted but not final yet. review: waiting for the team. sending: on its way. rejected: declined. */
 export type ActivityState = "done" | "pending" | "review" | "sending" | "rejected";
 

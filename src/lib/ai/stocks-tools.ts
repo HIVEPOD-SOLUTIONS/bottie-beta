@@ -37,7 +37,7 @@ function errorResult(err: unknown) {
   return { error: "Stock data is temporarily unavailable. Try again shortly." };
 }
 
-export function createStocksTools(userId?: string, client?: string) {
+export function createStocksTools(userId?: string, _client?: string) {
   return {
     search_stocks: tool({
       description:
@@ -198,7 +198,6 @@ export function createStocksTools(userId?: string, client?: string) {
           .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
       execute: async ({ ticker, side, amountUsd, shares, all, fundFrom, refundAddress }) => {
-        if (fundFrom && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
         if (fundFrom && side === "buy" && (fundFrom === "zcash" || fundFrom === "hyperliquid") && !refundAddress) {
           return { error: fundFrom === "zcash"
             ? "Ask the user for their own transparent Zcash address (t1…/t3…) for refunds, then call again with refundAddress."

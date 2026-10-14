@@ -20,6 +20,8 @@ export const APP_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_cryptorefills_order", "get_cryptorefills_orders",
   // Invest: Backpack stocks and ETFs (confirm card, withdraw sheet)
   "search_stocks", "get_stock", "get_stock_portfolio", "trade_stock", "withdraw_stock_credit",
+  // Arc, Tempo, Robinhood Chain, Zcash and Hyperliquid: the Arc wallet tab and send card, the top-up panel, and the status of payments from those chains
+  "get_arc_balance", "get_other_chain_balances", "send_usdc_arc", "fund_wallet_from_chain", "get_chain_payments",
   // history
   "get_payment_history", "get_balance_history", "get_activities", "get_activity_narration",
   // the user's own XRP wallet
@@ -79,11 +81,6 @@ export const APP_DENIED_NAMES: Readonly<Record<string, string>> = {
   create_goal: "savings goals have no screen in the app",
   delete_goal: "savings goals have no screen in the app",
   get_goals: "savings goals have no screen in the app",
-  get_arc_balance: "Arc has no screen in the app yet (website Wallet → Arc tab)",
-  get_other_chain_balances: "Arc, Tempo and Robinhood Chain have no screen in the app yet",
-  send_usdc_arc: "its confirm card exists only on the website",
-  fund_wallet_from_chain: "the top-up panel exists only on the website",
-  get_chain_payments: "payments from other chains are made on the website, which has their status",
 };
 
 export function isAppTool(name: string): boolean {

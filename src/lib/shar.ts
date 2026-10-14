@@ -57,6 +57,7 @@ const isUniqueViolation = (err: unknown) => {
 /** The qualifying payments, one row each with the Shar they earn (0 for ones that don't qualify). */
 export function spendCte() {
   const types = sql.join(SHAR.qualifyingTypes.map((t) => sql`${t}`), sql`, `);
+  const chains = sql.join(SHAR.excludedChains.map((c) => sql`${c}`), sql`, `);
   return sql`spend as (
     select id, user_id, status, created_at, description, shar from (
       select p.id, p.user_id, p.status, p.created_at, p.description,
@@ -65,7 +66,7 @@ export function spendCte() {
         select id, user_id, status, created_at, description,
           (case when amount_usdc ~ '^[0-9]+([.][0-9]+)?$' then amount_usdc::numeric else 0 end) as usd
         from payments
-        where type in (${types}) and status in ('completed', 'pending', 'processing')
+        where type in (${types}) and status in ('completed', 'pending', 'processing') and coalesce(chain, '') not in (${chains})
       ) p
     ) q where shar > 0
   )`;

@@ -50,7 +50,7 @@ check("the card-backed Backpack, Cryptorefills and Bitrefill tools are all allow
 const fake = Object.fromEntries(all.map((n) => [n, { name: n }]));
 const kept = at.restrictForApp(fake);
 check("restrictForApp keeps exactly the allowed tools and leaves the originals untouched", Object.keys(kept).every((n) => at.isAppTool(n)) && Object.keys(kept).length === all.filter((n) => at.isAppTool(n)).length && Object.keys(fake).length === all.length && kept.get_bills === fake.get_bills);
-check("the app gets far fewer tools than the website", Object.keys(kept).length < all.length / 3, `${Object.keys(kept).length} of ${all.length}`);
+check("the app still gets well under half of the website's tools (a sanity bound: it was a third until Arc and the other chains got screens in the app)", Object.keys(kept).length < all.length / 2, `${Object.keys(kept).length} of ${all.length}`);
 check("a tool nobody has classified is left out of the app", !at.isAppTool("brand_new_payment_tool") && !("brand_new_payment_tool" in at.restrictForApp({ brand_new_payment_tool: {} })));
 
 // ── it is actually wired in

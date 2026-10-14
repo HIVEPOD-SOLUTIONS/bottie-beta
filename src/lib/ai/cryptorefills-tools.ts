@@ -38,7 +38,7 @@ const countrySchema = z.string().regex(/^[a-zA-Z]{2}$/).describe("ISO 3166-1 alp
 // Gasless x402 rows store chain "evm"/"solana"; deposit-address (partner) rows store the network name.
 const isGaslessChain = (chain: string | null) => chain === "evm" || chain === "solana";
 
-export function createCryptorefillsTools(userId?: string, client?: string) {
+export function createCryptorefillsTools(userId?: string, _client?: string) {
   return {
     search_cryptorefills: tool({
       description:
@@ -166,8 +166,7 @@ export function createCryptorefillsTools(userId?: string, client?: string) {
           .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
       execute: async ({ country, brand, productId, productValue, email, phone, giftToEmail, payWith: payWithIn = "base", coin, network, fundFrom, refundAddress }) => {
-        // Paying from another chain tops up the Base wallet, then pays gaslessly on Base (website card only).
-        if (fundFrom && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
+        // Paying from another chain tops up the Base wallet, then pays gaslessly on Base (the website card and the app's).
         const payWith = fundFrom ? "base" : payWithIn;
         if ((fundFrom === "zcash" || fundFrom === "hyperliquid") && !refundAddress) {
           return { error: fundFrom === "zcash"

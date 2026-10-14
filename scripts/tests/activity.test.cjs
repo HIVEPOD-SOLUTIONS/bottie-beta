@@ -139,6 +139,27 @@ const WALLET = "5FHwkrdxntdK24hgQU8qgBjn35Y1zwhz1GZwCkP2UJnM";
   check("route: unknown source and silly limits fall back to the defaults", (await call("?source=bogus&limit=abc")).body.items.length === 23 && (await call("?limit=9999")).body.items.length === 23);
   check("route: it only ever returns the signed-in user's own history", (await call("", "OTHER")).body.items.every((i) => ["Someone else's card", "Added credits", "Weather Wisp was used"].includes(i.title)) && (await call("", "OTHER")).body.items.length === 3);
 
+  // ── Daily Sparks and weekly prizes are part of the Shar history (and so of what the assistant reads out)
+  await q(`insert into shar_sparks (user_id, day, shar, streak, created_at) values ('ME','2026-10-05',2,1,'2026-10-05 08:00:00'), ('ME','2026-10-06',3,3,'2026-10-06 08:00:00'), ('OTHER','2026-10-06',9,9,'2026-10-06 08:00:00')`);
+  await q(`insert into shar_weekly_awards (week_start, user_id, place, shar, created_at) values ('2026-09-28','ME',2,30,'2026-10-05 00:00:00'), ('2026-09-28','OTHER',1,50,'2026-10-05 00:00:00')`);
+  const sharOnly = await feed.getActivity("ME", { source: "shar", limit: 50 });
+  const sparks = sharOnly.items.filter((i) => i.kind === "spark");
+  const prizes = sharOnly.items.filter((i) => i.kind === "prize");
+  check("spark and prize entries: a person's own Daily Sparks and weekly prize show in their Shar history, titled and signed as in the app's journey log", sparks.length === 2 && sparks.some((i) => i.title === "Daily Spark · day 3" && i.amount === 3 && i.unit === "shar" && i.state === "done" && i.source === "shar") && prizes.length === 1 && prizes[0].title === "Weekly trial · place #2" && prizes[0].amount === 30 && prizes[0].subtitle === "Prize");
+  check("...never anyone else's, and not under Credits or Commission", !sharOnly.items.some((i) => i.amount === 9 || i.amount === 50) && (await feed.getActivity("ME", { source: "credits", limit: 50 })).items.every((i) => i.kind !== "spark" && i.kind !== "prize") && (await feed.getActivity("ME", { source: "commission", limit: 50 })).items.every((i) => i.kind !== "spark" && i.kind !== "prize"));
+  check("...and in All, newest first with the rest", (await feed.getActivity("ME", { limit: 50 })).items.filter((i) => i.kind === "spark" || i.kind === "prize").length === 3);
+  const seen = [];
+  let cursorAt = null;
+  for (let i = 0; i < 80; i++) {
+    const p = await feed.getActivity("ME", { limit: 2, cursor: cursorAt ? rules.parseCursor(cursorAt) : null });
+    seen.push(...p.items.map((x) => x.id));
+    if (!p.nextCursor) break;
+    cursorAt = p.nextCursor;
+  }
+  check("...and paging two at a time through everything never skips or repeats one", new Set(seen).size === seen.length && seen.includes("s:2026-10-05") && seen.includes("s:2026-10-06") && seen.includes("a:2026-09-28"));
+  await q(`delete from shar_sparks`);
+  await q(`delete from shar_weekly_awards`);
+
   // ── a migration that hasn't been applied yet only hides that part of the history
   await q(`drop table credit_ledger cascade`);
   await q(`drop table commission_payouts cascade`);
@@ -148,6 +169,8 @@ const WALLET = "5FHwkrdxntdK24hgQU8qgBjn35Y1zwhz1GZwCkP2UJnM";
   void bare;
   await q(`drop table shar_claims cascade`);
   await q(`drop table provider_usage cascade`);
+  await q(`drop table shar_sparks cascade`);
+  await q(`drop table shar_weekly_awards cascade`);
   const minimal = await feed.getActivity("ME", { limit: 50 });
   check("without any of the new tables: purchases (from payments) still work", minimal.ready === false && minimal.items.length === 2 && minimal.items.every((i) => i.kind === "purchase"), JSON.stringify(minimal.items.map((i) => i.title)));
   const pagedMinimal = await feed.getActivity("ME", { limit: 1 });

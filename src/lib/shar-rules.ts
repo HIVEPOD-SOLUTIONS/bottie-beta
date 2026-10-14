@@ -18,6 +18,11 @@ export const SHAR = {
   minPurchaseUsd: 10,
   /** Payment types that count as spending (banking moves and funding do not). */
   qualifyingTypes: ["bill", "investment"] as readonly string[],
+  /**
+   * Payments on these networks never earn Shar. Backpack stock trades are recorded as "investment" payments for History, but a stock can be
+   * sold straight back, so paying for one is not spending: counting it would let anyone buy and sell in a loop to earn Shar (which is SKR).
+   */
+  excludedChains: ["backpack"] as readonly string[],
   /** Share of a referred person's spending Shar that the referrer earns on top. */
   referralBonusRate: 0.1,
   /** Shar the owner of a verified provider earns per eligible use. */
@@ -42,8 +47,9 @@ export type SharState = "available" | "pending" | "none";
 const AMOUNT = /^[0-9]+(\.[0-9]+)?$/;
 
 /** What one payment earns, and whether that Shar can be used yet. */
-export function sharForPayment(p: { type: string; status: string; amountUsdc: string }): { shar: number; state: SharState } {
+export function sharForPayment(p: { type: string; status: string; amountUsdc: string; chain?: string | null }): { shar: number; state: SharState } {
   if (!SHAR.qualifyingTypes.includes(p.type)) return { shar: 0, state: "none" };
+  if (p.chain && SHAR.excludedChains.includes(p.chain)) return { shar: 0, state: "none" };
   if (!AMOUNT.test(p.amountUsdc)) return { shar: 0, state: "none" };
   const usd = Number(p.amountUsdc);
   if (!(usd >= SHAR.minPurchaseUsd)) return { shar: 0, state: "none" };

@@ -17,7 +17,7 @@ import { spendCte } from "@/lib/shar";
 /**
  * The activity feed: everything that moved for one person, newest first, a page at a time.
  *
- * Each source (purchases, provider use, claims, credits, commission, withdrawals) is asked for its own newest page and the pages are
+ * Each source (purchases, provider use, Daily Sparks, weekly prizes, claims, credits, commission, withdrawals) is asked for its own newest page and the pages are
  * merged, so no source can crowd out another and a missing table (a migration not applied yet) only hides that source. A position
  * in the feed is the exact time of the last entry (to the microsecond, as text) plus its id, with ids compared byte for byte
  * (COLLATE "C") in the database and in the merge, so paging never skips or repeats an entry, even at identical times.
@@ -95,6 +95,27 @@ export async function getActivity(userId: string, opts: { source?: ActivitySourc
               where l.owner_user_id = ${userId} and u.shar > 0 ${olderThan("u.created_at", "'u:' || u.id::text", c)}
               order by u.created_at desc, ('u:' || u.id::text) collate "C" desc limit ${n}`),
           ).map((r): Row => ({ id: r.id, source: "shar", kind: "provider", title: `${r.name} was used`, subtitle: null, amount: num(r.shar), unit: "shar", state: "done", at: isoFromDb(r.at_text), atText: r.at_text })),
+        )
+      : Promise.resolve([] as Row[]),
+    // Daily Sparks and weekly prizes (drizzle/0016 and 0017): each hides on its own until its migration has been applied.
+    shar
+      ? guarded(async () =>
+          rowsOf<{ id: string; streak: number; shar: string; at_text: string }>(
+            await db.execute(sql`
+              select ('s:' || day::text) as id, streak, shar, ${AT("created_at")} as at_text
+              from shar_sparks where user_id = ${userId} ${olderThan("created_at", "'s:' || day::text", c)}
+              order by created_at desc, ('s:' || day::text) collate "C" desc limit ${n}`),
+          ).map((r): Row => ({ id: r.id, source: "shar", kind: "spark", title: `Daily Spark · day ${r.streak}`, subtitle: null, amount: num(r.shar), unit: "shar", state: "done", at: isoFromDb(r.at_text), atText: r.at_text })),
+        )
+      : Promise.resolve([] as Row[]),
+    shar
+      ? guarded(async () =>
+          rowsOf<{ id: string; place: number; shar: string; at_text: string }>(
+            await db.execute(sql`
+              select ('a:' || week_start::text) as id, place, shar, ${AT("created_at")} as at_text
+              from shar_weekly_awards where user_id = ${userId} ${olderThan("created_at", "'a:' || week_start::text", c)}
+              order by created_at desc, ('a:' || week_start::text) collate "C" desc limit ${n}`),
+          ).map((r): Row => ({ id: r.id, source: "shar", kind: "prize", title: `Weekly trial · place #${r.place}`, subtitle: "Prize", amount: num(r.shar), unit: "shar", state: "done", at: isoFromDb(r.at_text), atText: r.at_text })),
         )
       : Promise.resolve([] as Row[]),
     shar

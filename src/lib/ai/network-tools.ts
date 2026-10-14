@@ -82,8 +82,10 @@ export function createNetworkTools(userId?: string) {
     get_my_shar: tool({
       description:
         "The user's Shar: how much they have available and pending, their rank (Spark, Wisp, Guide or Seeker), how much SKR it is worth, " +
-        "whether they can claim it yet, any claim in progress, and their referral code and link. Use for any question about Shar, rewards, " +
-        "claiming SKR or referrals. Do not estimate: always call this.",
+        "whether they can claim it yet, any claim in progress, and their referral code and link. Also their Daily Spark (streak, whether today's is collected, " +
+        "what the next one pays, the Seeker Genesis boost), their badges, their squad and this week's squad pool, and their weekly trial rank with the prizes. " +
+        "Use for any question about Shar, rewards, the Daily Spark or a streak, badges, squads, the weekly board or its prizes, claiming SKR or referrals. " +
+        "Do not estimate: always call this.",
       inputSchema: z.object({}),
       execute: async () => {
         if (!userId) return { error: "Not signed in." };
@@ -266,7 +268,7 @@ export function createNetworkTools(userId?: string) {
 
     get_my_activity: tool({
       description:
-        "The user's recent history, newest first: Shar they earned, claimed or spent, credits they added or used on providers, commission they earned, " +
+        "The user's recent history, newest first: Shar they earned (purchases, Daily Sparks, weekly trial prizes, providers being used), claimed or spent, credits they added or used on providers, commission they earned, " +
         "and withdrawals, each with its state (done, pending, in review, on its way, declined). Use for 'what happened', 'where did my money go', " +
         "'did my claim go through', or 'what did I earn from my provider'. Optionally filter to shar, credits or commission.",
       inputSchema: z.object({
