@@ -8,6 +8,7 @@ import { getCreator, listMine, listVerified, getProviderDetail } from "@/lib/pro
 import { PROVIDER_TERMS_VERSION } from "@/lib/provider-publisher-rules";
 import { NETWORK, SORTS } from "@/lib/provider-network-rules";
 import { getLeaderboard, getSummary, isMissingTable } from "@/lib/shar";
+import { getSquadView } from "@/lib/shar-squads";
 
 /**
  * Read-only tools for Shar (Bluvfi's reward unit) and the open provider network, so the agent answers from the user's real
@@ -42,6 +43,28 @@ function setupFor(p: { inputFields?: unknown; requirements?: unknown; setupUrl?:
  * In the app the Shar, Activity and Help & FAQ screens exist only for provider creators. A link to one would go nowhere for anyone else,
  * so a tool result offers the screen only to a creator, and tells the agent to answer from the numbers (and how to unlock the screen) otherwise.
  */
+/** The user's squad for get_my_shar: whether they are in one and how this week is going. Never fails the tool. */
+async function squadFor(userId: string) {
+  try {
+    const v = await getSquadView(userId);
+    if (!v.ready) return { available: false, note: "Squads aren't switched on yet." };
+    if (!v.squad) return { inSquad: false, howToStart: "Daily Spark screen, Squad card", screen: "bluvfi://spark" };
+    return {
+      inSquad: true,
+      name: v.squad.name,
+      members: v.squad.memberCount,
+      maxMembers: v.rules.maxMembers,
+      sharThisWeek: v.squad.shar,
+      weeklyGoal: v.squad.goal,
+      goalReached: v.squad.reached,
+      inviteCode: v.squad.code,
+      screen: "bluvfi://spark",
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function creatorScreen(userId: string, link: string, what: string) {
   const creator = await getCreator(userId).catch(() => null);
   if (creator) return { openTheScreen: link };
@@ -84,6 +107,7 @@ export function createNetworkTools(userId?: string) {
               screen: "bluvfi://spark",
             },
             badges: s.badges.map((b) => ({ badge: b.label, earned: b.earned, howToEarn: b.hint })),
+            squad: await squadFor(userId),
             rank: s.tier,
             worthSkrIfClaimedNow: s.skr.availableSkr,
             skrPerShar: s.skr.perShar,

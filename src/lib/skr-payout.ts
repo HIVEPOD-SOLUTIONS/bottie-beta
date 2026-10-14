@@ -344,7 +344,7 @@ export async function payPayout(input: { kind: PayoutKind; id: string; expectedS
     }
     const outcome = await c.confirm(signature, blockhash, lastValidBlockHeight);
     if (outcome === "confirmed") {
-      await setStatus(kind, id, ["sent"], "paid", sql`paid_at = now()`);
+      if (await setStatus(kind, id, ["sent"], "paid", sql`paid_at = now()`)) tellPayout(kind, id, "paid");
       return { ok: true, status: "paid", signature, skrMicro, acknowledged: risk.flags };
     }
     if (outcome === "failed") {
@@ -400,7 +400,7 @@ export async function reconcilePayout(kind: PayoutKind, id: string, chain?: Payo
     return { ok: true, outcome: "released", message: "The transaction failed on-chain, so nothing was sent. It's back in the queue." };
   }
   if (st && st.confirmed) {
-    await setStatus(kind, id, ["sent"], "paid", sql`paid_at = now()`);
+    if (await setStatus(kind, id, ["sent"], "paid", sql`paid_at = now()`)) tellPayout(kind, id, "paid");
     return { ok: true, outcome: "paid", message: "The transaction landed. Marked as paid." };
   }
   // Not seen. It's only safe to retry once the chain is past the last block the transaction could land in.
@@ -409,13 +409,18 @@ export async function reconcilePayout(kind: PayoutKind, id: string, chain?: Payo
     // One last look, in case it landed right at the end.
     const again = await c.status(row.txSignature).catch(() => null);
     if (again && !again.err && again.confirmed) {
-      await setStatus(kind, id, ["sent"], "paid", sql`paid_at = now()`);
+      if (await setStatus(kind, id, ["sent"], "paid", sql`paid_at = now()`)) tellPayout(kind, id, "paid");
       return { ok: true, outcome: "paid", message: "The transaction landed. Marked as paid." };
     }
     await release(kind, id, "The transaction expired without landing. Nothing was sent.");
     return { ok: true, outcome: "released", message: "The transaction expired and can never land, so nothing was sent. It's back in the queue." };
   }
   return { ok: true, outcome: "pending", message: "Still waiting: the transaction can still land. Check again in a minute." };
+}
+
+/** Tells the person their payout was paid or declined. Fire and forget: a notification must never hold up or break a payout. */
+function tellPayout(kind: PayoutKind, id: string, outcome: "paid" | "rejected"): void {
+  void import("@/lib/push").then((m) => m.notifyPayout(kind, id, outcome)).catch(() => {});
 }
 
 // ── Rejecting ─────────────────────────────────────────────────────────────────
@@ -425,6 +430,7 @@ export async function rejectPayout(kind: PayoutKind, id: string, note: string): 
   const clean = note.trim().slice(0, 300) || "Declined";
   if (kind === "shar_claim") {
     const done = await setStatus("shar_claim", id, ["requested"], "rejected", sql`note = ${clean}`);
+    if (done) tellPayout("shar_claim", id, "rejected");
     return done ? { ok: true } : { ok: false, status: 409, error: "Only a waiting claim can be rejected." };
   }
   const rows = rowsOf<{ user_id: string }>(
@@ -440,5 +446,6 @@ export async function rejectPayout(kind: PayoutKind, id: string, note: string): 
       )
       select user_id from rej`),
   );
+  if (rows.length > 0) tellPayout("commission", id, "rejected");
   return rows.length > 0 ? { ok: true } : { ok: false, status: 409, error: "Only a waiting withdrawal can be rejected." };
 }

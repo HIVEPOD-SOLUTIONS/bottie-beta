@@ -849,10 +849,18 @@ export async function recordUsage(
         set available_micro = earnings_balances.available_micro + excluded.available_micro,
             lifetime_micro = earnings_balances.lifetime_micro + excluded.lifetime_micro,
             updated_at = now()`);
+    tellOwner(listing, callerUserId);
     return { shar };
   }
   await db.insert(providerUsage).values({ listingId: listing.id, callerUserId, amountUsdc, shar, settlementRef });
+  if (shar > 0) tellOwner(listing, callerUserId);
   return { shar };
+}
+
+/** Lets the owner know their provider was used by someone else. Fire and forget, and never for their own tests. */
+function tellOwner(listing: Pick<Listing, "id" | "ownerUserId">, callerUserId: string): void {
+  if (callerUserId === listing.ownerUserId) return;
+  void import("@/lib/push").then((m) => m.notifyProviderUsed(listing.ownerUserId, listing.id)).catch(() => {});
 }
 
 // ── One call, free or paid ────────────────────────────────────────────────────

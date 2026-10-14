@@ -627,3 +627,40 @@ export const sharSparks = pgTable("shar_sparks", {
   primaryKey({ columns: [table.userId, table.day], name: "shar_sparks_pk" }),
   index("shar_sparks_day_idx").on(table.day),
 ]);
+
+/** A squad: friends pooling toward a weekly Shar goal (see drizzle/0017 and src/lib/shar-squad-rules.ts). */
+export const sharSquads = pgTable("shar_squads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  code: text("code").notNull().unique(),
+  ownerUserId: text("owner_user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Who is in which squad. One squad per person; the slot (1 to 10) is the hard cap on squad size. */
+export const sharSquadMembers = pgTable("shar_squad_members", {
+  userId: text("user_id").primaryKey(),
+  squadId: uuid("squad_id").notNull(),
+  slot: integer("slot").notNull(),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+});
+
+/** Shar paid to a top place of a past week. (week, user) is the key, so a week can never be paid twice. */
+export const sharWeeklyAwards = pgTable("shar_weekly_awards", {
+  weekStart: date("week_start", { mode: "string" }).notNull(),
+  userId: text("user_id").notNull(),
+  place: integer("place").notNull(),
+  shar: integer("shar").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.weekStart, table.userId], name: "shar_weekly_awards_pk" }),
+]);
+
+/** A phone's push address (Firebase Cloud Messaging token) and whose it is. */
+export const pushTokens = pgTable("push_tokens", {
+  token: text("token").primaryKey(),
+  userId: text("user_id").notNull(),
+  platform: text("platform").notNull().default("android"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

@@ -1,10 +1,11 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { claimBlockedByDevice, sharesDevice, sparkBlockedByDevice } from "@/lib/abuse";
 import { db } from "@/lib/db";
 import { sharClaims, sharProfiles } from "@/lib/db/schema";
 import {
   SPARK,
-  WEEKLY_PRIZE_SKR,
+  WEEKLY_PRIZE_MIN_SHAR,
+  WEEKLY_PRIZE_SHAR,
   badgesFor,
   dayBefore,
   liveStreak,
@@ -122,7 +123,7 @@ export async function attachReferral(userId: string, rawCode: unknown): Promise<
 
 export type ActivityItem = {
   id: string;
-  kind: "purchase" | "claim" | "referral" | "provider" | "spark";
+  kind: "purchase" | "claim" | "referral" | "provider" | "spark" | "prize";
   title: string;
   /** Signed: negative for claims. */
   shar: number;
@@ -273,8 +274,30 @@ export async function getSummary(userId: string, now: Date = new Date()) {
     return num(r?.n);
   })();
   const claimsMade = claims.filter((c) => c.status !== "rejected").length;
+  // Weekly prizes: last week's, paid the first time anyone loads Shar after it closed (a no-op until the team sets prizes), then totalled.
+  await settleLastWeek(now).catch((err) => console.warn("[shar] couldn't settle last week's prizes:", err instanceof Error ? err.message : err));
+  const awards = await (async () => {
+    try {
+      const [t] = rowsOf<{ total: string }>(await db.execute(sql`select coalesce(sum(shar), 0) as total from shar_weekly_awards where user_id = ${userId}`));
+      const recent = rowsOf<{ week_start: string; place: number; shar: number }>(
+        await db.execute(sql`select to_char(week_start, 'YYYY-MM-DD') as week_start, place, shar from shar_weekly_awards where user_id = ${userId} order by week_start desc limit 5`),
+      );
+      return { total: num(t?.total), recent };
+    } catch (err) {
+      if (!isMissingTable(err)) throw err;
+      return { total: 0, recent: [] as { week_start: string; place: number; shar: number }[] };
+    }
+  })();
+  const inSquad = await (async () => {
+    try {
+      return rowsOf<{ one: number }>(await db.execute(sql`select 1 as one from shar_squad_members where user_id = ${userId} limit 1`)).length > 0;
+    } catch (err) {
+      if (!isMissingTable(err)) throw err;
+      return false;
+    }
+  })();
 
-  const earned = num(totals?.available) + bonus + provider.total + sparkTotals.total; // before claims; what the ladder is measured on
+  const earned = num(totals?.available) + bonus + provider.total + sparkTotals.total + awards.total; // before claims; what the ladder is measured on
   const available = Math.max(0, earned - claimedAll);
 
   const activity: ActivityItem[] = [
@@ -301,6 +324,15 @@ export async function getSummary(userId: string, now: Date = new Date()) {
       shar: r.shar,
       state: "available",
       at: new Date(`${r.day}T12:00:00Z`).toISOString(),
+    })),
+    ...awards.recent.map((a): ActivityItem => ({
+      id: `w:${a.week_start}`,
+      kind: "prize",
+      title: `Weekly trial · place #${a.place}`,
+      shar: a.shar,
+      state: "available",
+      // Paid when the week closed: the Monday after the week it was won.
+      at: new Date(`${a.week_start}T00:00:00Z`).getTime() + 7 * 86_400_000 > now.getTime() ? now.toISOString() : new Date(new Date(`${a.week_start}T00:00:00Z`).getTime() + 7 * 86_400_000).toISOString(),
     })),
     ...claims.map((c): ActivityItem => ({
       id: `c:${c.id}`,
@@ -339,6 +371,7 @@ export async function getSummary(userId: string, now: Date = new Date()) {
       providersOwned: provider.owned,
       claims: claimsMade,
       seeker: sparkRows.some((r) => r.seeker),
+      inSquad,
     }),
     activity,
     rules: {
@@ -352,37 +385,59 @@ export async function getSummary(userId: string, now: Date = new Date()) {
   };
 }
 
-// ── Weekly leaderboard ────────────────────────────────────────────────────────
+// ── Weekly totals, the leaderboard, squads' totals and weekly prizes ──────────────
 
-export async function getLeaderboard(userId: string, now: Date = new Date()) {
-  const week = weekStartUtc(now);
-  const weekDay = week.toISOString().slice(0, 10);
-  const run = (withProviders: boolean, withSparks: boolean) =>
-    db.execute(sql`
-      with ${spendCte()}, weekly as (
-        select user_id, shar from spend where status = 'completed' and created_at >= ${ts(week)}
-        ${withProviders
-          ? sql`union all
-        select l.owner_user_id as user_id, u.shar from provider_usage u join provider_listings l on l.id = u.listing_id
-        where u.shar > 0 and u.created_at >= ${ts(week)}`
-          : sql``}
-        ${withSparks
-          ? sql`union all
-        select user_id, shar from shar_sparks where day >= ${weekDay}::date`
-          : sql``}
-      )
-      select user_id, sum(shar)::int as shar from weekly group by user_id order by shar desc, user_id asc limit 50`);
-  // Each optional source is its own migration, so the board falls back one step at a time instead of failing.
-  let res;
+/** A window of the week's Shar: from Monday 00:00 UTC, up to (not including) `to` when it is a past week. */
+export type WeeklyWindow = { from: Date; to?: Date };
+
+/** The Shar each person earned in the window: completed purchases, provider uses and Daily Sparks. Needs a `with ` in front. */
+function weeklyCte(win: WeeklyWindow, withProviders: boolean, withSparks: boolean): SQL {
+  const fromDay = win.from.toISOString().slice(0, 10);
+  const toDay = win.to ? win.to.toISOString().slice(0, 10) : null;
+  const before = (col: SQL) => (win.to ? sql` and ${col} < ${ts(win.to)}` : sql``);
+  return sql`${spendCte()}, weekly as (
+    select user_id, shar from spend where status = 'completed' and created_at >= ${ts(win.from)}${before(sql`created_at`)}
+    ${withProviders
+      ? sql`union all
+    select l.owner_user_id as user_id, u.shar from provider_usage u join provider_listings l on l.id = u.listing_id
+    where u.shar > 0 and u.created_at >= ${ts(win.from)}${before(sql`u.created_at`)}`
+      : sql``}
+    ${withSparks
+      ? sql`union all
+    select user_id, shar from shar_sparks where day >= ${fromDay}::date${toDay ? sql` and day < ${toDay}::date` : sql``}`
+      : sql``}
+  )`;
+}
+
+/**
+ * Runs a query over the weekly totals. Each optional source is its own migration, so this falls back one step at a time (providers and
+ * sparks, then providers only, then purchases only) instead of failing when one has not been applied yet.
+ */
+export async function withWeekly<T>(win: WeeklyWindow, run: (cte: SQL) => Promise<T>): Promise<T> {
   for (const [p, sp] of [[true, true], [true, false], [false, false]] as const) {
     try {
-      res = await run(p, sp);
-      break;
+      return await run(weeklyCte(win, p, sp));
     } catch (err) {
       if (!isMissingTable(err) || (!p && !sp)) throw err;
     }
   }
-  const all = rowsOf<{ user_id: string; shar: number }>(res);
+  throw new Error("unreachable");
+}
+
+/** Everyone's Shar in the window, biggest first (ties by id so the order never wobbles), optionally only some people. */
+export async function weeklyTotals(win: WeeklyWindow, opts: { userIds?: string[]; limit?: number } = {}): Promise<{ user_id: string; shar: number }[]> {
+  if (opts.userIds && opts.userIds.length === 0) return [];
+  const only = opts.userIds ? sql`where user_id in (${sql.join(opts.userIds.map((i) => sql`${i}`), sql`, `)})` : sql``;
+  const cap = sql`limit ${opts.limit ?? 50}`;
+  const res = await withWeekly(win, (cte) =>
+    db.execute(sql`with ${cte} select user_id, sum(shar)::int as shar from weekly ${only} group by user_id order by shar desc, user_id asc ${cap}`),
+  );
+  return rowsOf<{ user_id: string; shar: number }>(res).map((r) => ({ user_id: r.user_id, shar: num(r.shar) }));
+}
+
+export async function getLeaderboard(userId: string, now: Date = new Date()) {
+  const week = weekStartUtc(now);
+  const all = await weeklyTotals({ from: week }, { limit: 50 });
   const topRows = all.slice(0, SHAR.leaderboardSize);
   // Which of the top few are verified Seeker holders (as of their latest spark), for a badge beside their name.
   const seekers = new Set<string>();
@@ -403,7 +458,7 @@ export async function getLeaderboard(userId: string, now: Date = new Date()) {
       shar: num(r.shar),
       you: r.user_id === userId,
       seeker: seekers.has(r.user_id),
-      prizeSkr: WEEKLY_PRIZE_SKR[i] ?? null,
+      prizeShar: WEEKLY_PRIZE_SHAR[i] && num(r.shar) >= WEEKLY_PRIZE_MIN_SHAR ? WEEKLY_PRIZE_SHAR[i] : null,
     })),
   );
   const mineIdx = all.findIndex((r) => r.user_id === userId);
@@ -412,9 +467,38 @@ export async function getLeaderboard(userId: string, now: Date = new Date()) {
     weekEndsAt: nextWeekStartUtc(now).toISOString(),
     top,
     me: { rank: mineIdx >= 0 ? mineIdx + 1 : null, shar: mineIdx >= 0 ? num(all[mineIdx].shar) : 0 },
-    /** SKR prizes by place, when the team has set them; empty means none are promised. */
-    prizes: [...WEEKLY_PRIZE_SKR],
+    /** The prizes by place, in Shar and the SKR it converts to; empty means none are promised. */
+    prizes: WEEKLY_PRIZE_SHAR.map((shar, i) => ({ place: i + 1, shar, skr: skrForShar(shar) })),
+    prizeMinShar: WEEKLY_PRIZE_MIN_SHAR,
   };
+}
+
+/**
+ * Pays last week's prizes, once. Does nothing until the team has set prizes. The prizes are Shar (claimed as SKR the usual way), the
+ * whole week is written in ONE statement, and (week, user) is the key, so running this twice, or twice at once, can't pay anyone twice.
+ * Called when anyone loads their Shar after the week closed; there is no scheduler to set up. Returns how many prizes were paid.
+ */
+export async function settleLastWeek(now: Date = new Date()): Promise<number> {
+  if (WEEKLY_PRIZE_SHAR.length === 0) return 0;
+  const thisWeek = weekStartUtc(now);
+  const last = new Date(thisWeek);
+  last.setUTCDate(last.getUTCDate() - 7);
+  const lastDay = last.toISOString().slice(0, 10);
+  try {
+    if (rowsOf<{ one: number }>(await db.execute(sql`select 1 as one from shar_weekly_awards where week_start = ${lastDay}::date limit 1`)).length > 0) return 0;
+    const winners = (await weeklyTotals({ from: last, to: thisWeek }, { limit: WEEKLY_PRIZE_SHAR.length }))
+      .map((r, i) => ({ userId: r.user_id, place: i + 1, shar: WEEKLY_PRIZE_SHAR[i], earned: r.shar }))
+      .filter((w) => w.shar > 0 && w.earned >= WEEKLY_PRIZE_MIN_SHAR);
+    if (winners.length === 0) return 0;
+    const values = sql.join(winners.map((w) => sql`(${lastDay}::date, ${w.userId}, ${w.place}, ${w.shar})`), sql`, `);
+    const inserted = rowsOf<{ user_id: string }>(
+      await db.execute(sql`insert into shar_weekly_awards (week_start, user_id, place, shar) values ${values} on conflict (week_start, user_id) do nothing returning user_id`),
+    );
+    return inserted.length;
+  } catch (err) {
+    if (isMissingTable(err)) return 0;
+    throw err;
+  }
 }
 
 // ── Claims ────────────────────────────────────────────────────────────────────
