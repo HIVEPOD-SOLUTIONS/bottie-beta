@@ -1,7 +1,18 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { claimBlockedByDevice, sharesDevice } from "@/lib/abuse";
+import { claimBlockedByDevice, sharesDevice, sparkBlockedByDevice } from "@/lib/abuse";
 import { db } from "@/lib/db";
 import { sharClaims, sharProfiles } from "@/lib/db/schema";
+import {
+  SPARK,
+  WEEKLY_PRIZE_SKR,
+  badgesFor,
+  dayBefore,
+  liveStreak,
+  nextSparkAt,
+  sparkDay,
+  sparkReward,
+  streakAfterCollecting,
+} from "@/lib/shar-spark-rules";
 import {
   CODE_ALPHABET,
   CODE_LENGTH,
@@ -111,7 +122,7 @@ export async function attachReferral(userId: string, rawCode: unknown): Promise<
 
 export type ActivityItem = {
   id: string;
-  kind: "purchase" | "claim" | "referral" | "provider";
+  kind: "purchase" | "claim" | "referral" | "provider" | "spark";
   title: string;
   /** Signed: negative for claims. */
   shar: number;
@@ -119,6 +130,32 @@ export type ActivityItem = {
   state: "available" | "pending" | "requested" | "sending" | "paid" | "rejected";
   at: string;
 };
+
+/** The Daily Spark card: the live streak, whether today's is collected, what the next one is worth, and the last 7 days. */
+export function sparkState(rows: { day: string; shar: number; streak: number; seeker: boolean }[], today: string, now: Date, ready: boolean) {
+  const last = rows[0] ?? null;
+  const live = liveStreak(last, today);
+  const seeker = !!last?.seeker;
+  // What the next collect pays: the live streak plus one, whether that collect is today's or tomorrow's.
+  const nextStreak = live.streak + 1;
+  const reward = sparkReward(nextStreak, seeker);
+  const have = new Set(rows.map((r) => r.day));
+  const days = Array.from({ length: 7 }, (_, i) => {
+    let d = today;
+    for (let k = 0; k < 6 - i; k++) d = dayBefore(d);
+    return { day: d, collected: have.has(d), today: d === today };
+  });
+  return {
+    ready,
+    streak: live.streak,
+    collectedToday: live.collectedToday,
+    nextAt: nextSparkAt(now).toISOString(),
+    next: { streak: nextStreak, ...reward },
+    seeker,
+    days,
+    rules: { baseShar: SPARK.baseShar, weekBonusShar: SPARK.weekBonusShar, seekerMultiplier: SPARK.seekerMultiplier, streakTiers: SPARK.streakTiers },
+  };
+}
 
 export async function getSummary(userId: string, now: Date = new Date()) {
   const week = weekStartUtc(now);
@@ -203,7 +240,41 @@ export async function getSummary(userId: string, now: Date = new Date()) {
     return num(r?.n);
   });
 
-  const earned = num(totals?.available) + bonus + provider.total; // before claims; what the ladder is measured on
+  // Daily Spark and the badge facts. Their table is a separate migration (0016), so a missing table never flips `ready` (that would block claims):
+  // sparks just read as empty until it exists.
+  const weekDay = week.toISOString().slice(0, 10);
+  const today = sparkDay(now);
+  let sparksReady = true;
+  const sparkRows = await (async () => {
+    try {
+      return rowsOf<{ day: string; shar: number; streak: number; seeker: boolean }>(
+        await db.execute(sql`
+          select to_char(day, 'YYYY-MM-DD') as day, shar, streak, seeker from shar_sparks where user_id = ${userId} order by day desc limit 60`),
+      );
+    } catch (err) {
+      if (!isMissingTable(err)) throw err;
+      sparksReady = false;
+      return [];
+    }
+  })();
+  const sparkTotals = await (async () => {
+    if (!sparksReady) return { total: 0, week: 0, count: 0, best: 0 };
+    const [r] = rowsOf<{ total: string; week: string; count: string; best: string }>(
+      await db.execute(sql`
+        select coalesce(sum(shar), 0) as total,
+               coalesce(sum(shar) filter (where day >= ${weekDay}::date), 0) as week,
+               count(*) as count, coalesce(max(streak), 0) as best
+        from shar_sparks where user_id = ${userId}`),
+    );
+    return { total: num(r?.total), week: num(r?.week), count: num(r?.count), best: num(r?.best) };
+  })();
+  const purchases = await (async () => {
+    const [r] = rowsOf<{ n: string }>(await db.execute(sql`select count(*) as n from payments where user_id = ${userId} and type = 'bill' and status = 'completed'`));
+    return num(r?.n);
+  })();
+  const claimsMade = claims.filter((c) => c.status !== "rejected").length;
+
+  const earned = num(totals?.available) + bonus + provider.total + sparkTotals.total; // before claims; what the ladder is measured on
   const available = Math.max(0, earned - claimedAll);
 
   const activity: ActivityItem[] = [
@@ -223,6 +294,14 @@ export async function getSummary(userId: string, now: Date = new Date()) {
       state: "available",
       at: new Date(e.created_at).toISOString(),
     })),
+    ...sparkRows.slice(0, 10).map((r): ActivityItem => ({
+      id: `s:${r.day}`,
+      kind: "spark",
+      title: `Daily Spark · day ${r.streak}`,
+      shar: r.shar,
+      state: "available",
+      at: new Date(`${r.day}T12:00:00Z`).toISOString(),
+    })),
     ...claims.map((c): ActivityItem => ({
       id: `c:${c.id}`,
       kind: "claim",
@@ -241,7 +320,7 @@ export async function getSummary(userId: string, now: Date = new Date()) {
     available,
     pending: num(totals?.pending),
     lifetime: earned,
-    week: num(totals?.week) + provider.week,
+    week: num(totals?.week) + provider.week + sparkTotals.week,
     weekEndsAt: nextWeekStartUtc(now).toISOString(),
     tier: tierFor(earned),
     skr: { perShar: SHAR.skrPerShar, availableSkr: skrForShar(available) },
@@ -251,6 +330,16 @@ export async function getSummary(userId: string, now: Date = new Date()) {
     },
     referral: { code: profile?.referralCode ?? null, referred: referredCount, bonus },
     provider: { owned: provider.owned, earned: provider.total },
+    spark: sparkState(sparkRows, today, now, sparksReady),
+    badges: badgesFor({
+      sparks: sparkTotals.count,
+      bestStreak: sparkTotals.best,
+      purchases,
+      referred: referredCount,
+      providersOwned: provider.owned,
+      claims: claimsMade,
+      seeker: sparkRows.some((r) => r.seeker),
+    }),
     activity,
     rules: {
       perUsd: SHAR.perUsd,
@@ -267,7 +356,8 @@ export async function getSummary(userId: string, now: Date = new Date()) {
 
 export async function getLeaderboard(userId: string, now: Date = new Date()) {
   const week = weekStartUtc(now);
-  const run = (withProviders: boolean) =>
+  const weekDay = week.toISOString().slice(0, 10);
+  const run = (withProviders: boolean, withSparks: boolean) =>
     db.execute(sql`
       with ${spendCte()}, weekly as (
         select user_id, shar from spend where status = 'completed' and created_at >= ${ts(week)}
@@ -276,22 +366,44 @@ export async function getLeaderboard(userId: string, now: Date = new Date()) {
         select l.owner_user_id as user_id, u.shar from provider_usage u join provider_listings l on l.id = u.listing_id
         where u.shar > 0 and u.created_at >= ${ts(week)}`
           : sql``}
+        ${withSparks
+          ? sql`union all
+        select user_id, shar from shar_sparks where day >= ${weekDay}::date`
+          : sql``}
       )
       select user_id, sum(shar)::int as shar from weekly group by user_id order by shar desc, user_id asc limit 50`);
+  // Each optional source is its own migration, so the board falls back one step at a time instead of failing.
   let res;
-  try {
-    res = await run(true);
-  } catch (err) {
-    if (!isMissingTable(err)) throw err;
-    res = await run(false);
+  for (const [p, sp] of [[true, true], [true, false], [false, false]] as const) {
+    try {
+      res = await run(p, sp);
+      break;
+    } catch (err) {
+      if (!isMissingTable(err) || (!p && !sp)) throw err;
+    }
   }
   const all = rowsOf<{ user_id: string; shar: number }>(res);
+  const topRows = all.slice(0, SHAR.leaderboardSize);
+  // Which of the top few are verified Seeker holders (as of their latest spark), for a badge beside their name.
+  const seekers = new Set<string>();
+  if (topRows.length > 0) {
+    try {
+      const list = sql.join(topRows.map((r) => sql`${r.user_id}`), sql`, `);
+      for (const r of rowsOf<{ user_id: string }>(
+        await db.execute(sql`select distinct on (user_id) user_id from shar_sparks where user_id in (${list}) and seeker order by user_id, day desc`),
+      )) seekers.add(r.user_id);
+    } catch (err) {
+      if (!isMissingTable(err)) throw err;
+    }
+  }
   const top = await Promise.all(
-    all.slice(0, SHAR.leaderboardSize).map(async (r, i) => ({
+    topRows.map(async (r, i) => ({
       rank: i + 1,
       handle: await handleFor(r.user_id),
       shar: num(r.shar),
       you: r.user_id === userId,
+      seeker: seekers.has(r.user_id),
+      prizeSkr: WEEKLY_PRIZE_SKR[i] ?? null,
     })),
   );
   const mineIdx = all.findIndex((r) => r.user_id === userId);
@@ -300,6 +412,8 @@ export async function getLeaderboard(userId: string, now: Date = new Date()) {
     weekEndsAt: nextWeekStartUtc(now).toISOString(),
     top,
     me: { rank: mineIdx >= 0 ? mineIdx + 1 : null, shar: mineIdx >= 0 ? num(all[mineIdx].shar) : 0 },
+    /** SKR prizes by place, when the team has set them; empty means none are promised. */
+    prizes: [...WEEKLY_PRIZE_SKR],
   };
 }
 
@@ -334,4 +448,49 @@ export async function createClaim(userId: string, body: { shar?: unknown; wallet
     if (isUniqueViolation(err)) return { ok: false, status: 409, error: "You already have a claim in progress." };
     throw err;
   }
+}
+
+// ── Daily Spark ───────────────────────────────────────────────────────────────
+
+export type SparkResult =
+  | { ok: true; streak: number; shar: number; daily: number; bonus: number; multiplier: number; seeker: boolean; day: string }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Collects today's Daily Spark. The (user, day) primary key is the once-a-day guard, so two taps at once pay once: the second insert
+ * finds the row and is told it is already collected. A verified Seeker Genesis Token holder (checked here, on the server) gets the Seeker multiplier.
+ */
+export async function collectSpark(userId: string, now: Date = new Date()): Promise<SparkResult> {
+  const day = sparkDay(now);
+  let last: { day: string; streak: number } | null;
+  try {
+    last = rowsOf<{ day: string; streak: number }>(
+      await db.execute(sql`select to_char(day, 'YYYY-MM-DD') as day, streak from shar_sparks where user_id = ${userId} order by day desc limit 1`),
+    )[0] ?? null;
+  } catch (err) {
+    if (isMissingTable(err)) return { ok: false, status: 503, error: "Daily Spark is being set up. Try again soon." };
+    throw err;
+  }
+  if (last?.day === day) return { ok: false, status: 409, error: "You've already collected today's spark. It comes back at midnight UTC." };
+  if (await sparkBlockedByDevice(userId, day)) {
+    return { ok: false, status: 409, error: "Another account on this phone has already collected today's spark." };
+  }
+
+  // Loaded here, not at the top: it pulls in the Privy client, which the rest of Shar (and its tests) never needs.
+  const { isSeekerHolder } = await import("@/lib/seeker-sgt");
+  const seeker = await isSeekerHolder(userId);
+  const streak = streakAfterCollecting(last, day);
+  const reward = sparkReward(streak, seeker);
+  try {
+    const inserted = rowsOf<{ day: string }>(
+      await db.execute(sql`
+        insert into shar_sparks (user_id, day, shar, streak, seeker) values (${userId}, ${day}::date, ${reward.shar}, ${streak}, ${seeker})
+        on conflict (user_id, day) do nothing returning day`),
+    );
+    if (inserted.length === 0) return { ok: false, status: 409, error: "You've already collected today's spark. It comes back at midnight UTC." };
+  } catch (err) {
+    if (isMissingTable(err)) return { ok: false, status: 503, error: "Daily Spark is being set up. Try again soon." };
+    throw err;
+  }
+  return { ok: true, day, streak, shar: reward.shar, daily: reward.daily, bonus: reward.bonus, multiplier: reward.multiplier, seeker };
 }

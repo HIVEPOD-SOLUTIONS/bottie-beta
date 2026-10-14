@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const FILES = ["0007_shar_rewards.sql", "0008_payouts_credits.sql", "0009_x402_edge.sql", "0010_listing_management.sql", "0011_abuse_controls.sql", "0012_provider_publishers.sql", "0013_provider_config.sql", "0014_provider_terms.sql", "0015_provider_creators.sql"];
+const FILES = ["0007_shar_rewards.sql", "0008_payouts_credits.sql", "0009_x402_edge.sql", "0010_listing_management.sql", "0011_abuse_controls.sql", "0012_provider_publishers.sql", "0013_provider_config.sql", "0014_provider_terms.sql", "0015_provider_creators.sql", "0016_shar_sparks.sql"];
 
 const statements = FILES.flatMap((file) =>
   fs

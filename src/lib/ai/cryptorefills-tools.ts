@@ -155,6 +155,7 @@ export function createCryptorefillsTools(userId?: string, client?: string) {
         productValue: z.number().positive().optional().describe("Required for range products: amount in the product's local currency"),
         email: z.string().email().describe("Email that receives the code or receipt"),
         phone: z.string().max(32).optional().describe("Phone number to top up (required for phone refills). Local or international format."),
+        giftToEmail: z.string().email().optional().describe("Send as a gift: the recipient's email. The code or eSIM is delivered to them and the receipt stays with 'email'. Gift cards and eSIMs only; a phone refill goes to the phone number given, which is already the way to gift one."),
         payWith: z.enum(["base", "solana", "other"]).optional()
           .describe("'base' (default) or 'solana' = gasless USDC; 'other' = coin/network below via deposit address"),
         coin: z.string().max(12).optional().describe("payWith='other' only: coin, e.g. 'USDT'"),
@@ -164,7 +165,7 @@ export function createCryptorefillsTools(userId?: string, client?: string) {
         refundAddress: z.string().max(128).optional()
           .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
-      execute: async ({ country, brand, productId, productValue, email, phone, payWith: payWithIn = "base", coin, network, fundFrom, refundAddress }) => {
+      execute: async ({ country, brand, productId, productValue, email, phone, giftToEmail, payWith: payWithIn = "base", coin, network, fundFrom, refundAddress }) => {
         // Paying from another chain tops up the Base wallet, then pays gaslessly on Base (website card only).
         if (fundFrom && client === "expo-android") return { error: "Paying from another chain (Arc, Tempo, Robinhood Chain, Zcash, Hyperliquid) is on bluvfi.xyz, not in the app yet. Offer the usual wallet payment instead." };
         const payWith = fundFrom ? "base" : payWithIn;
@@ -180,7 +181,7 @@ export function createCryptorefillsTools(userId?: string, client?: string) {
           const brandInfo = brands.find((b) => b.brand_name === brand);
           const kind = kindOf(brandInfo?.category ?? "");
 
-          let beneficiary = email;
+          let beneficiary = giftToEmail ?? email;
           if (kind === "topup") {
             if (!phone) return { error: "Ask the user for the phone number to top up, then call again with phone." };
             try {

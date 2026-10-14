@@ -130,3 +130,20 @@ export async function sharesDevice(a: string, b: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * True when another account that has used this account's phone has already collected today's Daily Spark, so the phone's one spark
+ * for the day is taken. Accounts opened just to collect again on the same phone earn nothing. Fails open (false) when it can't be known.
+ */
+export async function sparkBlockedByDevice(userId: string, day: string): Promise<boolean> {
+  try {
+    const others = await accountsOnMyDevices(userId);
+    if (!others || others.length === 0) return false;
+    const list = sql.join(others.map((i) => sql`${i}`), sql`, `);
+    const [r] = rowsOf<{ n: string }>(await db.execute(sql`select count(*) as n from shar_sparks where day = ${day}::date and user_id in (${list})`));
+    return num(r?.n) > 0;
+  } catch (err) {
+    if (!missing(err)) console.warn("[abuse] device spark check failed (allowing):", err instanceof Error ? err.message : err);
+    return false;
+  }
+}

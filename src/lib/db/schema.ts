@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index, integer, bigint, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, numeric, uniqueIndex, boolean, index, integer, bigint, primaryKey, date } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const goals = pgTable("goals", {
@@ -612,4 +612,18 @@ export const userDevices = pgTable("user_devices", {
 }, (table) => [
   primaryKey({ columns: [table.userId, table.deviceHash], name: "user_devices_pk" }),
   index("user_devices_hash_idx").on(table.deviceHash),
+]);
+
+/** One Daily Spark collected by one person on one UTC day (see drizzle/0016 and src/lib/shar-spark-rules.ts). The primary key is the once-a-day guard. */
+export const sharSparks = pgTable("shar_sparks", {
+  userId: text("user_id").notNull(),
+  day: date("day", { mode: "string" }).notNull(),
+  shar: integer("shar").notNull(),
+  streak: integer("streak").notNull(),
+  /** Whether they were a verified Seeker Genesis Token holder when they collected. */
+  seeker: boolean("seeker").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.day], name: "shar_sparks_pk" }),
+  index("shar_sparks_day_idx").on(table.day),
 ]);

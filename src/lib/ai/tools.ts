@@ -247,7 +247,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         recipientEmail: z
           .string()
           .email()
-          .describe("User's email — required for all purchases. Receives the code for gift cards, or a confirmation receipt for top-ups."),
+          .describe("User's email — required for all purchases. Receives the code for gift cards, or a confirmation receipt for top-ups. To send a gift card or eSIM as a gift, pass the RECIPIENT's email here (and their name in recipientName): Bitrefill emails it to them from Bluvfi."),
         recipientName: z
           .string()
           .max(64)

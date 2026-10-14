@@ -122,7 +122,8 @@ const addPay = (c, userId, type, status, amount, createdAt, description = 'Netfl
   check('leaderboard: marks me and ranks me 3rd', lb.top[2].you === true && lb.me.rank === 3 && lb.me.shar === 28, JSON.stringify(lb.me));
   check('leaderboard: shows anonymous handles only', lb.top.every((t) => /^Seeker [0-9A-F]{4}$/.test(t.handle)) && !JSON.stringify(lb).includes('U3'));
   check('leaderboard: last week (U1 investment 100) is excluded', !lb.top.some((t) => t.shar === 100));
-  const lbLater = await s.getLeaderboard('U1', new Date('2026-10-12T00:00:01Z')); // next Monday: everything resets
+  // The Monday after today (not a fixed date: some rows are stamped with the real clock, so a fixed Monday stops working once it is in the past).
+  const lbLater = await s.getLeaderboard('U1', new Date(r.weekStartUtc(new Date()).getTime() + 7 * 86400000 + 1000)); // next Monday: everything resets
   check('leaderboard: resets on Monday 00:00 UTC', lbLater.top.length === 0 && lbLater.me.rank === null);
 
   // before the migration is applied: spending half still works, nothing throws

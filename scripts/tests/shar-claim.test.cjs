@@ -55,7 +55,7 @@ async function freshDb() {
   await client.exec(PAYMENTS);
   for (const stmt of MIGRATION) await client.exec(stmt);
   const abuse = load("src/lib/abuse.ts", { "@/lib/db": { db: drizzle(client, { schema }) }, "@/lib/abuse-rules": load("src/lib/abuse-rules.ts", { "node:crypto": require("node:crypto") }) });
-  const shar = load("src/lib/shar.ts", { "@/lib/db": { db: drizzle(client, { schema }) }, "@/lib/db/schema": schema, "@/lib/shar-rules": rules, "@/lib/abuse": abuse });
+  const shar = load("src/lib/shar.ts", { "@/lib/db": { db: drizzle(client, { schema }) }, "@/lib/db/schema": schema, "@/lib/shar-rules": rules, "@/lib/shar-spark-rules": load("src/lib/shar-spark-rules.ts"), "@/lib/abuse": abuse });
   return { client, shar };
 }
 const spend = (client, user, usd) =>
