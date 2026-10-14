@@ -648,7 +648,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
                     status: failStatus,
                     invoiceId,
                     error:
-                      `The payment didn't go through. Anything the user sent is refunded automatically to ${wallet.chain === "arc" ? "their Bluvfi wallet on Arc" : `the refund address they gave (${wallet.refundAddress ?? "on file"})`} — usually within minutes. ` +
+                      `The payment didn't go through. Anything the user sent is refunded automatically to ${wallet.chain === "arc" || wallet.chain === "tempo" || wallet.chain === "robinhood" ? `their Bluvfi wallet on ${wallet.chain === "arc" ? "Arc" : wallet.chain === "tempo" ? "Tempo" : "Robinhood Chain"}` : `the refund address they gave (${wallet.refundAddress ?? "on file"})`} — usually within minutes. ` +
                       "Tell them this, and offer to try again or use a different payment method. Do NOT call the XRP recovery tools.",
                   };
                 }
@@ -1732,7 +1732,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         "'onramp' (INR→crypto via UPI — starts pending, completed by webhook), " +
         "'offramp' (crypto→INR via bank — starts pending, completed by webhook). " +
         "'investment' also covers real Backpack stock/ETF fills (chain='backpack'), 'domain' is a Doma registration or marketplace buy (chain='doma', or 'evm' for Base listings; amountUsdc is 0 when paid in ETH — the description has the price). " +
-        "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid', 'robinhood' or 'arc' was paid with XRP / ZEC / Hyperliquid USDC / Robinhood Chain ETH / Arc USDC — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
+        "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid', 'robinhood', 'arc' or 'tempo' was paid with XRP / ZEC / Hyperliquid USDC / Robinhood Chain ETH / Arc USDC / Tempo USDC.e — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
         "A 'bridge' record whose description starts 'Top-up:' funded the Base wallet from that chain (arc/tempo/robinhood/zcash/hyperliquid) for a Cryptorefills, stock or Doma payment. " +
         "'transfer' / 'bridge' with chain='arc' happened on Arc. " +
         "Each record includes chain ('evm'|'solana'|'xrpl'|'arc'|'tempo'|'robinhood'|'zcash'|'hyperliquid'|'doma'|'backpack'), amountUsdc, status, txHash, and createdAt.",
