@@ -5,6 +5,9 @@
  * Idempotent: does nothing if the table exists, so it runs on every Amplify
  * build (see amplify.yml) and is safe by hand too.
  *
+ * Also adds bitrefill_orders.invoice_access_token (ADD COLUMN IF NOT EXISTS),
+ * which the server needs to confirm a Bitrefill order with Bitrefill itself.
+ *
  * Why not `drizzle-kit migrate`: this project's drizzle.__drizzle_migrations
  * history is incomplete — see scripts/apply-stocks-migration.mjs.
  *
@@ -22,10 +25,13 @@ if (!url) {
 const sql = neon(url);
 const host = new URL(url).host;
 
+// Column on an existing table: a no-op once it's there.
+await sql`ALTER TABLE "bitrefill_orders" ADD COLUMN IF NOT EXISTS "invoice_access_token" text`;
+
 const existing = await sql`
   SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chain_swaps'`;
 if (existing.length) {
-  console.log(`[chain-swaps-migration] ✓ ${host}: chain_swaps already exists — nothing to do.`);
+  console.log(`[chain-swaps-migration] ✓ ${host}: chain_swaps and bitrefill_orders.invoice_access_token are in place — nothing to do.`);
   process.exit(0);
 }
 

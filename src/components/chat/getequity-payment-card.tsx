@@ -57,7 +57,10 @@ export function GetEquityPaymentCard({ output }: { output: Output }) {
   return (
     <div className="my-2 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-400/10 text-xs font-bold text-indigo-400">GE</div>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#5B8DFF]/10">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/getequity-logo.png" alt="GetEquity" className="h-7 w-7" />
+        </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-[#F2F0E8]">{output.purpose === "invest" ? "Fund & invest" : "Fund GetEquity wallet"}</p>
           <p className="text-xs text-[#A7A79A]">GetEquity · {output.paymentMethod.replace("_", " ")}</p>

@@ -24,6 +24,7 @@ import { getWalletRequest, reportRouteTransaction, type XrplWallet } from "@/lib
 import { markXrpPurchaseFailed } from "@/lib/xrp-purchase";
 import { SWAP_CHAIN_META, isSwapChain } from "@/lib/swap-chains";
 import { swapProgress, type SwapProgress } from "@/lib/swap-server";
+import { syncBitrefillOrder, syncPendingBitrefillOrders } from "@/lib/bitrefill-sync";
 
 export type ChainSwapRow = typeof chainSwaps.$inferSelect;
 export type ChainSwapPurpose = "bitrefill" | "cryptorefills" | "stocks" | "doma" | "wallet";
@@ -132,10 +133,12 @@ export async function refreshChainSwap(row: ChainSwapRow): Promise<ChainSwapRow>
 
   if (row.purpose === "bitrefill") {
     // Failure handling shared with XRP purchases (bitrefill_orders + payments).
-    // Completion is set by Bitrefill's own webhook, not by the swap landing.
     if (status === "failed" || status === "expired") {
       await markXrpPurchaseFailed(row.walletRequestId, status).catch(() => {});
     }
+    // The money reached Bitrefill: ask Bitrefill whether the order is done
+    // (no need to wait for its webhook, which may never arrive).
+    if (status === "completed" && row.reference) await syncBitrefillOrder(row.reference);
   } else if (status === "completed" || status === "failed" || status === "expired") {
     await db.update(payments)
       .set({ status: status === "completed" ? "completed" : "failed", ...(wallet.swapTxHash ? { txHash: wallet.swapTxHash } : row.userTxHash ? { txHash: row.userTxHash } : {}) })
@@ -153,6 +156,8 @@ export async function refreshByWalletRequestId(walletRequestId: string): Promise
 
 /** The user's chain payments, newest first, with every still-open one refreshed first. */
 export async function listUserChainSwaps(userId: string, limit = 20): Promise<ChainSwapRow[]> {
+  // Delivered swaps whose Bitrefill order is still pending get confirmed here too.
+  await syncPendingBitrefillOrders(userId).catch(() => 0);
   const rows = await db.select().from(chainSwaps).where(eq(chainSwaps.userId, userId)).orderBy(desc(chainSwaps.createdAt)).limit(limit);
   const open = rows.filter((r) => OPEN.includes(r.status as SwapProgress) || (r.kind === "route" && r.userTxHash && !r.reportedAt));
   if (!open.length) return rows;

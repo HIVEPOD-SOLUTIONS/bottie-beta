@@ -118,8 +118,9 @@ function GetEquityBanner({ onOpen }: { onOpen: () => void }) {
       onClick={onOpen}
       className="flex items-center gap-4 rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4 text-left hover:border-[#3A3B37] transition-colors w-full"
     >
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-400/10 text-sm font-bold text-indigo-400">
-        GE
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#5B8DFF]/10 overflow-hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/getequity-logo.png" alt="GetEquity" className="h-8 w-8" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
@@ -440,7 +441,10 @@ export function InvestmentsScreen() {
           <div className="bg-[#141513] rounded-t-3xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[#2A2B27] shrink-0">
               <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-400/10 text-xs font-bold text-indigo-400">GE</div>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#5B8DFF]/10">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/getequity-logo.png" alt="GetEquity" className="h-6 w-6" />
+                </div>
                 <div>
                   <p className="font-semibold text-[#F2F0E8] text-sm">GetEquity</p>
                   <p className="text-xs text-[#A7A79A]">Private Markets · Managed model</p>

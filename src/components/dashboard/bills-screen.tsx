@@ -3098,8 +3098,10 @@ function BitrefillDetail() {
     // amounts as if they were dollars.
     const _fp = firstPkg as BitrefillPackage | undefined;
     const amountUsdc = _fp ? (_fp.price_usd ?? _fp.priceInUsd ?? 0) : 0;
-    // Detect actual chain from payment method
-    const chain = paymentMethod.includes("solana") ? "solana" : "evm";
+    // Detect actual chain from payment method (chain-paid orders keep their own chain)
+    const chain = paymentMethod === "xrp" ? "xrpl"
+      : isChainMethod(paymentMethod) ? paymentMethod
+      : paymentMethod.includes("solana") ? "solana" : "evm";
     // PATCH updates the pending row created by /api/bitrefill/invoice (prevents duplicates).
     // Falls back to POST only if the PATCH finds no existing row (referenceId not yet in DB).
     authFetch("/api/payments", {

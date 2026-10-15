@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
+import { applyBitrefillOutcome } from "@/lib/bitrefill-sync";
 import { mcpGetInvoice } from "@/lib/bitrefill-mcp";
 import { verifyAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -62,6 +63,17 @@ export async function GET(
   // ── 2. MCP fallback — invoice not yet terminal in DB ──────────────────────
   try {
     const invoice = await mcpGetInvoice(id, accessToken);
+
+    // Persist what we learn so the order is right even if this tab closes:
+    // the access token (lets the server re-check later) and any terminal status.
+    if (accessToken) {
+      db.update(bitrefillOrders).set({ invoiceAccessToken: accessToken })
+        .where(and(eq(bitrefillOrders.invoiceId, id), isNull(bitrefillOrders.invoiceAccessToken)))
+        .catch(() => {});
+    }
+    if (invoice.status === "complete" || invoice.status === "failed" || invoice.status === "expired") {
+      await applyBitrefillOutcome(id, invoice).catch(() => {});
+    }
 
     // Extract redemption code from the first completed order
     let code: string | null = null;

@@ -405,6 +405,7 @@ export async function initiateXrpPurchase(opts: {
       status: "pending",
       xrplWalletRequestId: wallet.id,
       xrplWalletAddress: wallet.address,
+      invoiceAccessToken: invoice.invoice_access_token ?? null,
     }).onConflictDoUpdate({
       target: [bitrefillOrders.invoiceId],
       set: { status: "pending", updatedAt: new Date() },

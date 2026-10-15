@@ -230,6 +230,7 @@ export async function initiateChainPurchase(opts: InvoiceOpts & {
     chain: opts.chain,
     status: "pending",
     xrplWalletRequestId: wallet.id,
+    invoiceAccessToken: invoice.invoice_access_token ?? null,
   }).onConflictDoUpdate({
     target: [bitrefillOrders.invoiceId],
     set: { status: "pending", updatedAt: new Date() },

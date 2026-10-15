@@ -139,6 +139,10 @@ export const bitrefillOrders = pgTable("bitrefill_orders", {
   // recovered, without re-deriving that from bluvfi-xrpl's activity history
   // on every fetch.
   xrplRecoveredAt: timestamp("xrpl_recovered_at"),
+  // Bitrefill's per-invoice access token (guest checkout). Without it Bitrefill
+  // answers "Invoice not found", so the server couldn't confirm an order on its
+  // own (see lib/bitrefill-sync.ts). Column added by scripts/apply-chain-swaps-migration.mjs.
+  invoiceAccessToken: text("invoice_access_token"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [

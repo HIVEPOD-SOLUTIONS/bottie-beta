@@ -75,6 +75,9 @@ export async function PATCH(req: Request) {
   }
 }
 
+// Pending Bitrefill orders are re-checked with Bitrefill at most once a minute per user.
+const lastBillSync = new Map<string, number>();
+
 export async function GET(req: Request) {
   let userId: string;
   try {
@@ -88,6 +91,17 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
     const type = searchParams.get("type"); // "bill" | "investment"
+
+    // Orders paid from another chain (or whose tab was closed) are confirmed here,
+    // so the dashboard never shows a finished purchase as pending.
+    if (!type || type === "bill") {
+      const last = lastBillSync.get(userId) ?? 0;
+      if (Date.now() - last > 60_000) {
+        lastBillSync.set(userId, Date.now());
+        const { syncPendingBitrefillOrders } = await import("@/lib/bitrefill-sync");
+        await syncPendingBitrefillOrders(userId).catch(() => 0);
+      }
+    }
 
     const allPayments = await db
       .select()

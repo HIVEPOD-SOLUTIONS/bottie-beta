@@ -351,7 +351,10 @@ export function GetEquitySection() {
       {/* Header */}
       <div className="rounded-2xl border border-[#2A2B27] bg-[#1B1C19] p-4">
         <div className="flex items-center gap-3 mb-2">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-400/10 text-lg font-bold text-indigo-400">GE</div>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#5B8DFF]/10">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/getequity-logo.png" alt="GetEquity" className="h-7 w-7" />
+          </div>
           <div>
             <p className="font-semibold text-[#F2F0E8]">GetEquity</p>
             <p className="text-xs text-[#A7A79A]">Private markets — equity, SAFE, debt and fixed-interest raises</p>

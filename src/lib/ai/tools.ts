@@ -473,6 +473,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
               recipientEmail,
               chain: orderChain,
               status: "pending",
+              invoiceAccessToken: invoice.invoice_access_token ?? null,
             }).onConflictDoUpdate({
               target: [bitrefillOrders.invoiceId],
               set: { status: "pending", updatedAt: new Date() },

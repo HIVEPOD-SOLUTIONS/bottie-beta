@@ -139,6 +139,7 @@ export async function POST(req: NextRequest) {
         recipientEmail: recipientEmail ?? null,
         chain,
         status: "pending",
+        invoiceAccessToken: (invoice as { invoice_access_token?: string }).invoice_access_token ?? null,
       }).onConflictDoNothing().catch(() => {});
 
       // payments: pending bill row — bills-screen updates to completed on poll success
