@@ -20,6 +20,10 @@ if (files.length === 0) {
   process.exit(2);
 }
 
+// PGlite lives in scripts/tests/.deps (see setup-pglite.cjs): install it the first time, so a fresh clone or a dependency reinstall just works.
+// Skipped when PGLITE_PATH names another copy.
+if (!process.env.PGLITE_PATH && !require("./setup-pglite.cjs").setupPglite()) process.exit(2);
+
 const rows = [];
 let missingPglite = false;
 for (const file of files) {
@@ -51,7 +55,7 @@ for (const r of bad) {
   console.log(`\n${r.file}:`);
   for (const line of r.problems) console.log(`  ${line.slice(0, 200)}`);
 }
-if (missingPglite) console.log("\nPGlite is missing. Run once:  npm i --no-save @electric-sql/pglite   (or set PGLITE_PATH to a folder that has it)");
+if (missingPglite) console.log("\nPGlite is missing. Run once:  npm run test:setup   (or set PGLITE_PATH to a folder that has it)");
 const total = rows.reduce((n, r) => n + r.passed, 0);
 console.log(`\n${rows.length - bad.length}/${rows.length} suites ok, ${total} checks passed${bad.length ? `, ${bad.length} suite(s) FAILED` : ""}`);
 process.exit(bad.length ? 1 : 0);

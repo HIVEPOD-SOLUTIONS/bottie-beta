@@ -8,9 +8,9 @@ import { getServerEnv } from "@/lib/server-env";
 
 /**
  * POST /api/business/cron — runs the treasury agent for every business with a
- * bill due within the next 30 days. Call it on a schedule (e.g. every 15 min
- * from cron-job.org or an AWS EventBridge rule) with the header
- * `x-cron-secret: <BUSINESS_CRON_SECRET>`. Each run respects the business's
+ * bill due within the next 30 days. Called hourly by the GitHub Actions
+ * workflow .github/workflows/business-cron.yml (or any scheduler) with the
+ * header `x-cron-secret: <BUSINESS_CRON_SECRET>`. Each run respects the business's
  * own policy and is fully logged, exactly like a run the owner starts.
  */
 export async function POST(req: NextRequest) {

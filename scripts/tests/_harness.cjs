@@ -3,7 +3,8 @@
  * Postgres (PGlite) built from the real migrations, so nothing touches Neon. Imports of "@/lib/..." resolve to the real source
  * files automatically; only the things that must be faked (the db handle, DNS, env, the network) are stubbed per test.
  *
- *     npm i --no-save @electric-sql/pglite        (once; PGLITE_PATH can point at a folder that already has it)
+ *     npm run test:setup        (once: installs PGlite into scripts/tests/.deps, which survives reinstalling the project's dependencies;
+ *                                npm test does it by itself when it's missing, and PGLITE_PATH can point at a folder that already has it)
  */
 // Neon runs in UTC, and the code compares database timestamps with JavaScript ones. Newer PGlite takes its session time zone from
 // the host PC, which on a machine that is not on UTC shifts every "now()" and fails time-window checks that are correct in production.
@@ -16,7 +17,8 @@ const ROOT = path.resolve(__dirname, "../..");
 const req = (name) => require(path.join(ROOT, "node_modules", name));
 
 function loadPglite() {
-  const tries = [() => require("@electric-sql/pglite"), () => req("@electric-sql/pglite")];
+  // The pinned copy from setup-pglite.cjs first, then any copy in the project or on PGLITE_PATH.
+  const tries = [() => require(path.join(__dirname, ".deps/node_modules/@electric-sql/pglite")), () => require("@electric-sql/pglite"), () => req("@electric-sql/pglite")];
   if (process.env.PGLITE_PATH) tries.push(() => require(path.join(process.env.PGLITE_PATH, "node_modules/@electric-sql/pglite")));
   for (const t of tries) {
     try {
@@ -25,7 +27,7 @@ function loadPglite() {
       /* try the next place */
     }
   }
-  console.error("Missing @electric-sql/pglite. Run: npm i --no-save @electric-sql/pglite");
+  console.error("Missing @electric-sql/pglite. Run: npm run test:setup");
   process.exit(2);
 }
 

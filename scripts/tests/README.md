@@ -10,11 +10,12 @@ npm test -- shar admin        # only suites whose file name contains one of thes
 node scripts/tests/abuse.test.cjs      # one suite on its own
 ```
 
-**One-time setup:** the suites need PGlite, which is deliberately *not* a project dependency (so builds and `package-lock.json`
-stay untouched):
+**Setup:** the suites need PGlite, which is deliberately *not* a project dependency (so builds, `package.json` and the lockfiles
+stay untouched). `npm test` installs a pinned copy into `scripts/tests/.deps` (gitignored) the first time it is missing; it lives
+outside `node_modules`, so reinstalling the project's dependencies doesn't remove it. To do it by hand:
 
 ```bash
-npm i --no-save @electric-sql/pglite      # or put it anywhere and set PGLITE_PATH=<that folder>
+npm run test:setup      # or put PGlite anywhere and set PGLITE_PATH=<that folder>
 ```
 
 `pinned-request.test.cjs` also needs `openssl` on the PATH (it makes a throwaway certificate for a local TLS server) and skips
