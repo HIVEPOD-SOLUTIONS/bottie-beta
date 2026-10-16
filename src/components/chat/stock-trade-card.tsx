@@ -30,7 +30,7 @@ type Output = {
   ticker: string;
   name: string;
   side: "buy" | "sell";
-  /** Buy paid from Arc / Tempo / Robinhood / Zcash / Hyperliquid: top up the Base wallet first. */
+  /** Buy paid from Arc / Tempo / Robinhood / XRP / Zcash / Hyperliquid: top up the Base wallet first. */
   fundFrom?: SwapChain;
   refundAddress?: string;
   quote: StockQuote;
@@ -167,7 +167,7 @@ export function StockTradeCard({
           )}
           {output.side === "buy" && fromWallet > 0 && !showTopUp && (
             <button onClick={() => setShowTopUp(true)} className="mt-2 text-[11px] text-[#8FAE82] underline">
-              Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+              Pay from Arc, Tempo, Robinhood Chain, XRP, Zcash or Hyperliquid instead
             </button>
           )}
           <div className={`mt-3 flex gap-2 ${showTopUp && fromWallet > 0 ? "hidden" : ""}`}>

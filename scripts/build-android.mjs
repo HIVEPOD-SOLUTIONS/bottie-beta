@@ -68,6 +68,8 @@ function findBakFiles(dir) {
 const WEB_ONLY_PAGES = [
   join(root, "src/app/r/[code]/page.tsx"),
   join(root, "src/app/r/[code]/page.ts"),
+  join(root, "src/app/audit/[id]/page.tsx"),
+  join(root, "src/app/audit/[id]/page.ts"),
 ];
 
 const appDir = join(root, "src/app");

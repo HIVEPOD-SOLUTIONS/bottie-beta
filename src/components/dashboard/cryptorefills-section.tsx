@@ -25,7 +25,7 @@ import type { CrBrand, CrCatalogItem, CrDelivery, CrOrderStatus, CrPaymentMethod
 /**
  * "base"/"solana" = gasless USDC over x402; "other" = any coin via deposit
  * address (partner API); "chain" = top up the Bluvfi wallet on Base from Arc,
- * Tempo, Robinhood Chain, Zcash or Hyperliquid, then pay gaslessly on Base.
+ * Tempo, Robinhood Chain, XRPL, Zcash or Hyperliquid, then pay gaslessly on Base.
  */
 type PayWith = CrRail | "other" | "chain";
 
@@ -593,7 +593,7 @@ function CryptorefillsCheckout({
                   {([
                     { key: "base", title: "USDC", sub: "Base · no gas" },
                     { key: "solana", title: "USDC", sub: "Solana · no gas" },
-                    { key: "chain", title: "Other chain", sub: "Arc · Tempo · Robinhood · ZEC · HL" },
+                    { key: "chain", title: "Other chain", sub: "Arc · Tempo · Robinhood · XRP · ZEC · HL" },
                     ...(partnerEnabled ? [{ key: "other", title: "Other crypto", sub: `${coins.length} coins` }] : []),
                   ] as { key: PayWith; title: string; sub: string }[]).map((o) => (
                     <button
@@ -630,7 +630,7 @@ function CryptorefillsCheckout({
 
               {msg && <p className="text-xs text-red-400">{msg}</p>}
 
-              {payWith === "chain" && canPay && priceUsd !== null && /^[^s@]+@[^s@]+.[^s@]+$/.test(email.trim()) && (
+              {payWith === "chain" && canPay && priceUsd !== null && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && (
                 <ChainTopUpPanel
                   token="usdc"
                   amount={priceUsd.toFixed(2)}
@@ -641,7 +641,7 @@ function CryptorefillsCheckout({
                   onFunded={() => void pay()}
                 />
               )}
-              {payWith === "chain" && !(canPay && /^[^s@]+@[^s@]+.[^s@]+$/.test(email.trim())) && (
+              {payWith === "chain" && !(canPay && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) && (
                 <p className="text-[11px] text-[#A7A79A]">Choose an amount and enter your email to continue.</p>
               )}
 

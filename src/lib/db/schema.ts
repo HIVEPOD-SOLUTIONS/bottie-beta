@@ -289,12 +289,13 @@ export const stockLedger = pgTable("stock_ledger", {
 ]);
 
 /**
- * chain_swaps — one row per bluvfi-xrpl swap from Zcash, Hyperliquid, Arc,
- * Robinhood Chain or Tempo (Bitrefill purchases and Base-wallet top-ups), so
- * every such payment can be traced and its funds accounted for even if the
+ * chain_swaps — one row per bluvfi-xrpl swap from XRPL, Zcash, Hyperliquid,
+ * Arc, Robinhood Chain or Tempo (Bitrefill purchases and Base-wallet top-ups),
+ * so every such payment can be traced and its funds accounted for even if the
  * user closed the app mid-way. bluvfi-xrpl stays the source of truth; this is
  * Bluvfi's copy (kept fresh by the xrpl webhook, status polls and listings).
- * Table created by scripts/apply-chain-swaps-migration.mjs (drizzle/0016).
+ * Table created by scripts/apply-chain-swaps-migration.mjs (drizzle/0016);
+ * recovered_at added by drizzle/0019_chain_swaps_xrp_recovery.sql.
  */
 export const chainSwaps = pgTable("chain_swaps", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -302,11 +303,11 @@ export const chainSwaps = pgTable("chain_swaps", {
   walletRequestId: text("wallet_request_id").notNull(),  // bluvfi-xrpl wallet-request id
   purpose: text("purpose").notNull(),                      // bitrefill | cryptorefills | stocks | doma | wallet
   reference: text("reference"),                            // e.g. Bitrefill invoice id
-  chain: text("chain").notNull(),                          // zcash | hyperliquid | arc | robinhood | tempo
+  chain: text("chain").notNull(),                          // xrpl | zcash | hyperliquid | arc | robinhood | tempo
   kind: text("kind").notNull(),                            // deposit | route
   depositAddress: text("deposit_address"),
   depositMemo: text("deposit_memo"),
-  refundAddress: text("refund_address").notNull(),         // where a failed swap is refunded
+  refundAddress: text("refund_address").notNull(),         // where a failed swap is refunded (xrpl: the Bluvfi XRP wallet it is recovered to)
   payAmount: text("pay_amount").notNull(),                 // what the user pays, decimal
   paySymbol: text("pay_symbol").notNull(),
   recipient: text("recipient").notNull(),                  // invoice address or the user's Base wallet
@@ -320,6 +321,7 @@ export const chainSwaps = pgTable("chain_swaps", {
   swapTxHash: text("swap_tx_hash"),                        // delivery / refund tx reported by bluvfi-xrpl
   error: text("error"),
   expiresAt: timestamp("expires_at"),
+  recoveredAt: timestamp("recovered_at"),                  // xrpl only: a failed swap's XRP was moved back to the Bluvfi XRP wallet
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [

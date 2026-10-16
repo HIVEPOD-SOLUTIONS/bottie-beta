@@ -8,7 +8,7 @@ import { startWalletTopUp, type TopUpPurpose } from "@/lib/chain-topup";
 const PURPOSES: TopUpPurpose[] = ["cryptorefills", "stocks", "doma", "wallet"];
 
 /**
- * POST /api/chain-topup — fund the user's Bluvfi wallet on Base from Arc,
+ * POST /api/chain-topup — fund the user's Bluvfi wallet on Base from Arc, XRPL,
  * Tempo, Robinhood Chain, Zcash or Hyperliquid (see src/lib/chain-topup.ts).
  *
  * Body: { chain, token: "usdc"|"eth", amount, amountUsd, recipient, refundAddress?, purpose }
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     chain?: string; token?: string; amount?: string; amountUsd?: number; recipient?: string; refundAddress?: string; purpose?: string; reference?: string;
   } | null;
   if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  if (!isSwapChain(body.chain)) return NextResponse.json({ error: "chain must be arc, tempo, robinhood, zcash or hyperliquid" }, { status: 422 });
+  if (!isSwapChain(body.chain)) return NextResponse.json({ error: "chain must be arc, tempo, robinhood, xrpl, zcash or hyperliquid" }, { status: 422 });
   if (body.token !== "usdc" && body.token !== "eth") return NextResponse.json({ error: "token must be usdc or eth" }, { status: 422 });
   if (!body.amount || typeof body.amountUsd !== "number" || !body.recipient) {
     return NextResponse.json({ error: "amount, amountUsd and recipient are required" }, { status: 422 });

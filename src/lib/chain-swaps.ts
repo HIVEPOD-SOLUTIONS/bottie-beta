@@ -1,6 +1,6 @@
 /**
- * Bluvfi's ledger of every bluvfi-xrpl swap from Zcash, Hyperliquid, Arc,
- * Robinhood Chain or Tempo (table chain_swaps). The point is that no payment
+ * Bluvfi's ledger of every bluvfi-xrpl swap from XRPL, Zcash, Hyperliquid,
+ * Arc, Robinhood Chain or Tempo (table chain_swaps). The point is that no payment
  * sent through one of these chains can go untracked:
  *
  *   - every swap is recorded the moment it is created, with its deposit
@@ -14,7 +14,9 @@
  *
  * bluvfi-xrpl remains the source of truth (and NEAR Intents / LI.FI refund a
  * failed swap to refundAddress on their own); this copy is for tracing and
- * for telling the user exactly where their funds are.
+ * for telling the user exactly where their funds are. XRPL is the exception:
+ * a failed XRP swap's XRP stays in the swap wallet bluvfi-xrpl holds until it
+ * is recovered to the Bluvfi XRP wallet (recoverXrpOrder, recovered_at).
  */
 
 import { and, desc, eq } from "drizzle-orm";
@@ -30,6 +32,8 @@ export type ChainSwapRow = typeof chainSwaps.$inferSelect;
 export type ChainSwapPurpose = "bitrefill" | "cryptorefills" | "stocks" | "doma" | "wallet";
 
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
+/** XRPL transaction hashes: 64 hex characters, no 0x. */
+const XRPL_TX_HASH = /^[0-9a-fA-F]{64}$/;
 const OPEN: SwapProgress[] = ["awaiting_payment", "processing"];
 
 export async function recordChainSwap(row: {
@@ -78,9 +82,9 @@ export async function getOwnedChainSwap(userId: string, walletRequestId: string)
 
 /** Saves the user's own payment hash (wallet send to a deposit address, or a signed route). */
 export async function saveUserTx(userId: string, walletRequestId: string, txHash: string): Promise<ChainSwapRow> {
-  if (!TX_HASH.test(txHash)) throw new Error("Invalid transaction hash.");
   const row = await getOwnedChainSwap(userId, walletRequestId);
   if (!row) throw new Error("That payment wasn't found, or doesn't belong to this account.");
+  if (!(row.chain === "xrpl" ? XRPL_TX_HASH : TX_HASH).test(txHash)) throw new Error("Invalid transaction hash.");
   if (row.userTxHash && row.userTxHash.toLowerCase() !== txHash.toLowerCase()) {
     throw new Error("A different transaction is already recorded for this payment.");
   }
@@ -170,7 +174,8 @@ export function describeChainSwap(row: ChainSwapRow): { summary: string; fundsAt
   const meta = isSwapChain(row.chain) ? SWAP_CHAIN_META[row.chain] : null;
   const label = meta?.label ?? row.chain;
   const paid = `${row.payAmount} ${row.paySymbol} on ${label}`;
-  const explorer = row.userTxHash && meta ? meta.explorerTx(row.userTxHash) : null;
+  const hashOk = !!row.userTxHash && (row.chain === "xrpl" ? XRPL_TX_HASH : TX_HASH).test(row.userTxHash);
+  const explorer = hashOk && meta ? meta.explorerTx(row.userTxHash!) : null;
   const toWallet = row.purpose !== "bitrefill";
   switch (row.status) {
     case "completed":
@@ -181,6 +186,16 @@ export function describeChainSwap(row: ChainSwapRow): { summary: string; fundsAt
       return { summary: `${paid} was received and is being converted — usually a minute or two.`, fundsAt: "In transit", explorer };
     case "failed":
     case "expired":
+      // XRPL: nothing is refunded on-chain — the XRP waits in the payment wallet until it's recovered.
+      if (row.chain === "xrpl") {
+        return row.recoveredAt
+          ? { summary: `${row.status === "expired" ? "The payment window closed" : "The payment couldn't complete"}. The XRP sent was moved back to the Bluvfi XRP wallet.`, fundsAt: `Bluvfi XRP wallet (${row.refundAddress})`, explorer }
+          : {
+              summary: `${row.status === "expired" ? "The payment window closed" : "The payment couldn't complete"}. Any XRP sent is safe in this payment's wallet and can be recovered to the Bluvfi XRP wallet (${row.refundAddress}).`,
+              fundsAt: row.userTxHash ? "Safe in the payment wallet — recover it to the Bluvfi XRP wallet" : "Nothing was sent, or it is waiting to be recovered",
+              explorer,
+            };
+      }
       return {
         summary: `${row.status === "expired" ? "The payment window closed" : "The payment couldn't complete"}. Anything sent is refunded automatically to ${row.refundAddress}${row.swapTxHash ? ` (refund tx ${row.swapTxHash})` : ""}.`,
         fundsAt: row.userTxHash || row.swapStatus === "REFUNDED" ? `Refunded to ${row.refundAddress}` : "Nothing was sent, or it is being refunded",

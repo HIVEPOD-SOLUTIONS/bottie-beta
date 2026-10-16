@@ -4,8 +4,9 @@ import { z } from "zod";
 /**
  * Bluvfi for Business from chat: set up a business treasury on Arc, add
  * payees and bills (or file an invoice from pasted text), run the treasury
- * agent, approve what it escalated, change its limits, and read the signed
- * decision log. The agent's limits are enforced server-side whatever is said
+ * agent, approve or cancel what it escalated, allow or block payees, change
+ * its limits, and read (or publish) the signed decision log. Withdrawals stay
+ * in the Business tab. The agent's limits are enforced server-side whatever is said
  * here; the chat can't raise them past what the owner sets.
  */
 export function createBusinessTools(userId?: string) {
@@ -142,6 +143,57 @@ export function createBusinessTools(userId?: string) {
           const b = await resolveBusiness(uid, businessId);
           const bill = await approveBill(uid, b.id, billId);
           return { approved: true, billId: bill.id, amountUsd: Number(bill.amountUsdc), tip: "Approved. Offer to run the agent now to pay it." };
+        } catch (err) { return fail(err); }
+      },
+    }),
+
+    business_cancel_bill: tool({
+      description: "Cancel a bill that hasn't been paid yet (scheduled or waiting for approval), so the agent never pays it. Only after the user explicitly asks to cancel that specific bill. Paid or paying bills can't be cancelled.",
+      inputSchema: z.object({ billId: z.string(), businessId: z.string().optional() }),
+      execute: async ({ billId, businessId }) => {
+        try {
+          const { resolveBusiness, cancelBill } = await svc();
+          const uid = need();
+          const b = await resolveBusiness(uid, businessId);
+          const bill = await cancelBill(uid, b.id, billId);
+          return { cancelled: true, billId: bill.id, amountUsd: Number(bill.amountUsdc) };
+        } catch (err) { return fail(err); }
+      },
+    }),
+
+    business_set_payee_allowlisted: tool({
+      description:
+        "Allow or block a payee. The agent only pays allowlisted payees; a bill to a blocked payee is held even if approved. " +
+        "Only when the user explicitly asks to allow or block that specific payee (confirm the name and address back).",
+      inputSchema: z.object({
+        payee: z.string().describe("Payee name or id"),
+        allowlisted: z.boolean().describe("true = may be paid, false = blocked"),
+        businessId: z.string().optional(),
+      }),
+      execute: async ({ payee, allowlisted, businessId }) => {
+        try {
+          const { resolveBusiness, setPayeeAllowlisted, businessSnapshot } = await svc();
+          const uid = need();
+          const b = await resolveBusiness(uid, businessId);
+          const s = await businessSnapshot(uid, b.id);
+          const p = s.payees.find((x) => x.id === payee) ?? s.payees.find((x) => x.name.toLowerCase().includes(payee.toLowerCase()));
+          if (!p) return { error: `No payee called "${payee}". Payees: ${s.payees.map((x) => x.name).join(", ") || "none yet"}.` };
+          const row = await setPayeeAllowlisted(uid, b.id, p.id, allowlisted);
+          return { payeeId: row.id, name: row.name, address: row.address, allowlisted: row.allowlisted };
+        } catch (err) { return fail(err); }
+      },
+    }),
+
+    business_set_public_log: tool({
+      description: "Make the treasury agent's signed decision log public (a shareable /audit page anyone can verify) or private again. Only when the user asks.",
+      inputSchema: z.object({ public: z.boolean(), businessId: z.string().optional() }),
+      execute: async ({ public: on, businessId }) => {
+        try {
+          const { resolveBusiness, setPublicLog } = await svc();
+          const uid = need();
+          const b = await resolveBusiness(uid, businessId);
+          await setPublicLog(uid, b.id, on);
+          return { publicLog: on, auditPage: on ? `/audit/${b.id}` : null };
         } catch (err) { return fail(err); }
       },
     }),

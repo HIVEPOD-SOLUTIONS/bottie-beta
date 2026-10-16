@@ -1,11 +1,15 @@
 /**
- * Server-side pricing and creation of bluvfi-xrpl swaps from Zcash,
+ * Server-side pricing and creation of bluvfi-xrpl swaps from XRPL, Zcash,
  * Hyperliquid, Arc, Robinhood Chain or Tempo into a destination asset at a
  * recipient address. Shared by Bitrefill checkout (chain-purchase.ts) and
  * wallet top-ups for Cryptorefills / Backpack / Doma (chain-topup.ts).
  *
  * Pricing:
  *   - deposit chains (NEAR Intents): EXACT_OUTPUT quote → origin amount needed.
+ *     XRPL is quoted and created exactly like the Bitrefill XRP flow
+ *     (xrp-purchase.ts): no `chain` (bluvfi-xrpl's default), the amount as
+ *     swapAmountXrp, and no refund address (a failed swap's XRP stays in the
+ *     swap wallet and is recovered to the user's Bluvfi XRP wallet).
  *   - route chains (LI.FI, EXACT_INPUT only): quote a probe input worth the
  *     target in USD, then scale the input by how much of the target the
  *     route's guaranteed floor delivers. Route chains' origin assets are all
@@ -110,7 +114,7 @@ export async function priceSwap(opts: {
   }
   const q = await getQuote({
     swapType: "EXACT_OUTPUT",
-    chain: opts.chain,
+    ...(opts.chain === "xrpl" ? {} : { chain: opts.chain }),
     amount: opts.atomicTarget,
     destinationAsset: opts.dest.nearAsset,
     recipient: opts.recipient,
@@ -142,9 +146,9 @@ export async function createSwap(opts: {
         privyDid: opts.privyDid,
         // Distinct per attempt: a 422 writes nothing, but keep keys unambiguous.
         idempotencyKey: i === 0 ? opts.idempotencyKey : `${opts.idempotencyKey}:${i}`,
-        chain: opts.chain,
-        refundAddress: opts.refundAddress,
-        swapAmount,
+        ...(opts.chain === "xrpl"
+          ? { swapAmountXrp: swapAmount }
+          : { chain: opts.chain, refundAddress: opts.refundAddress, swapAmount }),
         swapRecipient: opts.recipient,
         ...(meta.kind === "route"
           ? { swapDestinationChain: opts.dest.lifiChain, swapDestinationToken: opts.dest.lifiToken }

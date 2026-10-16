@@ -20,8 +20,8 @@ export const APP_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_cryptorefills_order", "get_cryptorefills_orders",
   // Invest: Backpack stocks and ETFs (confirm card, withdraw sheet)
   "search_stocks", "get_stock", "get_stock_portfolio", "trade_stock", "withdraw_stock_credit",
-  // Arc, Tempo, Robinhood Chain, Zcash and Hyperliquid: the Arc wallet tab and send card, the top-up panel, and the status of payments from those chains
-  "get_arc_balance", "get_other_chain_balances", "send_usdc_arc", "fund_wallet_from_chain", "get_chain_payments",
+  // Arc, Tempo, Robinhood Chain, XRPL, Zcash and Hyperliquid: the Arc wallet tab and send card, the top-up panel, and the status of payments from those chains
+  "get_arc_balance", "get_other_chain_balances", "send_usdc_arc", "fund_wallet_from_chain", "get_chain_payments", "fund_xrp_topup_from_wallet",
   // history
   "get_payment_history", "get_balance_history", "get_activities", "get_activity_narration",
   // the user's own XRP wallet

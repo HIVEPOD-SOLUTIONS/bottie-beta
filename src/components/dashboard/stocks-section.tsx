@@ -309,7 +309,7 @@ function StockSheet({
   const [step, setStep] = useState<TradeStep>("form");
   const [msg, setMsg] = useState<string | null>(null);
   const [result, setResult] = useState<{ status: string; fillPrice?: string | null; fillQuantity?: string | null } | null>(null);
-  // Buy funded from Arc / Tempo / Robinhood / Zcash / Hyperliquid (tops up the Base wallet first).
+  // Buy funded from Arc / Tempo / Robinhood / XRP / Zcash / Hyperliquid (tops up the Base wallet first).
   const [showTopUp, setShowTopUp] = useState(false);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -434,7 +434,7 @@ function StockSheet({
               />
             ) : (
               <button onClick={() => setShowTopUp(true)} className="text-center text-[11px] text-[#8FAE82] underline">
-                Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+                Pay from Arc, Tempo, Robinhood Chain, XRP, Zcash or Hyperliquid instead
               </button>
             ))}
             <div className="flex gap-2">

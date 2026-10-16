@@ -47,7 +47,7 @@ type Output = {
   };
   payment: { token: Hex | "native"; amount: string };
   buyer: string;
-  /** Base listings only: top up the Base wallet from Arc / Tempo / Robinhood / Zcash / Hyperliquid first. */
+  /** Base listings only: top up the Base wallet from Arc / Tempo / Robinhood / XRP / Zcash / Hyperliquid first. */
   fundFrom?: SwapChain;
   refundAddress?: string;
   paid?: boolean;
@@ -240,7 +240,7 @@ export function DomaListingCard({
             )}
             {topUpToken && !showTopUp && (
               <button onClick={() => setShowTopUp(true)} className="mt-2 text-[11px] text-[#8FAE82] underline">
-                Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+                Pay from Arc, Tempo, Robinhood Chain, XRP, Zcash or Hyperliquid instead
               </button>
             )}
             <div className={`mt-3 flex gap-2 ${topUpToken && showTopUp ? "hidden" : ""}`}>

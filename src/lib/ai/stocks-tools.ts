@@ -192,8 +192,8 @@ export function createStocksTools(userId?: string, _client?: string) {
         amountUsd: z.number().positive().optional().describe("Buy only: how many dollars to invest, e.g. 50"),
         shares: z.number().positive().optional().describe("Sell (or buy by shares): number of shares, fractions allowed"),
         all: z.boolean().optional().describe("Sell only: sell every share the user holds"),
-        fundFrom: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional()
-          .describe("Only when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
+        fundFrom: z.enum(["arc", "tempo", "robinhood", "xrpl", "zcash", "hyperliquid"]).optional()
+          .describe("Only when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, XRP, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
         refundAddress: z.string().max(128).optional()
           .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
@@ -236,7 +236,7 @@ export function createStocksTools(userId?: string, _client?: string) {
               'CONFIRM CARD SHOWN. Output only: "Here\'s your order — tap Confirm to place it." Then STOP. ' +
               "The card pays, places the order and shows the result. When it reports {done:true}, summarize what filled. " +
               "If it reports {done:false}, relay the error plainly." +
-              (fundFrom && side === "buy" ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card places the order by itself. Never say swap/bridge." : ""),
+              (fundFrom && side === "buy" ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, XRP is sent in one tap from the Bluvfi XRP wallet or from any XRP wallet (the amount shown includes the ~1.05 XRP reserve a new XRP address needs; a failed XRP payment is not refunded on-chain but recovered to the Bluvfi XRP wallet with list_recoverable_xrp / recover_xrp_order), Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card places the order by itself. Never say swap/bridge." : ""),
           };
         } catch (err) {
           return errorResult(err);

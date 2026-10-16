@@ -135,7 +135,9 @@ function BusinessDashboard({ id }: { id: string }) {
   const pending = s.bills.filter((b) => b.status === "approval_needed");
   const open = s.bills.filter((b) => b.status === "scheduled" || b.status === "paying");
   const done = s.bills.filter((b) => b.status === "paid");
-  const auditUrl = typeof window !== "undefined" ? `${window.location.origin}/audit/${s.id}` : `/audit/${s.id}`;
+  // The audit page is server-rendered on the web only (not in the Android export), so point at the deployed site.
+  const siteOrigin = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "") || (typeof window !== "undefined" ? window.location.origin : "");
+  const auditUrl = `${siteOrigin}/audit/${s.id}`;
 
   return (
     <>
