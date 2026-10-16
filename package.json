@@ -27,6 +27,7 @@
     "@circle-fin/adapter-solana": "^1.6.5",
     "@circle-fin/adapter-viem-v2": "^1.19.0",
     "@circle-fin/app-kit": "^1.16.0",
+    "@circle-fin/developer-controlled-wallets": "^10.8.1",
     "@circle-fin/x402-batching": "^3.2.0",
     "@coral-xyz/anchor": "^0.32.1",
     "@google/genai": "^2.17.1",

@@ -328,6 +328,92 @@ export const chainSwaps = pgTable("chain_swaps", {
   index("chain_swaps_status_idx").on(table.status),
 ]);
 
+// ── Bluvfi for Business (tables created by scripts/apply-business-migration.mjs, drizzle/0017) ──
+
+/**
+ * A business with its own treasury wallet on Arc. custody "circle": a Circle
+ * developer-controlled wallet (Circle holds the key; circleWalletId). custody
+ * "local": a key Bluvfi generated, stored encrypted with secret-box.
+ */
+export const businessAccounts = pgTable("business_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerUserId: text("owner_user_id").notNull(),
+  name: text("name").notNull(),
+  treasuryAddress: text("treasury_address").notNull(),
+  encryptedKey: text("encrypted_key"),             // custody "local" only
+  custody: text("custody").notNull().default("local"), // circle | local
+  circleWalletId: text("circle_wallet_id"),         // custody "circle" only
+  policy: text("policy").notNull(),                 // JSON — see lib/business/policy.ts
+  publicLog: boolean("public_log").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("business_accounts_owner_idx").on(table.ownerUserId),
+  uniqueIndex("business_accounts_treasury_idx").on(table.treasuryAddress),
+]);
+
+/** Vendors and contractors the treasury may pay (USDC on Arc). */
+export const businessPayees = pgTable("business_payees", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  businessId: uuid("business_id").notNull(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("vendor"),   // vendor | contractor
+  address: text("address").notNull(),
+  capUsd: numeric("cap_usd", { precision: 20, scale: 6 }),
+  allowlisted: boolean("allowlisted").notNull().default(true),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("business_payees_business_idx").on(table.businessId)]);
+
+/** Bills / invoices / milestones the agent decides on. */
+export const businessBills = pgTable("business_bills", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  businessId: uuid("business_id").notNull(),
+  payeeId: uuid("payee_id").notNull(),
+  amountUsdc: numeric("amount_usdc", { precision: 20, scale: 6 }).notNull(),
+  dueAt: timestamp("due_at").notNull(),
+  memo: text("memo"),
+  invoiceRef: text("invoice_ref"),                  // unique per payee — a duplicate invoice can't be paid twice
+  source: text("source").notNull().default("manual"), // manual | invoice_text | chat
+  status: text("status").notNull().default("scheduled"), // scheduled | approval_needed | paying | paid | failed | cancelled
+  ownerApproved: boolean("owner_approved").notNull().default(false),
+  decisionNote: text("decision_note"),
+  paidTx: text("paid_tx"),
+  paidAt: timestamp("paid_at"),
+  // Circle custody: the idempotency key sent with the transfer (stored before
+  // sending, so a retry after a crash can never pay twice) and Circle's tx id.
+  paymentKey: text("payment_key"),
+  providerTxId: text("provider_tx_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("business_bills_business_status_idx").on(table.businessId, table.status),
+  uniqueIndex("business_bills_invoice_idx").on(table.businessId, table.payeeId, table.invoiceRef),
+]);
+
+/**
+ * Append-only decision log. Each entry's hash covers the previous entry's hash
+ * and is signed by the treasury key, so anyone can replay and verify what the
+ * agent saw, which rule it applied, why, and what it paid.
+ */
+export const businessDecisions = pgTable("business_decisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  businessId: uuid("business_id").notNull(),
+  seq: integer("seq").notNull(),
+  kind: text("kind").notNull(),                     // created | payee_added | bill_added | run | pay | defer | escalate | blocked | approve | cancel | withdraw | policy | failed
+  billId: uuid("bill_id"),
+  actor: text("actor").notNull(),                   // agent | owner
+  summary: text("summary").notNull(),
+  inputs: text("inputs").notNull(),                 // JSON: balance seen, forecast, rule checks…
+  reasoning: text("reasoning"),
+  amountUsdc: numeric("amount_usdc", { precision: 20, scale: 6 }),
+  txHash: text("tx_hash"),
+  prevHash: text("prev_hash").notNull(),
+  hash: text("hash").notNull(),
+  signature: text("signature").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [uniqueIndex("business_decisions_seq_idx").on(table.businessId, table.seq)]);
+
 export const stockOrders = pgTable("stock_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").notNull(),

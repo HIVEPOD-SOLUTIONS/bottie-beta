@@ -54,8 +54,8 @@ export default function RootLayout({
         <CapacitorFetchPatch />
         <AppUrlListener />
         <Providers>{children}</Providers>
-        {/* Desktop blocker — mobile only app */}
-        <div className="pointer-events-none fixed inset-0 z-[9999] hidden flex-col items-center justify-center bg-cream px-8 md:flex">
+        {/* Desktop blocker — mobile only app (public pages like /audit hide it via .desktop-blocker) */}
+        <div className="desktop-blocker pointer-events-none fixed inset-0 z-[9999] hidden flex-col items-center justify-center bg-cream px-8 md:flex">
           <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
             {/* Logo */}
             <img src="/Bluvfiv2.jpg" alt="Bluvfi" className="h-16 w-16 rounded-2xl object-cover shadow-lg" />

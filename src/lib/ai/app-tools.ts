@@ -47,6 +47,7 @@ export const APP_DENIED_WITHIN_PREFIXES: ReadonlySet<string> = new Set([
 
 /** Families that are never available in the app (operator accounts, banking, agent wallets, B2B). */
 export const APP_DENIED_PREFIXES: readonly string[] = [
+  "business_", // Bluvfi for Business is a website feature (Business tab); the app has no screen for it
   "fuze_", "spherepay_", "nanopay_", "solpay_", "xstocks_", "grail_",
   "get_banking_", "get_payout_", "get_onramp_", "get_offramp_", "get_nanopay_", "get_solpay_",
 ];

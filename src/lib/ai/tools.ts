@@ -12,6 +12,7 @@ import { calculateXrpBalance, resolveXrpBalance } from "@/lib/xrplBalance";
 import { createCmcTools } from "@/lib/ai/cmc-tools";
 import { createCryptorefillsTools } from "@/lib/ai/cryptorefills-tools";
 import { createStocksTools } from "@/lib/ai/stocks-tools";
+import { createBusinessTools } from "@/lib/ai/business-tools";
 import { createNetworkTools } from "@/lib/ai/network-tools";
 import { restrictForApp } from "@/lib/ai/app-tools";
 
@@ -88,6 +89,9 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
 
     // ── US stocks & ETFs (Backpack) — see lib/ai/stocks-tools.ts ───────────────
     ...createStocksTools(userId, client),
+
+    // ── Bluvfi for Business: treasury agent on Arc — see lib/ai/business-tools.ts ──
+    ...createBusinessTools(userId),
 
     // ── Shar rewards & the open provider network: mobile app only. The website chat never gets these tools. ──
     ...(client === "expo-android" ? createNetworkTools(userId) : {}),
@@ -1728,6 +1732,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         "'bridge' (Arc AppKit cross-chain bridges), " +
         "'onramp' (INR→crypto via UPI — starts pending, completed by webhook), " +
         "'offramp' (crypto→INR via bank — starts pending, completed by webhook). " +
+        "'business' is a payment the Bluvfi for Business treasury agent made to a vendor or contractor (USDC on Arc, chain='arc'; the description names the business and payee). " +
         "'investment' also covers real Backpack stock/ETF fills (chain='backpack'), 'domain' is a Doma registration or marketplace buy (chain='doma', or 'evm' for Base listings; amountUsdc is 0 when paid in ETH — the description has the price). " +
         "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid', 'robinhood', 'arc' or 'tempo' was paid with XRP / ZEC / Hyperliquid USDC / Robinhood Chain ETH / Arc USDC / Tempo USDC.e — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
         "A 'bridge' record whose description starts 'Top-up:' funded the Base wallet from that chain (arc/tempo/robinhood/zcash/hyperliquid) for a Cryptorefills, stock or Doma payment. " +
@@ -1739,7 +1744,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           .optional()
           .describe("Number of records to return (default 20)"),
         type: z
-          .enum(["bill", "investment", "domain", "nanopay", "solpay", "x402", "transfer", "deposit", "withdrawal", "bridge", "onramp", "offramp"])
+          .enum(["bill", "investment", "domain", "business", "nanopay", "solpay", "x402", "transfer", "deposit", "withdrawal", "bridge", "onramp", "offramp"])
           .optional()
           .describe("Filter by payment type"),
       }),

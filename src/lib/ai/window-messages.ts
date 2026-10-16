@@ -14,6 +14,13 @@ const ACTION_TOOLS = new Set([
   "send_usdc_arc",
   "fund_wallet_from_chain",
   "get_chain_payments",
+  "business_run_agent",
+  "business_approve_bill",
+  "business_add_bill",
+  "business_file_invoice",
+  "business_add_payee",
+  "business_create",
+  "business_set_policy",
   "fund_xrp_purchase_from_wallet",
   "recover_xrp_order",
   "buy_investment",
@@ -819,6 +826,23 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
       line = p?.sent || p?.queued
         ? `Stock credit $${p.amountUsd} ${p.sent ? "sent" : "queued"} to wallet ${p.to}`
         : `Stock credit withdrawal not done: ${p?.error ?? "unknown error"}`;
+      break;
+    }
+    case "business_run_agent": {
+      const p = parsed as any;
+      line = p?.error
+        ? `Treasury agent run failed: ${p.error}`
+        : `Treasury agent ran: paid ${(p?.paid ?? []).map((x: any) => `${x.payee} $${x.amountUsd} (tx ${x.txHash})`).join(", ") || "nothing"}; escalated ${(p?.escalated ?? []).length}, deferred ${(p?.deferred ?? []).length}, blocked ${(p?.blocked ?? []).length}`;
+      break;
+    }
+    case "business_approve_bill":
+    case "business_add_bill":
+    case "business_file_invoice":
+    case "business_add_payee":
+    case "business_create":
+    case "business_set_policy": {
+      const p = parsed as any;
+      line = p?.error ? `${toolName} failed: ${p.error}` : `${toolName} done: ${JSON.stringify(p).slice(0, 160)}`;
       break;
     }
     case "get_chain_payments": {

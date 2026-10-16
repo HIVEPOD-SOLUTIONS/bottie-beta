@@ -7,6 +7,7 @@ import { useDemoState } from "@/contexts/demo-state-context";
 import { BillsScreen } from "@/components/dashboard/bills-screen";
 import { InvestmentsScreen } from "@/components/dashboard/investments-screen";
 import { PaymentsScreen } from "@/components/dashboard/payments-screen";
+import { BusinessScreen } from "@/components/business/business-screen";
 import { PaymentsProvider, usePaymentsContext } from "@/contexts/payments-context";
 
 function ComingSoon({ icon, title, description }: { icon: string; title: string; description: string }) {
@@ -34,11 +35,12 @@ import { ASSET_PRICES } from "@/lib/demo-data";
 import { getPrivyEmbeddedWallets } from "@/lib/privy-wallets";
 import { getUserFirstName, getTimeBasedGreeting } from "@/lib/user-display-name";
 
-type Tab = "bills" | "investments" | "payments" | "banking" | "chat";
+type Tab = "bills" | "investments" | "business" | "payments" | "banking" | "chat";
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "bills",       label: "Bills",   icon: "🧾" },
   { key: "investments", label: "Invest",  icon: "📈" },
+  { key: "business",    label: "Business", icon: "🏢" },
   { key: "banking",     label: "Banking", icon: "🏦" },
   { key: "payments",    label: "History", icon: "💳" },
   { key: "chat",        label: "Chat",    icon: "💬" },
@@ -293,6 +295,7 @@ function DashboardInner() {
       <div className="px-5 py-4">
         {activeTab === "bills"       && <BillsScreen />}
         {activeTab === "investments" && <InvestmentsScreen />}
+        {activeTab === "business"    && <BusinessScreen />}
         {activeTab === "banking"     && <ComingSoon icon="🏦" title="Banking" description="Onramp, offramp, payouts & stablecoin banking are coming soon. Global fiat ↔ crypto rails, all in one place." />}
         {activeTab === "payments"    && <PaymentsScreen />}
       </div>
