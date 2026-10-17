@@ -227,7 +227,13 @@ export function payEvmTransfer(opts: {
 
 /** Waits for a transaction and throws if it reverted. */
 export async function waitForEvmTx(chainId: number, hash: Hex) {
-  const receipt = await evmPublicClient(chainId).waitForTransactionReceipt({ hash });
+  // Bounded: if the RPC is blocked/unreachable, polling would otherwise spin forever and leave the UI "busy".
+  const receipt = await evmPublicClient(chainId).waitForTransactionReceipt({ hash, timeout: 90_000 }).catch((err) => {
+    if ((err as Error)?.name === "WaitForTransactionReceiptTimeoutError") {
+      throw new Error(`Sent (${hash.slice(0, 10)}…), but couldn't confirm it — the network RPC may be blocked. Check your balance in a minute.`);
+    }
+    throw err;
+  });
   if (receipt.status !== "success") throw new Error("The transaction failed on-chain. Nothing was charged.");
   return receipt;
 }

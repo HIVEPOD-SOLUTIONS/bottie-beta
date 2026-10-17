@@ -10,11 +10,24 @@ import { defineChain, type Hex } from "viem";
  * `getBalance` returns), while the USDC ERC-20 interface is 6 decimals — the
  * same funds, viewed two ways. Payments use the ERC-20 (6 dp).
  */
+const ARC_RPC = "https://rpc.mainnet.arc.io";
+
+/**
+ * In the browser, go through our own /api/rpc/arc proxy: ad/privacy blockers block
+ * rpc.mainnet.arc.io outright, which breaks Privy's embedded wallet on Arc. Servers use
+ * the upstream directly. (NEXT_PUBLIC_API_URL is set for the Capacitor app, whose own
+ * origin has no /api.)
+ */
+const arcRpcUrl =
+  typeof window === "undefined"
+    ? ARC_RPC
+    : `${(process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "") || window.location.origin}/api/rpc/arc`;
+
 export const arcChain = defineChain({
   id: 5042,
   name: "Arc",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.mainnet.arc.io"] } },
+  rpcUrls: { default: { http: [arcRpcUrl] } },
   blockExplorers: { default: { name: "Arc Explorer", url: "https://explorer.arc.io" } },
 });
 
