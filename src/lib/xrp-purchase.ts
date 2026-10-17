@@ -42,7 +42,7 @@ import { recoverableXrpFromWallet } from "@/lib/xrplBalance";
 import { mcpBuyProducts } from "@/lib/bitrefill-mcp";
 import { getQuote, createWalletRequest, getWalletRequest, transferBetweenWallets } from "@/lib/xrplBackend";
 import { db } from "@/lib/db";
-import { bitrefillOrders, payments, xrplSidebarWallets } from "@/lib/db/schema";
+import { bitrefillOrders, chainSwaps, payments, xrplSidebarWallets } from "@/lib/db/schema";
 
 export type UnderlyingMethod =
   | "usdc_base"
@@ -559,11 +559,42 @@ export async function walletRequestBelongsToUser(walletRequestId: string, userId
 }
 
 export interface RecoverableXrpOrder {
+  /** Bitrefill invoice id; for a top-up, its wallet-request id (top-ups have no invoice). */
   invoiceId: string;
   walletRequestId: string;
   productName: string;
   recoverableXrp: number;
   failedAt: Date;
+  /** "bill": a Bitrefill purchase paid with XRP. "topup": XRP that topped up the Base wallet (Cryptorefills, stocks, Doma, wallet). */
+  kind: "bill" | "topup";
+}
+
+/** The user's own XRP top-up (chain_swaps, chain "xrpl") for this swap wallet, if there is one. */
+async function ownedXrpTopUp(userId: string, walletRequestId: string) {
+  const [row] = await db
+    .select()
+    .from(chainSwaps)
+    .where(and(eq(chainSwaps.walletRequestId, walletRequestId), eq(chainSwaps.userId, userId), eq(chainSwaps.chain, "xrpl")))
+    .limit(1);
+  return row ?? null;
+}
+
+function topUpLabel(row: typeof chainSwaps.$inferSelect): string {
+  return `Top-up: ${row.receiveAmount} ${row.receiveAsset}${row.reference ? ` (${row.reference})` : ""}`;
+}
+
+/**
+ * True when `walletRequestId` is one of this user's XRP payment wallets — a
+ * "pay with XRP" Bitrefill purchase or an XRP top-up — i.e. a wallet whose
+ * only legitimate outbound use is recovering its XRP back to the owner.
+ */
+export async function isOwnedXrpPaymentWallet(walletRequestId: string, userId: string): Promise<boolean> {
+  const [order] = await db
+    .select({ id: bitrefillOrders.id })
+    .from(bitrefillOrders)
+    .where(and(eq(bitrefillOrders.xrplWalletRequestId, walletRequestId), eq(bitrefillOrders.userId, userId)))
+    .limit(1);
+  return !!order || !!(await ownedXrpTopUp(userId, walletRequestId));
 }
 
 const FAILURE_SWAP_STATUSES = new Set(["FAILED", "REFUNDED", "EXPIRED"]);
@@ -583,8 +614,59 @@ const FAILURE_SWAP_STATUSES = new Set(["FAILED", "REFUNDED", "EXPIRED"]);
  * may already show it failed — so every candidate is re-checked live
  * against bluvfi-xrpl, and a still-"pending" row discovered to have failed
  * is reconciled here via markXrpPurchaseFailed before being returned.
+ *
+ * XRP top-ups (chain_swaps rows with chain "xrpl") are listed too: their XRP
+ * waits in the same kind of wallet when the swap fails.
  */
 export async function listRecoverableXrpOrders(userId: string): Promise<RecoverableXrpOrder[]> {
+  const [bills, topUps] = await Promise.all([listRecoverableXrpBills(userId), listRecoverableXrpTopUps(userId)]);
+  return [...bills, ...topUps].sort((a, b) => b.failedAt.getTime() - a.failedAt.getTime());
+}
+
+async function listRecoverableXrpTopUps(userId: string): Promise<RecoverableXrpOrder[]> {
+  const candidates = await db
+    .select()
+    .from(chainSwaps)
+    .where(
+      and(
+        eq(chainSwaps.userId, userId),
+        eq(chainSwaps.chain, "xrpl"),
+        inArray(chainSwaps.status, ["awaiting_payment", "processing", "failed", "expired"]),
+        isNull(chainSwaps.recoveredAt),
+      ),
+    )
+    .orderBy(desc(chainSwaps.updatedAt))
+    .limit(20)
+    .catch(() => []);
+  if (candidates.length === 0) return [];
+
+  const { refreshChainSwap } = await import("@/lib/chain-swaps");
+  const results = await Promise.all(
+    candidates.map(async (row): Promise<RecoverableXrpOrder | null> => {
+      try {
+        const wallet = await getWalletRequest(row.walletRequestId, { includeLedgerBalance: true });
+        if (!FAILURE_SWAP_STATUSES.has(wallet.swapStatus)) return null;
+        // Brings chain_swaps and the payments row (History) in step if nothing else has yet.
+        if (row.status !== "failed" && row.status !== "expired") await refreshChainSwap(row).catch(() => row);
+        const recoverableXrp = recoverableXrpFromWallet(wallet);
+        if (recoverableXrp <= 0) return null;
+        return {
+          invoiceId: row.walletRequestId,
+          walletRequestId: row.walletRequestId,
+          productName: topUpLabel(row),
+          recoverableXrp,
+          failedAt: row.updatedAt,
+          kind: "topup",
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.filter((r): r is RecoverableXrpOrder => r !== null);
+}
+
+async function listRecoverableXrpBills(userId: string): Promise<RecoverableXrpOrder[]> {
   const candidates = await db
     .select()
     .from(bitrefillOrders)
@@ -627,6 +709,7 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
           productName: order.productName ?? "Digital product",
           recoverableXrp,
           failedAt: order.updatedAt,
+          kind: "bill",
         };
       } catch {
         return null; // bluvfi-xrpl lookup failed for this one — skip, retry next fetch
@@ -634,9 +717,7 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
     }),
   );
 
-  return results
-    .filter((r): r is RecoverableXrpOrder => r !== null)
-    .sort((a, b) => b.failedAt.getTime() - a.failedAt.getTime());
+  return results.filter((r): r is RecoverableXrpOrder => r !== null);
 }
 
 /**
@@ -654,6 +735,8 @@ export async function listRecoverableXrpOrders(userId: string): Promise<Recovera
  *
  * Throws with a message safe to surface directly to the user/AI on any
  * failure (not owned, nothing recoverable, transfer itself failed).
+ *
+ * Handles XRP top-ups (chain_swaps) the same way, marking recovered_at.
  */
 export async function recoverXrpOrder(
   userId: string,
@@ -664,7 +747,11 @@ export async function recoverXrpOrder(
     .from(bitrefillOrders)
     .where(and(eq(bitrefillOrders.xrplWalletRequestId, walletRequestId), eq(bitrefillOrders.userId, userId)))
     .limit(1);
-  if (!order) throw new Error("That payment wasn't found, or doesn't belong to this account.");
+  if (!order) {
+    const topUp = await ownedXrpTopUp(userId, walletRequestId);
+    if (!topUp) throw new Error("That payment wasn't found, or doesn't belong to this account.");
+    return recoverXrpTopUp(userId, topUp);
+  }
   if (order.xrplRecoveredAt) throw new Error("This payment's funds were already recovered.");
 
   const wallet = await getWalletRequest(walletRequestId, { includeLedgerBalance: true });
@@ -690,4 +777,30 @@ export async function recoverXrpOrder(
     .catch(() => {});
 
   return { recoveredXrp: recoverableXrp, productName: order.productName ?? "Digital product" };
+}
+
+async function recoverXrpTopUp(
+  userId: string,
+  row: typeof chainSwaps.$inferSelect,
+): Promise<{ recoveredXrp: number; productName: string }> {
+  if (row.recoveredAt) throw new Error("This payment's funds were already recovered.");
+  const wallet = await getWalletRequest(row.walletRequestId, { includeLedgerBalance: true });
+  if (!FAILURE_SWAP_STATUSES.has(wallet.swapStatus)) {
+    throw new Error("This payment hasn't failed (or already completed) — there's nothing to recover yet.");
+  }
+  const recoverableXrp = recoverableXrpFromWallet(wallet);
+  if (recoverableXrp <= 0) throw new Error("There's no recoverable balance left on this payment.");
+
+  const { refreshChainSwap } = await import("@/lib/chain-swaps");
+  await refreshChainSwap(row).catch(() => row);
+
+  const sidebarWallet = await getOrCreateSidebarWallet(userId);
+  await transferBetweenWallets(row.walletRequestId, sidebarWallet.id, String(recoverableXrp));
+
+  await db.update(chainSwaps)
+    .set({ recoveredAt: new Date(), updatedAt: new Date() })
+    .where(eq(chainSwaps.id, row.id))
+    .catch(() => {});
+
+  return { recoveredXrp: recoverableXrp, productName: topUpLabel(row) };
 }

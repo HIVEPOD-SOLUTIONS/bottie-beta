@@ -1,12 +1,18 @@
 /**
- * Chains bluvfi-xrpl can swap FROM besides XRPL — one registry shared by the
- * server (pricing, swap creation) and the browser (checkout UI, wallet
- * signing). Nothing here touches the database or secrets.
+ * Chains bluvfi-xrpl can swap FROM — one registry shared by the server
+ * (pricing, swap creation) and the browser (checkout UI, wallet signing).
+ * Nothing here touches the database or secrets.
  *
  *   - "deposit" chains (NEAR Intents): the service returns a deposit address
  *     the payment is sent to. Zcash and Hyperliquid are paid from the user's
  *     own wallet/account; Robinhood Chain ETH can also be sent straight from
  *     the Bluvfi wallet (it is an EVM chain the Privy wallet can sign on).
+ *   - XRPL is a deposit chain too, but the address is a fresh XRPL wallet
+ *     bluvfi-xrpl holds for the swap: the user sends XRP (plus the ~1.05 XRP
+ *     activation reserve) from any XRP wallet, or in one tap from their Bluvfi
+ *     XRP wallet. Nothing is refunded on-chain: a failed swap's XRP stays in
+ *     that wallet and is recovered to the Bluvfi XRP wallet (xrp-purchase.ts).
+ *     Bitrefill has its own "pay with XRP" flow, so XRPL only tops up here.
  *   - "route" chains (LI.FI): the service returns an approval + transaction the
  *     Bluvfi wallet signs on that chain (Arc, Tempo); the hash is reported back.
  *
@@ -17,8 +23,8 @@
 import { defineChain } from "viem";
 import { arcChain } from "@/lib/arc-chain";
 
-export type SwapChain = "zcash" | "hyperliquid" | "arc" | "robinhood" | "tempo";
-export const SWAP_CHAINS: readonly SwapChain[] = ["arc", "tempo", "robinhood", "zcash", "hyperliquid"];
+export type SwapChain = "xrpl" | "zcash" | "hyperliquid" | "arc" | "robinhood" | "tempo";
+export const SWAP_CHAINS: readonly SwapChain[] = ["arc", "tempo", "robinhood", "xrpl", "zcash", "hyperliquid"];
 
 export function isSwapChain(v: unknown): v is SwapChain {
   return typeof v === "string" && (SWAP_CHAINS as readonly string[]).includes(v);
@@ -113,6 +119,22 @@ export const SWAP_CHAIN_META: Record<SwapChain, SwapChainMeta> = {
     howToPay: "Send ETH on Robinhood Chain — from your Bluvfi wallet in one tap, or from any wallet to the address shown.",
     explorerTx: (h) => `https://robin.etherscan.io/tx/${h}`,
   },
+  xrpl: {
+    label: "XRP Ledger",
+    icon: "🌐",
+    symbol: "XRP",
+    // Drops: bluvfi-xrpl quotes the XRP needed in drops (1 XRP = 1,000,000 drops).
+    decimals: 6,
+    kind: "deposit",
+    wallet: null,
+    needsRefundAddress: false,
+    // Never typed: always the user's own Bluvfi XRP wallet, where a failed payment's XRP is recovered to.
+    refundPattern: /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/,
+    refundHint: "your Bluvfi XRP wallet address",
+    refundPlaceholder: "",
+    howToPay: "Send XRP from your Bluvfi XRP wallet in one tap, or from any XRP wallet to the address shown. The amount includes the ~1.05 XRP reserve a new XRP address needs.",
+    explorerTx: (h) => `https://livenet.xrpl.org/transactions/${h}`,
+  },
   zcash: {
     label: "Zcash",
     icon: "🛡️",
@@ -150,8 +172,9 @@ export const MIN_DEPOSIT_SWAP_USD = 3.2;
 /**
  * Chains offered at the Bitrefill checkout. Tempo is here too (paid from the
  * Bluvfi wallet like Arc), which works for every product — unlike Bitrefill's
- * own usdc_tempo/usdt_tempo, which only some products accept.
+ * own usdc_tempo/usdt_tempo, which only some products accept. XRPL is not
+ * here: Bitrefill already takes XRP through its own flow (xrp-purchase.ts).
  */
 export const BITREFILL_SWAP_CHAINS: readonly SwapChain[] = ["arc", "tempo", "robinhood", "zcash", "hyperliquid"];
-/** Chains that can top up the Bluvfi wallet on Base for Cryptorefills, Backpack and Doma. */
+/** Chains that can top up the Bluvfi wallet on Base for Cryptorefills, Backpack and Doma (XRPL included). */
 export const TOPUP_SWAP_CHAINS: readonly SwapChain[] = SWAP_CHAINS;

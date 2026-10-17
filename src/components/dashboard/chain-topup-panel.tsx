@@ -9,6 +9,7 @@ import { evmPublicClient, friendlyEvmError, pickPrivyWalletOrThrow, pickPrivyWal
 import { MIN_DEPOSIT_SWAP_USD, SWAP_CHAIN_META, TOPUP_SWAP_CHAINS, type SwapChain } from "@/lib/swap-chains";
 import { payDepositFromWallet, payRouteSwap, walletSwapBalance } from "@/lib/chain-purchase-client";
 import type { TopUpResult, TopUpPurpose, TopUpToken } from "@/lib/chain-topup";
+import { refreshXrpBalance, useXrpBalance } from "@/hooks/use-xrp-balance";
 
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 
@@ -25,8 +26,9 @@ async function baseBalance(token: TopUpToken, address: string): Promise<number |
 
 /**
  * "Pay from another chain": tops up the Bluvfi wallet on Base with exactly
- * what a checkout is short of (it reads the Base balance first), from Arc, Tempo, Robinhood Chain, Zcash or
- * Hyperliquid (server: src/lib/chain-topup.ts). When the funds have arrived it
+ * what a checkout is short of (it reads the Base balance first), from Arc, Tempo, Robinhood Chain, XRPL, Zcash or
+ * Hyperliquid (server: src/lib/chain-topup.ts). XRP can be sent in one tap from
+ * the Bluvfi XRP wallet; a failed XRP payment is recovered there. When the funds have arrived it
  * calls onFunded() and the provider's normal wallet payment carries on.
  *
  * Used by Cryptorefills, Backpack stocks and Doma Base listings, on screen and
@@ -71,6 +73,8 @@ export function ChainTopUpPanel({
   const [onBase, setOnBase] = useState<number | null>(null);
 
   const meta = SWAP_CHAIN_META[chain];
+  const isXrp = chain === "xrpl";
+  const { balance: xrpBalance } = useXrpBalance({ poll: isXrp });
   const evmAddress = pickPrivyWallet(wallets)?.address ?? null;
   const symbol = token === "eth" ? "ETH" : "USDC";
   const refundOk = !meta.needsRefundAddress || meta.refundPattern.test(refund.trim());
@@ -122,7 +126,9 @@ export function ChainTopUpPanel({
         }
         if (data.progress === "failed" || data.progress === "expired") {
           setStage("error");
-          setErr(`${data.progress === "expired" ? "The payment window closed." : "The top-up couldn't complete."} Anything you sent is refunded automatically to ${chain === "zcash" || chain === "hyperliquid" ? "your refund address" : `your Bluvfi wallet on ${meta.label}`}.`);
+          setErr(`${data.progress === "expired" ? "The payment window closed." : "The top-up couldn't complete."} ${chain === "xrpl"
+            ? "Any XRP you sent is safe: recover it to your Bluvfi XRP wallet from My Bills, or ask the assistant."
+            : `Anything you sent is refunded automatically to ${chain === "zcash" || chain === "hyperliquid" ? "your refund address" : `your Bluvfi wallet on ${meta.label}`}.`}`);
         }
       } catch { /* keep polling */ }
     };
@@ -198,6 +204,24 @@ export function ChainTopUpPanel({
     }
   };
 
+  // XRPL: the server moves exactly this top-up's amount from the Bluvfi XRP wallet.
+  const sendFromXrpWallet = async () => {
+    if (!topUp) return;
+    setErr(null);
+    setLabel(`Sending ${topUp.amount} XRP…`);
+    try {
+      const res = await authFetch(`/api/chain-topup/${encodeURIComponent(topUp.walletRequestId)}/fund-xrp`, { method: "POST" }, getAccessToken);
+      const data = await res.json().catch(() => ({ error: "Couldn't send the XRP" }));
+      if (!res.ok) throw new Error(data.error ?? "Couldn't send the XRP");
+      refreshXrpBalance();
+      setStage("arriving");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't send the XRP");
+    } finally {
+      setLabel(null);
+    }
+  };
+
   const copy = (v: string, what: string) => {
     navigator.clipboard.writeText(v).then(() => { setCopied(what); setTimeout(() => setCopied(null), 1500); }).catch(() => {});
   };
@@ -235,6 +259,7 @@ export function ChainTopUpPanel({
           <p className="text-[10px] leading-relaxed text-[#A7A79A]">
             {meta.howToPay}
             {balance !== null && ` You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${meta.symbol} there.`}
+            {isXrp && xrpBalance !== null && ` Your Bluvfi XRP wallet has ${xrpBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} XRP.`}
           </p>
           {meta.needsRefundAddress && (
             <input
@@ -286,8 +311,16 @@ export function ChainTopUpPanel({
               {label ?? `Send from my Bluvfi wallet`}
             </button>
           )}
+          {isXrp && (
+            <button onClick={sendFromXrpWallet} disabled={!!label} className="w-full rounded-lg bg-[#8FAE82] py-2 text-xs font-semibold text-[#141513] disabled:opacity-50">
+              {label ?? `Send from my Bluvfi XRP wallet`}
+            </button>
+          )}
           <p className="text-[10px] text-[#A7A79A]">
-            Waiting for your payment{topUp.expiresAt ? ` · send before ${new Date(topUp.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}. If it can&apos;t complete, it&apos;s refunded to {topUp.refundAddress.slice(0, 8)}…
+            Waiting for your payment{topUp.expiresAt ? ` · send before ${new Date(topUp.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}.{" "}
+            {isXrp
+              ? "The amount includes the ~1.05 XRP reserve a new XRP address needs. If it can't complete, your XRP stays safe and can be recovered to your Bluvfi XRP wallet."
+              : <>If it can&apos;t complete, it&apos;s refunded to {topUp.refundAddress.slice(0, 8)}…</>}
           </p>
         </div>
       )}

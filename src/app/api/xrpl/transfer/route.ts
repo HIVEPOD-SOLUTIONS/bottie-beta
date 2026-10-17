@@ -1,10 +1,7 @@
-import { and, eq } from "drizzle-orm";
 import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { transferBetweenWallets, isXrplBackendConfigured, friendlyXrpError } from "@/lib/xrplBackend";
-import { db } from "@/lib/db";
-import { bitrefillOrders } from "@/lib/db/schema";
-import { walletRequestBelongsToUser, recoverXrpOrder } from "@/lib/xrp-purchase";
+import { walletRequestBelongsToUser, recoverXrpOrder, isOwnedXrpPaymentWallet } from "@/lib/xrp-purchase";
 
 /**
  * POST /api/xrpl/transfer
@@ -64,16 +61,11 @@ export async function POST(req: Request) {
   }
 
   // Recovery-direction check: does the source resolve to one of the
-  // caller's own purchase wallets? If so, this is unambiguously a recovery
-  // call — dispatch to the shared, authoritative path instead of forwarding
-  // the request body's amount/destination verbatim.
-  const [sourceOrder] = await db
-    .select({ id: bitrefillOrders.id })
-    .from(bitrefillOrders)
-    .where(and(eq(bitrefillOrders.xrplWalletRequestId, sourceWalletRequestId), eq(bitrefillOrders.userId, userId)))
-    .limit(1);
-
-  if (sourceOrder) {
+  // caller's own XRP payment wallets (a purchase, or an XRP top-up)? If so,
+  // this is unambiguously a recovery call — dispatch to the shared,
+  // authoritative path instead of forwarding the request body's
+  // amount/destination verbatim.
+  if (await isOwnedXrpPaymentWallet(sourceWalletRequestId, userId)) {
     try {
       const result = await recoverXrpOrder(userId, sourceWalletRequestId);
       return Response.json({ message: "Recovered", amountDrops: String(Math.round(result.recoveredXrp * 1_000_000)) });

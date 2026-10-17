@@ -21,7 +21,11 @@ const ACTION_TOOLS = new Set([
   "business_add_payee",
   "business_create",
   "business_set_policy",
+  "business_cancel_bill",
+  "business_set_payee_allowlisted",
+  "business_set_public_log",
   "fund_xrp_purchase_from_wallet",
+  "fund_xrp_topup_from_wallet",
   "recover_xrp_order",
   "buy_investment",
   // x402 / nanopay / solpay
@@ -73,9 +77,6 @@ const ACTION_TOOLS = new Set([
   "review_offramp_bank_account",
   "banking_payout_trade",
   "solana_transfer_usdc",
-  // Bills management
-  "update_bill",
-  "delete_bill",
   // Goals
   "create_goal",
   "delete_goal",
@@ -428,16 +429,6 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
       line = (parsed as any)?.transaction
         ? `Built USDC transfer tx of ${input.amountUsdc} USDC from ${(input.from as string)?.slice(0, 8) ?? "?"} (awaiting user signature)`
         : `Failed to build Solana USDC transfer`;
-      break;
-    case "update_bill":
-      line = (parsed as any)?.bill?.id
-        ? `Updated bill ${input.billId ?? "?"}${input.status ? ` → status: ${input.status}` : ""}${input.autopay !== undefined ? ` autopay: ${input.autopay}` : ""}`
-        : `Failed to update bill`;
-      break;
-    case "delete_bill":
-      line = (parsed as any)?.success
-        ? `Deleted bill ${input.billId ?? "?"}`
-        : `Failed to delete bill`;
       break;
     // Goals
     case "grail_create_redemption":
@@ -840,7 +831,10 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
     case "business_file_invoice":
     case "business_add_payee":
     case "business_create":
-    case "business_set_policy": {
+    case "business_set_policy":
+    case "business_cancel_bill":
+    case "business_set_payee_allowlisted":
+    case "business_set_public_log": {
       const p = parsed as any;
       line = p?.error ? `${toolName} failed: ${p.error}` : `${toolName} done: ${JSON.stringify(p).slice(0, 160)}`;
       break;
@@ -908,6 +902,28 @@ function formatActionFact(toolName: string, input: Record<string, string>, outpu
       } else {
         line = `Cryptorefills purchase not completed for ${input.brand ?? "product"}: ${p?.error ?? "unknown error"}`;
       }
+      break;
+    }
+    // XRP moved from or back to the Bluvfi XRP wallet
+    case "fund_xrp_purchase_from_wallet": {
+      const p = parsed as any;
+      line = p?.funded
+        ? `Funded XRP payment for ${p.productName ?? input.invoiceId ?? "?"} from the Bluvfi XRP wallet: ${p.amountXrp} XRP (tx ${p.txHash ?? "?"})`
+        : `XRP payment funding failed for invoice ${input.invoiceId ?? "?"}: ${p?.error ?? "unknown error"}`;
+      break;
+    }
+    case "fund_xrp_topup_from_wallet": {
+      const p = parsed as any;
+      line = p?.funded
+        ? `Paid XRP top-up ${input.walletRequestId ?? "?"} from the Bluvfi XRP wallet: ${p.amountXrp} XRP (tx ${p.txHash ?? "?"})`
+        : `XRP top-up ${input.walletRequestId ?? "?"} not paid: ${p?.error ?? "unknown error"}`;
+      break;
+    }
+    case "recover_xrp_order": {
+      const p = parsed as any;
+      line = p?.recovered
+        ? `Recovered ${p.recoveredXrp} XRP from failed payment "${p.productName ?? "?"}" to the Bluvfi XRP wallet`
+        : `XRP recovery failed for ${input.walletRequestId ?? "?"}: ${p?.error ?? "unknown error"}`;
       break;
     }
     default:

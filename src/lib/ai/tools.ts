@@ -939,9 +939,10 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
 
     list_recoverable_xrp: tool({
       description:
-        "List the user's \"pay with XRP\" purchases that failed AFTER the deposit wallet was already funded — " +
+        "List the user's \"pay with XRP\" purchases AND XRP top-ups (XRP paid to fund the Base wallet for Cryptorefills, stocks or Doma; " +
+        "kind 'topup') that failed AFTER the deposit wallet was already funded — " +
         "meaning real XRP is sitting safe but stuck, un-recovered. Call this when the user asks about a failed " +
-        "XRP payment, mentions missing/stuck XRP, or after poll_bitrefill_order reports a failed XRP purchase " +
+        "XRP payment, mentions missing/stuck XRP, or after poll_bitrefill_order or get_chain_payments reports a failed XRP payment " +
         "and you want the exact recoverable amount before offering to recover it. Read-only, no confirmation needed. " +
         "Do not mention 'swap'/'bridge'/'NEAR Intents' — describe these only as failed XRP payments.",
       inputSchema: z.object({}),
@@ -957,6 +958,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             orders: orders.map((o) => ({
               walletRequestId: o.walletRequestId,
               productName:     o.productName,
+              kind:            o.kind,
               recoverableXrp:  o.recoverableXrp,
               failedAt:        o.failedAt,
             })),
@@ -1466,8 +1468,8 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
       inputSchema: z.object({
         name: z.string().optional().describe("Domain to buy, e.g. 'software.ai'. Picks its cheapest active listing."),
         listingId: z.string().optional().describe("A specific listing: its externalId (0x…) or numeric id from doma_get_listings"),
-        fundFrom: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional()
-          .describe("Base listings priced in ETH or USDC only, when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
+        fundFrom: z.enum(["arc", "tempo", "robinhood", "xrpl", "zcash", "hyperliquid"]).optional()
+          .describe("Base listings priced in ETH or USDC only, when the user wants to pay from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, XRP, Zcash ZEC or Hyperliquid USDC. The card first tops up their Bluvfi wallet on Base with what's needed, then pays as usual."),
         refundAddress: z.string().max(128).optional()
           .describe("fundFrom 'zcash' / 'hyperliquid' only: the user's own address there for refunds (Zcash t1…/t3…, Hyperliquid 0x…). Ask for it; never guess."),
       }),
@@ -1537,7 +1539,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
             ...(fundFrom && chainId === 8453 ? { fundFrom, refundAddress } : {}),
             tip: 'BUY CARD SHOWN. Output only: "A payment card has been shown. Please confirm the purchase." Then STOP. When it reports {paid:true}, tell the user the domain is theirs (it may take a minute to show). If {paid:false}, relay the error.' +
               (fundFrom && chainId !== 8453 ? " NOTE: this listing is not on Base, so paying from another chain isn't available for it — tell the user it's paid from their wallet on its own chain." : "") +
-              (fundFrom && chainId === 8453 ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card buys the domain by itself. Never say swap/bridge." : ""),
+              (fundFrom && chainId === 8453 ? " If fundFrom is set, the card first shows a \"Pay from another chain\" step: Arc/Tempo are signed from the Bluvfi wallet, Robinhood Chain ETH can be sent from the Bluvfi wallet or any wallet, XRP is sent in one tap from the Bluvfi XRP wallet or from any XRP wallet (the amount shown includes the ~1.05 XRP reserve a new XRP address needs; a failed XRP payment is not refunded on-chain but recovered to the Bluvfi XRP wallet with list_recoverable_xrp / recover_xrp_order), Zcash/Hyperliquid are sent from the user's own wallet to the address shown; once the funds land on Base the card buys the domain by itself. Never say swap/bridge." : ""),
           };
         } catch (err: any) { return { error: err?.message ?? "Failed" }; }
       },
@@ -1735,7 +1737,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
         "'business' is a payment the Bluvfi for Business treasury agent made to a vendor or contractor (USDC on Arc, chain='arc'; the description names the business and payee). " +
         "'investment' also covers real Backpack stock/ETF fills (chain='backpack'), 'domain' is a Doma registration or marketplace buy (chain='doma', or 'evm' for Base listings; amountUsdc is 0 when paid in ETH — the description has the price). " +
         "A 'bill' record with chain='xrpl', 'zcash', 'hyperliquid', 'robinhood', 'arc' or 'tempo' was paid with XRP / ZEC / Hyperliquid USDC / Robinhood Chain ETH / Arc USDC / Tempo USDC.e — describe it only that way, never mention swaps/bridges/NEAR Intents. " +
-        "A 'bridge' record whose description starts 'Top-up:' funded the Base wallet from that chain (arc/tempo/robinhood/zcash/hyperliquid) for a Cryptorefills, stock or Doma payment. " +
+        "A 'bridge' record whose description starts 'Top-up:' funded the Base wallet from that chain (arc/tempo/robinhood/xrpl/zcash/hyperliquid; xrpl = paid with XRP) for a Cryptorefills, stock or Doma payment. " +
         "'transfer' / 'bridge' with chain='arc' happened on Arc. " +
         "Each record includes chain ('evm'|'solana'|'xrpl'|'arc'|'tempo'|'robinhood'|'zcash'|'hyperliquid'|'doma'|'backpack'), amountUsdc, status, txHash, and createdAt.",
       inputSchema: z.object({
@@ -1819,7 +1821,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
 
     get_chain_payments: tool({
       description:
-        "The user's payments from Zcash, Hyperliquid, Arc, Robinhood Chain and Tempo (Bitrefill purchases and wallet top-ups for Cryptorefills, stocks and Doma), " +
+        "The user's payments from Zcash, Hyperliquid, Arc, Robinhood Chain and Tempo (Bitrefill purchases and wallet top-ups for Cryptorefills, stocks and Doma), and XRP wallet top-ups (a failed XRP top-up is recovered with list_recoverable_xrp / recover_xrp_order, not refunded on-chain), " +
         "refreshed live. Each has status (awaiting_payment | processing | completed | failed | expired), what was paid and received, the deposit and refund " +
         "addresses, the user's own tx hash, the delivery/refund tx, and a plain 'fundsAt' line saying where the money is. " +
         "Each item says what it was for (e.g. the product, stock or domain a top-up paid for). " +
@@ -1846,9 +1848,10 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
               userTxHash: r.userTxHash,
               deliveryOrRefundTx: r.swapTxHash,
               createdAt: r.createdAt,
+              ...(r.chain === "xrpl" ? { recovered: !!r.recoveredAt } : {}),
               ...describeChainSwap(r),
             })),
-            tip: "Explain each in plain words using summary/fundsAt (never say swap/bridge/NEAR Intents/LI.FI). Failed/expired ones are refunded automatically to refundAddress — no recovery action is needed or possible from Bluvfi. A completed top-up means the funds are in the Bluvfi wallet on Base even if the purchase wasn't finished; offer to complete it. If something looks wrong for over an hour, suggest contacting Bluvfi support with the id and tx hash.",
+            tip: "Explain each in plain words using summary/fundsAt (never say swap/bridge/NEAR Intents/LI.FI). Failed/expired ones are refunded automatically to refundAddress — no recovery action is needed or possible from Bluvfi — EXCEPT chain 'xrpl': a failed XRP top-up is not refunded on-chain; if recovered is false, call list_recoverable_xrp and offer recover_xrp_order (after the user confirms). An XRP top-up still awaiting_payment can be paid with fund_xrp_topup_from_wallet (after the user confirms the amount). A completed top-up means the funds are in the Bluvfi wallet on Base even if the purchase wasn't finished; offer to complete it. If something looks wrong for over an hour, suggest contacting Bluvfi support with the id and tx hash.",
           };
         } catch (err: unknown) {
           return { error: err instanceof Error ? err.message : "Couldn't load these payments" };
@@ -1856,17 +1859,43 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
       },
     }),
 
+    fund_xrp_topup_from_wallet: tool({
+      description:
+        "Pay a pending XRP top-up (chain 'xrpl' in get_chain_payments, status awaiting_payment) from the user's own Bluvfi XRP wallet — " +
+        "the same as the top-up panel's \"Send from my Bluvfi XRP wallet\" button. MOVES REAL XRP: first state what it tops up and the exact " +
+        "XRP amount (it includes the ~1.05 XRP reserve a new XRP address needs, not an extra fee) and get a clear yes. Never call speculatively. " +
+        "The amount and destination come from the user's own top-up; callers cannot override them.",
+      inputSchema: z.object({ walletRequestId: z.string().min(1).describe("The id of the XRP top-up from get_chain_payments") }),
+      execute: async ({ walletRequestId }) => {
+        if (!userId) return { error: "Not authenticated" };
+        try {
+          const { fundTopUpFromXrpWallet } = await import("@/lib/chain-topup");
+          const result = await fundTopUpFromXrpWallet(userId, walletRequestId);
+          return {
+            funded: true,
+            walletRequestId,
+            amountXrp: result.amountXrp,
+            txHash: result.txHash,
+            tip: "XRP sent. The USDC/ETH usually lands on Base in a minute or two; check with get_chain_payments, then continue with what the user wanted to pay for.",
+          };
+        } catch (err: unknown) {
+          const raw = err instanceof Error ? err.message : "Couldn't send the XRP";
+          return { funded: false, error: friendlyXrpError(raw) };
+        }
+      },
+    }),
+
     fund_wallet_from_chain: tool({
       description:
-        "Add USDC (or ETH) to the user's Bluvfi wallet on Base by paying from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, Zcash ZEC or Hyperliquid USDC. " +
+        "Add USDC (or ETH) to the user's Bluvfi wallet on Base by paying from another chain: Arc USDC, Tempo USDC.e, Robinhood Chain ETH, XRP, Zcash ZEC or Hyperliquid USDC. " +
         "Shows a panel in chat — nothing moves until the user acts there. Only the shortfall is topped up (it reads their Base balance). " +
         "Use when the user wants to fund their wallet from one of those chains, or to pay something not covered by a fundFrom option. " +
-        "Zcash/Hyperliquid need the user's own refund address (ask). Deposit-address chains (Zcash, Hyperliquid, Robinhood) start at about $3.20.",
+        "Zcash/Hyperliquid need the user's own refund address (ask). Deposit-address chains (XRP, Zcash, Hyperliquid, Robinhood) start at about $3.20.",
       inputSchema: z.object({
-        amount: z.string().regex(/^d+(.d+)?$/).describe("How much should end up on Base, in the token below, e.g. '25'"),
+        amount: z.string().regex(/^\d+(\.\d+)?$/).describe("How much should end up on Base, in the token below, e.g. '25'"),
         token: z.enum(["usdc", "eth"]).optional().describe("What to receive on Base (default usdc)"),
         amountUsd: z.number().positive().optional().describe("token 'eth' only: the USD value of amount (use a live ETH price)"),
-        chain: z.enum(["arc", "tempo", "robinhood", "zcash", "hyperliquid"]).optional().describe("Chain to pay from, if the user said; otherwise they pick in the panel"),
+        chain: z.enum(["arc", "tempo", "robinhood", "xrpl", "zcash", "hyperliquid"]).optional().describe("Chain to pay from, if the user said; otherwise they pick in the panel"),
         refundAddress: z.string().max(128).optional().describe("chain 'zcash' / 'hyperliquid': the user's own address there"),
       }),
       execute: async ({ amount, token = "usdc", amountUsd, chain, refundAddress }) => {
@@ -1890,7 +1919,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
     get_other_chain_balances: tool({
       description:
         "Live balances of the user's Bluvfi wallet on Arc (USDC), Tempo (USDC.e) and Robinhood Chain (ETH) — the chains it can pay from directly " +
-        "(Zcash and Hyperliquid are paid from the user's own wallets, so there is nothing of theirs to read). Read on-chain for the wallet Privy reports.",
+        "(Zcash and Hyperliquid are paid from the user's own wallets, so there is nothing of theirs to read; for the Bluvfi XRP wallet use get_xrp_balance). Read on-chain for the wallet Privy reports.",
       inputSchema: z.object({}),
       execute: async () => {
         if (!userId) return { error: "Not authenticated" };
@@ -1923,7 +1952,7 @@ function createAllTools(walletAddress?: string, userId?: string, solanaAddress?:
           return {
             wallet: address,
             balances,
-            tip: "These can pay Bitrefill (Arc, Robinhood), and Cryptorefills / Backpack / Doma Base listings via fundFrom. Tempo also needs a little stablecoin for its fee.",
+            tip: "These can pay Bitrefill (Arc, Tempo, Robinhood), and Cryptorefills / Backpack / Doma Base listings via fundFrom. Tempo also needs a little stablecoin for its fee.",
           };
         } catch (err: unknown) {
           return { error: err instanceof Error ? err.message : "Couldn't read balances" };
@@ -3455,11 +3484,13 @@ Use after grail_find_user (which searches by email/name) when you already have t
 
     grail_submit_buy: tool({
       description: `Submit a fully signed GRAIL buy transaction to execute the gold purchase on-chain.
-Call ONLY after the user has signed the transaction returned by grail_gold_price (which initiates a buy quote).
+Only with a trade_id and an unsigned transaction from a GRAIL buy quote that the user has signed in their own wallet. No tool returns
+a buy trade_id or transaction today (grail_gold_price returns the price only) and the buy-signing screen is hidden, so buying gold is
+currently unavailable: never call this with a made-up or reused trade_id.
 The signed_tx is the base64-encoded signed transaction from the user's Solana wallet.
 Returns: { trade_id, status, message } — success means the purchase is executing.`,
       inputSchema: z.object({
-        trade_id: z.string().describe("Trade ID from the grail_gold_price buy quote"),
+        trade_id: z.string().describe("Trade ID from a GRAIL buy quote (none is available from the agent today)"),
         signed_tx: z.string().describe("Base64-encoded signed Solana transaction from the user's wallet"),
       }),
       execute: async ({ trade_id, signed_tx }) => {
@@ -7081,9 +7112,9 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     get_activity_narration: tool({
       description:
-        "Get an AI-generated 2-3 sentence narrative summary of the user's last 10 DeFi activities. " +
-        "Uses DeepSeek to write a warm, jargon-free summary of what the user has been doing. " +
-        "Call when user asks 'what have I been doing?', 'summarize my recent activity', or 'give me an overview of my DeFi activity'.",
+        "Get an AI-generated 2-3 sentence summary of the user's last 10 entries in the legacy savings-vault activity log (see get_activities). " +
+        "Nothing writes that log anymore, so for 'what have I been doing?' or 'summarize my recent activity' use get_payment_history and summarize it yourself; " +
+        "call this only for old vault activity.",
       inputSchema: z.object({}),
       execute: async () => {
         try {
@@ -7166,8 +7197,8 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     get_goals: tool({
       description:
-        "Fetch all of the user's savings goals linked to their vaults. " +
-        "Each goal has a name, target amount, currency, and the vault it belongs to. " +
+        "Fetch all of the user's savings goals (from the legacy savings vaults; there is no goals screen right now, so this is the only place they show). " +
+        "Each goal has a name, target amount, currency, and the vault id it was linked to. " +
         "Call when user asks 'what are my savings goals?', 'show my goals', or 'am I on track?'.",
       inputSchema: z.object({}),
       execute: async () => {
@@ -7183,8 +7214,8 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     create_goal: tool({
       description:
-        "Create or update a savings goal for a vault. " +
-        "Associates a target amount and name with a vault so the user can track progress. " +
+        "Create or update a savings goal for a vault id. " +
+        "Associates a target amount and name with it for tracking only. Bluvfi no longer has vaults or a goals screen, so the goal is only visible through get_goals: say so before creating one. " +
         "Call when user says 'set a goal of $5000 for my vault' or 'I want to save 10 ETH in this vault'.",
       inputSchema: z.object({
         vaultId: z.string().describe("Vault address or ID the goal is linked to"),
@@ -7245,9 +7276,10 @@ IMPORTANT: Confirm with the user before archiving — this is irreversible.`,
 
     get_activities: tool({
       description:
-        "Fetch the user's recent DeFi activity log — vault deposits, withdrawals, swaps, and swap-and-deposits. " +
-        "Each record includes type, amount, token, vault, txHash, and timestamp. " +
-        "Call when user asks 'what have I done recently?', 'show my transaction history', or 'what was my last deposit?'.",
+        "Fetch the user's legacy savings-vault activity log (deposit, withdraw, swap, swap_and_deposit). " +
+        "Bluvfi no longer has vaults and nothing writes this log anymore, so it is usually empty and only holds old entries. " +
+        "For what the user has done or paid (bills, stocks, top-ups, transfers, bridges, business payments), use get_payment_history instead; " +
+        "call this only when they ask about old vault deposits or withdrawals.",
       inputSchema: z.object({
         limit: z.number().optional().describe("Number of activities to return, max 100, default 20"),
       }),

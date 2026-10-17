@@ -36,3 +36,6 @@ bluvfi-revenuecart*.json
 !.env.example
 *.jks
 *.keystore
+
+# Test-only PGlite (scripts/tests/setup-pglite.cjs)
+scripts/tests/.deps/

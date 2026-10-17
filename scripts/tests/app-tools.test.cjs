@@ -31,16 +31,18 @@ check("every denied name carries a reason", Object.values(at.APP_DENIED_NAMES).e
 
 // ── what must never reach the app
 const mustNot = ["x402_pay", "solana_transfer_usdc", "initiate_payout", "send_payout", "transfer_to_payout_wallet", "transfer_sub_account_funds", "create_onramp_order", "create_offramp_order", "banking_transfer",
-  "buy_investment", "get_market_prices", "create_goal", "doma_create_listing", "doma_prepare_buy", "grail_submit_buy", "grail_submit_sell", "grail_submit_redemption", "grail_cancel_redemption"];
+  "buy_investment", "get_market_prices", "create_goal", "doma_prepare_buy", "doma_prepare_accept_offer", "grail_submit_buy", "grail_submit_sell", "grail_submit_redemption", "grail_cancel_redemption"];
 const present = mustNot.filter((n) => names.has(n));
 check("the dangerous tools exist today (so this test is guarding something real)", present.length >= 15, present.join(","));
-check("none of the operator, banking, agent-wallet, signed-order or gold-trading tools is available to the app", present.every((n) => !at.isAppTool(n)));
+check("none of the operator, banking, agent-wallet, raw-calldata or gold-trading tools is available to the app", present.every((n) => !at.isAppTool(n)));
 check("no Fuze, SpherePay, Circle or Solana nanopayment tool is available to the app", all.filter((n) => /^(fuze_|spherepay_|nanopay_|solpay_)/.test(n)).every((n) => !at.isAppTool(n)));
 check("xStocks and gold: only the public read-only lookups are allowed", all.filter((n) => /^(xstocks_|grail_)/.test(n) && at.isAppTool(n)).every((n) => /(list|get|price|corporate_actions|denominations|multiplier)/.test(n) && !/(submit|rfq|whitelist|sweeping|market_|create|cancel|find_user|list_users|get_user|quote)/.test(n)), all.filter((n) => /^(xstocks_|grail_)/.test(n) && at.isAppTool(n)).join(", "));
 
 // ── what the app needs
 const need = ["get_crypto_prices", "convert_crypto", "open_fund_wallet", "get_bills", "get_product_details", "buy_bitrefill_product", "poll_bitrefill_order", "get_bitrefill_orders", "buy_cryptorefills_product", "search_stocks", "trade_stock", "withdraw_stock_credit",
-  "get_payment_history", "get_xrp_balance", "get_my_shar", "get_my_network_account", "search_network_providers", "get_provider_details", "get_my_activity", "getequity_get_member_balance", "doma_create_order", "doma_buy_listing", "nosana_list_deployments"];
+  "get_payment_history", "get_xrp_balance", "get_my_shar", "get_my_network_account", "search_network_providers", "get_provider_details", "get_my_activity", "getequity_get_member_balance", "doma_create_order", "doma_buy_listing", "nosana_list_deployments",
+  // the app's Business screen, and its Doma Orderbook tab (signed listings and offers, the signature pasted by the user)
+  "business_overview", "business_create", "business_run_agent", "business_set_public_log", "doma_create_listing", "doma_cancel_offer", "doma_create_bulk_listings"];
 check("everything the app has a screen or card for is still available", need.every((n) => at.isAppTool(n)), need.filter((n) => !at.isAppTool(n)).join(", "));
 const network = [...fs.readFileSync(path.join(dir, "network-tools.ts"), "utf8").matchAll(/^\s{2,6}([a-z0-9_]+): tool\(/gm)].map((m) => m[1]);
 check("all five Shar and network tools are allowed (they are app-only)", network.length === 5 && network.every((n) => at.isAppTool(n)));
@@ -50,6 +52,7 @@ check("the card-backed Backpack, Cryptorefills and Bitrefill tools are all allow
 const fake = Object.fromEntries(all.map((n) => [n, { name: n }]));
 const kept = at.restrictForApp(fake);
 check("restrictForApp keeps exactly the allowed tools and leaves the originals untouched", Object.keys(kept).every((n) => at.isAppTool(n)) && Object.keys(kept).length === all.filter((n) => at.isAppTool(n)).length && Object.keys(fake).length === all.length && kept.get_bills === fake.get_bills);
+check("every Bluvfi for Business tool is allowed (the app has the Business screen)", all.filter((n) => n.startsWith("business_")).length >= 10 && all.filter((n) => n.startsWith("business_")).every((n) => at.isAppTool(n)));
 check("the app still gets well under half of the website's tools (a sanity bound: it was a third until Arc and the other chains got screens in the app)", Object.keys(kept).length < all.length / 2, `${Object.keys(kept).length} of ${all.length}`);
 check("a tool nobody has classified is left out of the app", !at.isAppTool("brand_new_payment_tool") && !("brand_new_payment_tool" in at.restrictForApp({ brand_new_payment_tool: {} })));
 

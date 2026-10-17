@@ -20,8 +20,8 @@ export const APP_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_cryptorefills_order", "get_cryptorefills_orders",
   // Invest: Backpack stocks and ETFs (confirm card, withdraw sheet)
   "search_stocks", "get_stock", "get_stock_portfolio", "trade_stock", "withdraw_stock_credit",
-  // Arc, Tempo, Robinhood Chain, Zcash and Hyperliquid: the Arc wallet tab and send card, the top-up panel, and the status of payments from those chains
-  "get_arc_balance", "get_other_chain_balances", "send_usdc_arc", "fund_wallet_from_chain", "get_chain_payments",
+  // Arc, Tempo, Robinhood Chain, XRPL, Zcash and Hyperliquid: the Arc wallet tab and send card, the top-up panel, and the status of payments from those chains
+  "get_arc_balance", "get_other_chain_balances", "send_usdc_arc", "fund_wallet_from_chain", "get_chain_payments", "fund_xrp_topup_from_wallet",
   // history
   "get_payment_history", "get_balance_history", "get_activities", "get_activity_narration",
   // the user's own XRP wallet
@@ -36,18 +36,18 @@ export const APP_TOOL_NAMES: ReadonlySet<string> = new Set([
   "grail_gold_price", "grail_get_denominations", "grail_list_trades", "grail_get_trade", "grail_list_redemptions", "grail_get_redemption",
 ]);
 
-/** Whole families the app has a screen for: GetEquity (Invest), Doma (Invest) and Nosana (Invest). */
-export const APP_TOOL_PREFIXES: readonly string[] = ["getequity_", "doma_", "nosana_"];
+/** Whole families the app has a screen for: GetEquity, Doma and Nosana (Invest), and Bluvfi for Business (the Business screen, from Profile). */
+export const APP_TOOL_PREFIXES: readonly string[] = ["getequity_", "doma_", "nosana_", "business_"];
 
-/** Inside an allowed family, tools that need a wallet-signed order the app can't produce, or that are raw developer data. */
-export const APP_DENIED_WITHIN_PREFIXES: ReadonlySet<string> = new Set([
-  "doma_create_listing", "doma_create_offer", "doma_cancel_listing", "doma_cancel_offer",
-  "doma_create_bulk_listings", "doma_create_bulk_offers", "doma_prepare_buy", "doma_prepare_accept_offer",
-]);
+/**
+ * Inside an allowed family, tools that are raw developer data (Seaport fulfilment calldata; buying goes through doma_buy_listing's card).
+ * Signed Doma listings and offers are allowed: the app's Doma Orderbook tab submits and cancels them with a signature the user pastes,
+ * the same as the website, and the tools only ever pass on a signature the user supplies.
+ */
+export const APP_DENIED_WITHIN_PREFIXES: ReadonlySet<string> = new Set(["doma_prepare_buy", "doma_prepare_accept_offer"]);
 
-/** Families that are never available in the app (operator accounts, banking, agent wallets, B2B). */
+/** Families that are never available in the app (operator accounts, banking, agent wallets). */
 export const APP_DENIED_PREFIXES: readonly string[] = [
-  "business_", // Bluvfi for Business is a website feature (Business tab); the app has no screen for it
   "fuze_", "spherepay_", "nanopay_", "solpay_", "xstocks_", "grail_",
   "get_banking_", "get_payout_", "get_onramp_", "get_offramp_", "get_nanopay_", "get_solpay_",
 ];

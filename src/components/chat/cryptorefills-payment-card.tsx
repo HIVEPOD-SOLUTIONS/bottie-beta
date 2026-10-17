@@ -45,7 +45,7 @@ type Output = {
   rail?: CrRail;
   order?: CrOrderRequest;
   partnerOrder?: CrPartnerRequest;
-  /** Pay from Arc / Tempo / Robinhood / Zcash / Hyperliquid: top up the Base wallet first, then pay gaslessly on Base. */
+  /** Pay from Arc / Tempo / Robinhood / XRP / Zcash / Hyperliquid: top up the Base wallet first, then pay gaslessly on Base. */
   fundFrom?: SwapChain;
   refundAddress?: string;
   // Set after the card reports back:
@@ -251,7 +251,7 @@ export function CryptorefillsPaymentCard({
 
       {state === "idle" && !isOther && !showTopUp && (
         <button onClick={() => setShowTopUp(true)} className="mt-2 text-[11px] text-[#8FAE82] underline">
-          Pay from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid instead
+          Pay from Arc, Tempo, Robinhood Chain, XRP, Zcash or Hyperliquid instead
         </button>
       )}
 

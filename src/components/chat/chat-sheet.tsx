@@ -856,7 +856,7 @@ export function ChatSheet({ visible }: ChatSheetProps) {
                         );
                       }
 
-                      // Top up the Base wallet from Arc / Tempo / Robinhood / Zcash / Hyperliquid
+                      // Top up the Base wallet from Arc / Tempo / Robinhood / XRP / Zcash / Hyperliquid
                       if (tp.state === "output-available" && (tp.output as any)?.chainTopUp === true) {
                         return (
                           <ChainTopUpCard

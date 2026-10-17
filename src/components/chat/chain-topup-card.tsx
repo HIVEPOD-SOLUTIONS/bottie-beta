@@ -6,7 +6,7 @@ import { isSwapChain, SWAP_CHAIN_META, type SwapChain } from "@/lib/swap-chains"
 
 /**
  * fund_wallet_from_chain — puts USDC (or ETH) into the user's Bluvfi wallet on
- * Base from Arc, Tempo, Robinhood Chain, Zcash or Hyperliquid. Nothing moves
+ * Base from Arc, Tempo, Robinhood Chain, XRPL, Zcash or Hyperliquid. Nothing moves
  * until the user acts in the panel. Reports {funded:true} back to the chat.
  */
 type Output = {

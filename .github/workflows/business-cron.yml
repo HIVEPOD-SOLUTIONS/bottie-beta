@@ -1,0 +1,58 @@
+# Bluvfi for Business: runs every business's treasury agent on a schedule, so bills are paid on time without anyone pressing
+# "Run agent". It calls POST /api/business/cron (src/app/api/business/cron/route.ts), which runs the agent for each business with a
+# bill due in the next 30 days, within that business's own limits, and signs every decision into its log, exactly like a run the
+# owner starts. The site is on AWS Amplify, which has no scheduler of its own, so GitHub runs it.
+#
+# Setup (once):
+#   1. Pick a long random secret, e.g.  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#   2. Amplify → the app → Environment variables: BUSINESS_CRON_SECRET = that secret (amplify.yml already passes it through),
+#      then redeploy.
+#   3. GitHub → this repo → Settings → Secrets and variables → Actions → New repository secret: BUSINESS_CRON_SECRET = the same secret.
+#   4. Optional: a repository VARIABLE named BLUVFI_URL if the site isn't https://www.bluvfi.xyz.
+# Until step 3 is done each run is skipped (green, with a note), so nothing fails while it isn't set up.
+# Run it by hand any time: Actions → Business treasury agent → Run workflow.
+
+name: Business treasury agent
+
+on:
+  schedule:
+    - cron: "7 * * * *" # hourly, at :07 (GitHub may start scheduled runs a few minutes late)
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: business-cron
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run the treasury agent for businesses with bills due
+        env:
+          CRON_SECRET: ${{ secrets.BUSINESS_CRON_SECRET }}
+          SITE: ${{ vars.BLUVFI_URL || 'https://www.bluvfi.xyz' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::notice::BUSINESS_CRON_SECRET isn't set in this repo's Actions secrets, so the scheduled run is skipped. See the setup notes at the top of .github/workflows/business-cron.yml."
+            exit 0
+          fi
+          status=$(curl -sS -o response.json -w '%{http_code}' --max-time 240 \
+            -X POST "${SITE%/}/api/business/cron" \
+            -H "x-cron-secret: $CRON_SECRET" \
+            -H "content-type: application/json")
+          cat response.json; echo
+          if [ "$status" = "401" ]; then
+            echo "::error::The site refused the secret (401). BUSINESS_CRON_SECRET must be the same in Amplify and in this repo's Actions secrets, and Amplify must have been redeployed after setting it."
+            exit 1
+          fi
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::The business cron returned HTTP $status."
+            exit 1
+          fi
+          # A business whose run failed is listed with an "error"; show it as a warning, the others still ran.
+          if grep -q '"error"' response.json; then
+            echo "::warning::At least one business's run reported an error (see the response above)."
+          fi
