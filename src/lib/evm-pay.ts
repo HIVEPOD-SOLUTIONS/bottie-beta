@@ -162,6 +162,25 @@ export async function payEvm(opts: {
     }
     if (active !== payment.chainId) throw new Error(`Couldn't switch the wallet to ${chain.name}.`);
     const client = createWalletClient({ account, chain, transport: custom(provider) });
+    if (payment.chainId === arcChain.id) {
+      // Arc: don't let the wallet SDK broadcast. It returns a hash even when its broadcast silently fails
+      // (blocked/unreachable RPC), so the "sent" tx never lands. Sign in the wallet, then submit the raw
+      // transaction ourselves through the same-origin RPC proxy so any failure is real and visible.
+      const pub = evmPublicClient(payment.chainId);
+      let serialized: Hex | null = null;
+      try {
+        const req = await pub.prepareTransactionRequest({ account, chain, to: payment.to, data: payment.data, value: payment.value });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        serialized = await client.signTransaction(req as any);
+      } catch (err) {
+        if (isUserRejection(err)) throw err;
+        console.warn(`[${label}] Local signing failed on ${chain.name}, falling back to wallet broadcast:`, friendlyEvmError(err, chain.name));
+      }
+      if (serialized) {
+        const hash = await pub.sendRawTransaction({ serializedTransaction: serialized });
+        return { hash, layer: 2 };
+      }
+    }
     const hash = await client.sendTransaction({ account, chain, to: payment.to, data: payment.data, value: payment.value });
     return { hash, layer: 2 };
   } catch (err) {
@@ -171,8 +190,8 @@ export async function payEvm(opts: {
   }
 
   // ── Layer 3: Circle ArcKit (transfers only) ──
-  const arcChain = ARCKIT_CHAINS[payment.chainId];
-  if (payment.transfer && arcChain) {
+  const arcKitChain = ARCKIT_CHAINS[payment.chainId];
+  if (payment.transfer && arcKitChain) {
     onLayer?.(3);
     const [{ arcKit }, { createViemAdapterFromProvider }] = await Promise.all([
       import("@/lib/arc-kit"),
@@ -185,7 +204,7 @@ export async function payEvm(opts: {
     const token = t.token === "native" ? "NATIVE" : t.symbol === "USDC" ? "USDC" : t.symbol === "USDT" && payment.chainId === 1 ? "USDT" : t.token;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const step = await arcKit.send({ from: { adapter, chain: arcChain as any }, to: t.recipient, amount: t.amount, token: token as any });
+      const step = await arcKit.send({ from: { adapter, chain: arcKitChain as any }, to: t.recipient, amount: t.amount, token: token as any });
       if (step.state === "error" || !step.txHash) throw new Error("Transfer did not complete");
       return { hash: step.txHash as Hex, layer: 3 };
     } catch (err) {
