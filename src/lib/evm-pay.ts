@@ -22,8 +22,9 @@ import { robinhoodChain, tempoChain } from "@/lib/swap-chains";
  * Every EVM payment from the user's Privy wallet goes through here, so all
  * providers get the same fallback:
  *
- *   Layer 1 — Privy native gas sponsorship (EIP-7702, `sponsor: true`). Gas
- *             paid by Bluvfi; needs the chain enabled in the Privy dashboard
+ *   Layer 1 — Privy native gas sponsorship, relayed through
+ *             /api/privy/sponsored-send (user-pays mode: gas in the wallet's
+ *             USDC); needs the chain enabled in the Privy dashboard
  *             (Wallet infrastructure → Gas management).
  *   Layer 2 — The same Privy wallet as a plain EOA; the user pays gas in the
  *             chain's native token. Skipped if they have none.
@@ -111,7 +112,7 @@ export async function payEvm(opts: {
   /** Tag for console logs, e.g. "bitrefill". */
   label?: string;
 }): Promise<{ hash: Hex; layer: PayLayer }> {
-  const { payment, wallet, sendTransaction, onLayer, label = "pay" } = opts;
+  const { payment, wallet, onLayer, label = "pay" } = opts;
   const chain = evmChain(payment.chainId);
   const tx = { to: payment.to, chainId: payment.chainId, ...(payment.data ? { data: payment.data } : {}), ...(payment.value ? { value: payment.value } : {}) };
   let lastErr: unknown;
@@ -119,8 +120,17 @@ export async function payEvm(opts: {
   // ── Layer 1: Privy gas sponsorship ──
   try {
     onLayer?.(1);
-    const { hash } = await sendTransaction(tx, { sponsor: true });
-    return { hash: hash as Hex, layer: 1 };
+    // The app is in Privy's "User pays" gas mode, which needs `sponsor_options` — client SDKs
+    // can't pass it, so relay through the server (gas is paid in the wallet's USDC).
+    const res = await fetch("/api/privy/sponsored-send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ chainId: payment.chainId, to: payment.to, data: payment.data, value: payment.value?.toString() }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { hash?: string; error?: string };
+    if (!res.ok || !json.hash) throw new Error(json.error ?? `Sponsored send failed (HTTP ${res.status})`);
+    return { hash: json.hash as Hex, layer: 1 };
   } catch (err) {
     if (isUserRejection(err)) throw err;
     lastErr = err;
@@ -135,7 +145,8 @@ export async function payEvm(opts: {
     // the wallet has no native token — check first so we fail cleanly.
     // Tempo has no native gas token (fees are paid in a stablecoin), so there is no balance to check.
     if (payment.chainId !== tempoChain.id) {
-      const gas = await evmPublicClient(payment.chainId).getBalance({ address: account });
+      // If the RPC itself is unreachable (ad blocker, CSP, outage) we can't tell, so let the wallet try.
+      const gas = await evmPublicClient(payment.chainId).getBalance({ address: account }).catch(() => null);
       if (gas === BigInt(0)) throw new Error(`No native gas: no ${chain.nativeCurrency.symbol} on ${chain.name}`);
     }
     await wallet.switchChain(payment.chainId);
