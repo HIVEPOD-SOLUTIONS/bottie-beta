@@ -1285,9 +1285,9 @@
   resolved "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.0.tgz"
   integrity sha512-XovyyCCnBzW+zKu+z/zq8hwNs4KOR5rEMAOxo2f40Q5xoOI37IMm6MIg2COOUtUApo0i6850MTBKH2u4QLGIqg==
 
-"@hpke/chacha20poly1305@^1.6.2":
+"@hpke/chacha20poly1305@^1.6.2", "@hpke/chacha20poly1305@^1.7.1":
   version "1.8.0"
-  resolved "https://registry.npmjs.org/@hpke/chacha20poly1305/-/chacha20poly1305-1.8.0.tgz"
+  resolved "https://registry.yarnpkg.com/@hpke/chacha20poly1305/-/chacha20poly1305-1.8.0.tgz#d4d2f6e3cce08b4c5553920e15b4e598c8a5772e"
   integrity sha512-FcBfAQ+Y99vMNJP2yrZ9wpL8V0GOwp1+zMyzvc6alasrBygfFjFm1yeUtyADJCu/27C3Lm5mJzx6u7pwg+cX5w==
   dependencies:
     "@hpke/common" "^1.10.0"
@@ -1297,9 +1297,9 @@
   resolved "https://registry.npmjs.org/@hpke/common/-/common-1.10.1.tgz"
   integrity sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==
 
-"@hpke/core@^1.7.2":
+"@hpke/core@^1.7.2", "@hpke/core@^1.7.5":
   version "1.9.0"
-  resolved "https://registry.npmjs.org/@hpke/core/-/core-1.9.0.tgz"
+  resolved "https://registry.yarnpkg.com/@hpke/core/-/core-1.9.0.tgz#4eced0597787f51fdb53ad515c3d47a3abc9fe3a"
   integrity sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==
   dependencies:
     "@hpke/common" "^1.10.0"
@@ -2077,6 +2077,21 @@
     js-cookie "^3.0.5"
     libphonenumber-js "^1.10.44"
     set-cookie-parser "^2.6.0"
+
+"@privy-io/node@0.36.0":
+  version "0.36.0"
+  resolved "https://registry.yarnpkg.com/@privy-io/node/-/node-0.36.0.tgz#0428e2b11a89c6adeb3df809a0fa44ff1d70bd0a"
+  integrity sha512-ZgPQcjIwYSoLyHnQWRqSx27NbEMo6KUQepUVrm/yTpX9jI1BjBmHdUUXBsNS2cJZQ8f10mz/6jBmYZfIfXY2pA==
+  dependencies:
+    "@hpke/chacha20poly1305" "^1.7.1"
+    "@hpke/core" "^1.7.5"
+    "@noble/curves" "^1.9.7"
+    "@noble/hashes" "^1.8.0"
+    "@scure/base" "^1.2.5"
+    canonicalize "^2.1.0"
+    jose "^6.1.0"
+    lru-cache "^11.1.0"
+    svix "^1.92.2"
 
 "@privy-io/popup@0.0.4":
   version "0.0.4"
@@ -5095,9 +5110,9 @@ caniuse-lite@^1.0.30001579, caniuse-lite@^1.0.30001782:
   resolved "https://registry.npmjs.org/caniuse-lite/-/caniuse-lite-1.0.30001793.tgz"
   integrity sha512-iwSsYWaCOoh26cV8NwNRViHlrfUvYsHDfRVcbtmw0Kg6PJIZZXwMkj1442FYLBGkeUf1juAsU3DTfxW579mrPA==
 
-canonicalize@^2.0.0:
+canonicalize@^2.0.0, canonicalize@^2.1.0:
   version "2.1.0"
-  resolved "https://registry.npmjs.org/canonicalize/-/canonicalize-2.1.0.tgz"
+  resolved "https://registry.yarnpkg.com/canonicalize/-/canonicalize-2.1.0.tgz#92a20ecfb94e96591badf4977dc2fb1bfbc31dc5"
   integrity sha512-F705O3xrsUtgt98j7leetNhTWPe+5S72rlL5O4jA1pKqBVQ/dT1O1D6PFxmSXvc0SUOinWS57DKx0I3CHrXJHQ==
 
 "cbw-sdk@npm:@coinbase/wallet-sdk@3.9.3":
@@ -6481,6 +6496,11 @@ jose@^4.10.4, jose@^4.15.5:
   resolved "https://registry.npmjs.org/jose/-/jose-4.15.9.tgz"
   integrity sha512-1vUQX+IdDMVPj4k8kOxgUqlcK518yluMuGZwqlr44FS1ppZB/5GWh4rZG89erpOBOJjU/OBsnCVFfapsRz6nEA==
 
+jose@^6.1.0:
+  version "6.2.12"
+  resolved "https://registry.yarnpkg.com/jose/-/jose-6.2.12.tgz#65663e146edd010b98ece83f81737d3aa95fd0d7"
+  integrity sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==
+
 jose@^6.1.3:
   version "6.2.8"
   resolved "https://registry.npmjs.org/jose/-/jose-6.2.8.tgz"
@@ -6745,6 +6765,11 @@ lru-cache@^11.0.0, lru-cache@^11.2.7:
   version "11.5.1"
   resolved "https://registry.npmjs.org/lru-cache/-/lru-cache-11.5.1.tgz"
   integrity sha512-RPimw/7aMdv2oqRrxKwvZXcPfwBrn/JZ2xYcY9Hus/6LaS3VOAKVWKWgNLCFSiOm1ESXinjsDlidVU7JlnCN2A==
+
+lru-cache@^11.1.0:
+  version "11.5.3"
+  resolved "https://registry.yarnpkg.com/lru-cache/-/lru-cache-11.5.3.tgz#a7767b4034e35269562d2b9da2b185b5df70c421"
+  integrity sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==
 
 lucide-react@^0.554.0:
   version "0.554.0"
@@ -8280,6 +8305,13 @@ superstruct@^2.0.2:
   version "1.95.1"
   resolved "https://registry.npmjs.org/svix/-/svix-1.95.1.tgz"
   integrity sha512-Vtsbzsvs4lzXJneruB5HiZmV7dlhAjbo6dGid2Qxi9bv+LutLz7Yt3NORI4SYqRTNWPhVoFAA8TG/WXB+mIzNQ==
+  dependencies:
+    standardwebhooks "1.0.0"
+
+svix@^1.92.2:
+  version "1.99.1"
+  resolved "https://registry.yarnpkg.com/svix/-/svix-1.99.1.tgz#3e25fe4440bfbc6f9c85c157dbeb537088db70e9"
+  integrity sha512-JfpvbAg5iT5NagDAfOq3e6Ci6NbOMbMm6C3DnfDBB60m2JDK+Z2hXPE9XNAmutb53DCdPoih1V70IbklZnX09A==
   dependencies:
     standardwebhooks "1.0.0"
 

@@ -8,6 +8,9 @@ import {
 import { runTreasuryAgent } from "@/lib/business/agent";
 import { verifyDecisionLog } from "@/lib/business/ledger";
 
+/** A treasury run asks a model, then pays and waits for Circle, so it needs more than the default time (the chat route allows the same). */
+export const maxDuration = 60;
+
 /** GET /api/business/{id} — dashboard snapshot (owner only). */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let userId: string;

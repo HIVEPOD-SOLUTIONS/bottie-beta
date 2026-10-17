@@ -129,6 +129,9 @@ const decisionSchema = z.object({
   })),
 });
 
+/** The most time the agent's models may take in one run, all candidates together. */
+const MODEL_BUDGET_MS = 12_000;
+
 async function askModel(context: unknown): Promise<{ decisions: { billId: string; action: AgentAction; reason: string }[]; model: string } | null> {
   let candidates;
   try { candidates = getLanguageModelCandidates(); } catch { return null; }
@@ -138,14 +141,20 @@ async function askModel(context: unknown): Promise<{ decisions: { billId: string
     "Use judgement within the rules: pay what is due soonest first; don't pay early if that would leave too little for a bill due before more money is expected; " +
     "a contractor whose work is due is a higher priority than a renewable subscription; escalate anything unusual (possible duplicate, odd amount for that payee, missing invoice reference on a large bill). " +
     "Give a short, specific reason a reviewer can check against the numbers. Decide for every bill in `candidates`, by billId.";
+  // The whole run (this call, then the payments) has to answer within the server's request limit, so the model gets a bounded share of it:
+  // a slow model is abandoned and the next one, or the plain rules, decide instead of the owner seeing a gateway timeout.
+  const started = Date.now();
   for (const c of candidates) {
+    const left = MODEL_BUDGET_MS - (Date.now() - started);
+    if (left < 3_000) break;
     try {
       const { object } = await generateObject({
         model: c.model,
         schema: decisionSchema,
         system,
         prompt: JSON.stringify(context),
-        maxRetries: 1,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(left),
       });
       return { decisions: object.decisions, model: c.name };
     } catch (err) {

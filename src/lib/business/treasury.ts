@@ -25,6 +25,8 @@ import { getServerEnv } from "@/lib/server-env";
 /** Left in the treasury for Arc network fees (paid in USDC). */
 export const GAS_BUFFER_USD = 0.05;
 const CIRCLE_ARC = "ARC";
+/** How long a payment waits for Arc to confirm before the run moves on (the next run settles it). */
+const CONFIRM_WAIT_MS = 10_000;
 
 export type Custody = "circle" | "local";
 export interface TreasuryRow {
@@ -149,7 +151,8 @@ async function waitCircle(providerTxId: string, ms: number): Promise<PaymentResu
 }
 
 /**
- * Sends USDC on Arc from the treasury and waits up to ~25 s for the outcome.
+ * Sends USDC on Arc from the treasury and waits up to ~10 s for the outcome (Arc settles in well under a second; a run also spends time on the
+ * model, and the whole request has to finish inside the server's limit, so a slower payment is settled by the next run instead).
  * `idempotencyKey` (a UUID the caller stored first) makes Circle refuse to
  * send twice for the same payment, even across crashes and retries.
  */
@@ -158,9 +161,14 @@ export async function sendTreasuryUsdc(b: TreasuryRow, to: string, amountUsd: nu
     const c = await circle();
     let providerTxId: string | undefined;
     try {
+      // A token named by its address also needs its chain ("Blockchain of the transferred token. Required if tokenId is not provided"),
+      // or Circle answers "API parameter invalid" and no payment can ever leave a Circle treasury. The SDK's input type forbids
+      // `blockchain` next to `walletId`, but the API takes it, so it is added through a typed spread.
+      const tokenChain = { blockchain: CIRCLE_ARC } as unknown as Record<string, never>;
       const res = await c.createTransaction({
         walletId: b.circleWalletId!,
         tokenAddress: ARC_USDC,
+        ...tokenChain,
         amount: [amountUsd.toFixed(6).replace(/\.?0+$/, "")],
         destinationAddress: to,
         fee: { type: "level", config: { feeLevel: "MEDIUM" } },
@@ -171,7 +179,7 @@ export async function sendTreasuryUsdc(b: TreasuryRow, to: string, amountUsd: nu
       return { state: "failed", txHash: null, providerTxId: null, error: circleError(err) };
     }
     if (!providerTxId) return { state: "failed", txHash: null, providerTxId: null, error: "Circle returned no transaction id" };
-    return waitCircle(providerTxId, 25_000);
+    return waitCircle(providerTxId, CONFIRM_WAIT_MS);
   }
   const account = localAccount(b);
   const wallet = createWalletClient({ account, chain: arcChain, transport: http() });
@@ -181,7 +189,7 @@ export async function sendTreasuryUsdc(b: TreasuryRow, to: string, amountUsd: nu
   } catch (err) {
     return { state: "failed", txHash: null, providerTxId: null, error: err instanceof Error ? err.message : String(err) };
   }
-  const outcome = await txOutcome(hash, 20_000);
+  const outcome = await txOutcome(hash, CONFIRM_WAIT_MS);
   return { state: outcome === "success" ? "success" : outcome === "reverted" ? "failed" : "pending", txHash: hash, providerTxId: null, ...(outcome === "reverted" ? { error: "reverted on-chain" } : {}) };
 }
 
