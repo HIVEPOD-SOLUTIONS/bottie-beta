@@ -16,6 +16,7 @@ import { arbitrum, base, mainnet, optimism, polygon } from "viem/chains";
 import type { ConnectedWallet, usePrivy } from "@privy-io/react-auth";
 import { domaChain } from "@/lib/doma-chain";
 import { arcChain } from "@/lib/arc-chain";
+import { PRIVY_SPONSORED_CHAIN_IDS } from "@/lib/sponsor-chains";
 import { robinhoodChain, tempoChain } from "@/lib/swap-chains";
 
 /**
@@ -117,24 +118,26 @@ export async function payEvm(opts: {
   const tx = { to: payment.to, chainId: payment.chainId, ...(payment.data ? { data: payment.data } : {}), ...(payment.value ? { value: payment.value } : {}) };
   let lastErr: unknown;
 
-  // ── Layer 1: Privy gas sponsorship ──
-  try {
-    onLayer?.(1);
-    // The app is in Privy's "User pays" gas mode, which needs `sponsor_options` — client SDKs
-    // can't pass it, so relay through the server (gas is paid in the wallet's USDC).
-    const res = await fetch("/api/privy/sponsored-send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ chainId: payment.chainId, to: payment.to, data: payment.data, value: payment.value?.toString() }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { hash?: string; error?: string };
-    if (!res.ok || !json.hash) throw new Error(json.error ?? `Sponsored send failed (HTTP ${res.status})`);
-    return { hash: json.hash as Hex, layer: 1 };
-  } catch (err) {
-    if (isUserRejection(err)) throw err;
-    lastErr = err;
-    console.warn(`[${label}] Layer 1 (sponsored) failed on ${chain.name}:`, friendlyEvmError(err, chain.name));
+  // ── Layer 1: Privy gas sponsorship (only where Privy supports user-pays USDC gas; not Arc) ──
+  if (PRIVY_SPONSORED_CHAIN_IDS.has(payment.chainId)) {
+    try {
+      onLayer?.(1);
+      // The app is in Privy's "User pays" gas mode, which needs `sponsor_options` — client SDKs
+      // can't pass it, so relay through the server (gas is paid in the wallet's USDC).
+      const res = await fetch("/api/privy/sponsored-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ chainId: payment.chainId, to: payment.to, data: payment.data, value: payment.value?.toString() }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { hash?: string; error?: string };
+      if (!res.ok || !json.hash) throw new Error(json.error ?? `Sponsored send failed (HTTP ${res.status})`);
+      return { hash: json.hash as Hex, layer: 1 };
+    } catch (err) {
+      if (isUserRejection(err)) throw err;
+      lastErr = err;
+      console.warn(`[${label}] Layer 1 (sponsored) failed on ${chain.name}:`, friendlyEvmError(err, chain.name));
+    }
   }
 
   // ── Layer 2: plain EOA, user pays gas ──
@@ -150,7 +153,15 @@ export async function payEvm(opts: {
       if (gas === BigInt(0)) throw new Error(`No native gas: no ${chain.nativeCurrency.symbol} on ${chain.name}`);
     }
     await wallet.switchChain(payment.chainId);
-    const client = createWalletClient({ account, chain, transport: custom(await wallet.getEthereumProvider()) });
+    const provider = await wallet.getEthereumProvider();
+    // switchChain can resolve without the provider following (seen on Arc); never send on the wrong chain.
+    let active = Number(await provider.request({ method: "eth_chainId" }));
+    if (active !== payment.chainId) {
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: `0x${payment.chainId.toString(16)}` }] });
+      active = Number(await provider.request({ method: "eth_chainId" }));
+    }
+    if (active !== payment.chainId) throw new Error(`Couldn't switch the wallet to ${chain.name}.`);
+    const client = createWalletClient({ account, chain, transport: custom(provider) });
     const hash = await client.sendTransaction({ account, chain, to: payment.to, data: payment.data, value: payment.value });
     return { hash, layer: 2 };
   } catch (err) {

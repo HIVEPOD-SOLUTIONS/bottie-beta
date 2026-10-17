@@ -18,11 +18,9 @@ import { PrivyClient } from "@privy-io/node";
 import { getUserEmbeddedEvmAddress, verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { getServerEnv } from "@/lib/server-env";
-import { arcChain } from "@/lib/arc-chain";
+import { PRIVY_SPONSORED_CHAIN_IDS } from "@/lib/sponsor-chains";
 
-// Chains we try to sponsor in user-pays mode (Privy rejects the rest; the client falls through to Layer 2).
-// Tempo is excluded — it rejects `sponsor_options`.
-const SPONSORED_CHAINS = new Set([1, 8453, 137, 42161, 10, arcChain.id]);
+const SPONSORED_CHAINS = PRIVY_SPONSORED_CHAIN_IDS;
 const HEX = /^0x[0-9a-fA-F]*$/;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
