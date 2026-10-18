@@ -1,4 +1,5 @@
 import { getServerEnv } from "@/lib/server-env";
+import { geckoTickerPrices } from "@/lib/coingecko";
 import { parseQuotesLatest, type PriceSnapshot, type TrackedCoin } from "@/lib/coinmarketcap-parse";
 
 /**

@@ -3,6 +3,7 @@ import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { cmcGetCached, PriceFeedNotConfiguredError } from "@/lib/coinmarketcap";
 import { parseCoins, pickBestPerSymbol } from "@/lib/coinmarketcap-parse";
+import { geckoListing } from "@/lib/coingecko";
 import { getSupportedCoins } from "@/lib/supported-coins";
 import { checkApiLimit } from "@/lib/user-rate-limiter";
 
