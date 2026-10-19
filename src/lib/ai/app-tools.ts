@@ -36,8 +36,8 @@ export const APP_TOOL_NAMES: ReadonlySet<string> = new Set([
   "grail_gold_price", "grail_get_denominations", "grail_list_trades", "grail_get_trade", "grail_list_redemptions", "grail_get_redemption",
 ]);
 
-/** Whole families the app has a screen for: GetEquity, Doma and Nosana (Invest), and Bluvfi for Business (the Business screen, from Profile). */
-export const APP_TOOL_PREFIXES: readonly string[] = ["getequity_", "doma_", "nosana_", "business_"];
+/** Whole families the app has a screen for: GetEquity, Doma and Nosana (Invest). */
+export const APP_TOOL_PREFIXES: readonly string[] = ["getequity_", "doma_", "nosana_"];
 
 /**
  * Inside an allowed family, tools that are raw developer data (Seaport fulfilment calldata; buying goes through doma_buy_listing's card).
@@ -46,8 +46,9 @@ export const APP_TOOL_PREFIXES: readonly string[] = ["getequity_", "doma_", "nos
  */
 export const APP_DENIED_WITHIN_PREFIXES: ReadonlySet<string> = new Set(["doma_prepare_buy", "doma_prepare_accept_offer"]);
 
-/** Families that are never available in the app (operator accounts, banking, agent wallets). */
+/** Families that are never available in the app (operator accounts, banking, agent wallets, B2B). */
 export const APP_DENIED_PREFIXES: readonly string[] = [
+  "business_", // Bluvfi for Business is a website feature (Business tab); the app has no screen for it
   "fuze_", "spherepay_", "nanopay_", "solpay_", "xstocks_", "grail_",
   "get_banking_", "get_payout_", "get_onramp_", "get_offramp_", "get_nanopay_", "get_solpay_",
 ];

@@ -186,6 +186,18 @@ export async function getPrices(): Promise<PriceSnapshot> {
       console.warn("[prices] CoinMarketCap failed, serving stale prices:", err instanceof Error ? err.message : err);
       return { ...cache.snapshot, stale: true };
     }
+    // Nothing cached and CoinMarketCap is failing (plan expired, over its limit, outage): use CoinGecko's keyless
+    // feed. Website only for now — this is the dashboard ticker's path (GET /api/prices); the app's coin screens
+    // (/api/prices/all and /supported) don't fall back.
+    try {
+      const prices = await geckoTickerPrices(TRACKED_COINS.map((c) => c.symbol));
+      if (prices.length > 0) {
+        console.warn("[prices] CoinMarketCap failed, serving CoinGecko prices:", err instanceof Error ? err.message : err);
+        return { prices, fetchedAt: Date.now(), stale: false };
+      }
+    } catch (geckoErr) {
+      console.warn("[prices] CoinGecko fallback failed too:", geckoErr instanceof Error ? geckoErr.message : geckoErr);
+    }
     throw err;
   }
 }
