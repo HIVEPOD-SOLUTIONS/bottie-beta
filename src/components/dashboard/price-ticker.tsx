@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCryptoPrices } from "@/hooks/use-crypto-prices";
 import type { CoinPrice } from "@/lib/coinmarketcap-parse";
 
-/** $64,231.55 for normal prices; more decimals below $1 so a coin like XRP still shows movement. */
+/** $64,231.55 for normal prices; more decimals below $1 so a coin like XRP or DOGE still shows movement. */
 function formatCoinPrice(n: number): string {
   const decimals = n >= 1 ? 2 : n >= 0.01 ? 4 : 6;
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
@@ -55,6 +55,19 @@ function PriceChip({ coin }: { coin: CoinPrice }) {
 export function PriceTicker({ className = "" }: { className?: string }) {
   const { data, isPending, isError } = useCryptoPrices();
 
+  // Touch scrolls the strip natively; this lets a mouse drag it too (with the wheel/trackpad as before).
+  const stripRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; left: number } | null>(null);
+  const onStripDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "mouse" || !stripRef.current) return;
+    drag.current = { x: e.clientX, left: stripRef.current.scrollLeft };
+  };
+  const onStripMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag.current || !stripRef.current) return;
+    stripRef.current.scrollLeft = drag.current.left - (e.clientX - drag.current.x);
+  };
+  const onStripUp = () => { drag.current = null; };
+
   if (isError && !data) return null;
 
   if (isPending) {
@@ -70,7 +83,16 @@ export function PriceTicker({ className = "" }: { className?: string }) {
 
   return (
     <div className={className}>
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+      <div
+        ref={stripRef}
+        className="flex cursor-grab gap-2 overflow-x-auto pb-1 active:cursor-grabbing"
+        style={{ scrollbarWidth: "none" }}
+        onPointerDown={onStripDown}
+        onPointerMove={onStripMove}
+        onPointerUp={onStripUp}
+        onPointerCancel={onStripUp}
+        onPointerLeave={onStripUp}
+      >
         {data.prices.map((coin) => (
           <PriceChip key={coin.symbol} coin={coin} />
         ))}

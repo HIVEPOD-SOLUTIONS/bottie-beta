@@ -10,7 +10,11 @@ const BASE = "https://api.coingecko.com/api/v3";
 const TTL_MS = 60_000;
 
 /** CMC id → CoinGecko id for the dashboard ticker's fixed coin list. */
-export const TICKER_GECKO_IDS: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum", SOL: "solana", XRP: "ripple" };
+export const TICKER_GECKO_IDS: Record<string, string> = {
+  BTC: "bitcoin", ETH: "ethereum", SOL: "solana", XRP: "ripple",
+  BNB: "binancecoin", TRX: "tron", HYPE: "hyperliquid", DOGE: "dogecoin", ADA: "cardano", LINK: "chainlink",
+  NEAR: "near", XLM: "stellar", BCH: "bitcoin-cash", AVAX: "avalanche-2", LTC: "litecoin", SUI: "sui", DOT: "polkadot",
+};
 
 type GeckoMarket = {
   id: string;

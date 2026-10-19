@@ -28,6 +28,21 @@ export const TRACKED_COINS: readonly TrackedCoin[] = [
   { id: 1027, symbol: "ETH", name: "Ethereum" },
   { id: 5426, symbol: "SOL", name: "Solana" },
   { id: 52, symbol: "XRP", name: "XRP" },
+  // The rest of the strip, in market-cap order (scroll sideways). Ids confirmed live against quotes/latest; one call
+  // still costs 1 credit for up to 100 coins. Keep TICKER_GECKO_IDS (coingecko.ts) in step with this list.
+  { id: 1839, symbol: "BNB", name: "BNB" },
+  { id: 1958, symbol: "TRX", name: "TRON" },
+  { id: 32196, symbol: "HYPE", name: "Hyperliquid" },
+  { id: 74, symbol: "DOGE", name: "Dogecoin" },
+  { id: 2010, symbol: "ADA", name: "Cardano" },
+  { id: 1975, symbol: "LINK", name: "Chainlink" },
+  { id: 6535, symbol: "NEAR", name: "NEAR Protocol" },
+  { id: 512, symbol: "XLM", name: "Stellar" },
+  { id: 1831, symbol: "BCH", name: "Bitcoin Cash" },
+  { id: 5805, symbol: "AVAX", name: "Avalanche" },
+  { id: 2, symbol: "LTC", name: "Litecoin" },
+  { id: 20947, symbol: "SUI", name: "Sui" },
+  { id: 6636, symbol: "DOT", name: "Polkadot" },
 ];
 
 export class PriceFeedNotConfiguredError extends Error {
