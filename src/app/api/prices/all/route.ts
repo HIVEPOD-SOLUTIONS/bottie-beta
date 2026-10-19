@@ -3,6 +3,7 @@ import { verifyAuth } from "@/lib/auth";
 import { authErrorResponse } from "@/lib/auth-response";
 import { cmcGetCached, describeCmcError, PriceFeedNotConfiguredError } from "@/lib/coinmarketcap";
 import { parseCoins, pickBestPerSymbol, type CoinQuote } from "@/lib/coinmarketcap-parse";
+import { geckoListing } from "@/lib/coingecko";
 import { getSupportedCoins } from "@/lib/supported-coins";
 import { checkApiLimit } from "@/lib/user-rate-limiter";
 
@@ -12,6 +13,9 @@ import { checkApiLimit } from "@/lib/user-rate-limiter";
  *
  * Authenticated and cached like /api/prices (cmcGetCached: one upstream call serves everyone for the TTL).
  * Coins that a Bluvfi provider supports also carry `providers`, so the app can badge them.
+ *
+ * `&fallback=1` (the website's all-coins sheet only) serves a page from CoinGecko's keyless feed when CoinMarketCap fails,
+ * so the list isn't empty while the key or plan is down. The app never sends it, so its behaviour is unchanged.
  */
 
 const PAGE_MAX = 200;
@@ -94,10 +98,24 @@ export async function GET(req: NextRequest) {
     });
     const coins = parseCoins(body, "USD").map((c) => row(c, providers));
     return NextResponse.json(
-      { coins, nextStart: coins.length >= limit ? start + limit : null, fetchedAt },
+      { coins, nextStart: coins.length >= limit && start + limit <= START_MAX ? start + limit : null, fetchedAt },
       { headers: { "Cache-Control": "private, max-age=15" } },
     );
   } catch (err) {
+    // Website only: CoinGecko pages are 1-based and fixed-size, so only a page-aligned `start` maps onto one.
+    if (sp.get("fallback") === "1" && !symbol && (start - 1) % Math.min(limit, 250) === 0) {
+      try {
+        const perPage = Math.min(limit, 250);
+        const quotes = await geckoListing(Math.floor((start - 1) / perPage) + 1, perPage);
+        if (quotes.length > 0) {
+          console.warn("[prices/all] CoinMarketCap failed, serving CoinGecko:", err instanceof Error ? err.message : err);
+          const coins = quotes.map((c) => row(c, new Map()));
+          return NextResponse.json({ coins, nextStart: coins.length >= perPage && start + perPage <= START_MAX ? start + perPage : null, fetchedAt: Date.now() });
+        }
+      } catch (geckoErr) {
+        console.warn("[prices/all] CoinGecko fallback failed too:", geckoErr instanceof Error ? geckoErr.message : geckoErr);
+      }
+    }
     if (err instanceof PriceFeedNotConfiguredError) {
       return NextResponse.json({ error: "Price feed not configured" }, { status: 501 });
     }

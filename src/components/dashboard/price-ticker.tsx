@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useCryptoPrices } from "@/hooks/use-crypto-prices";
+import { AllCoinsSheet } from "./all-coins-sheet";
 import type { CoinPrice } from "@/lib/coinmarketcap-parse";
 
 /** $64,231.55 for normal prices; more decimals below $1 so a coin like XRP or DOGE still shows movement. */
@@ -54,6 +55,7 @@ function PriceChip({ coin }: { coin: CoinPrice }) {
  */
 export function PriceTicker({ className = "" }: { className?: string }) {
   const { data, isPending, isError } = useCryptoPrices();
+  const [showAll, setShowAll] = useState(false);
 
   // Touch scrolls the strip natively; this lets a mouse drag it too (with the wheel/trackpad as before).
   const stripRef = useRef<HTMLDivElement>(null);
@@ -96,13 +98,23 @@ export function PriceTicker({ className = "" }: { className?: string }) {
         {data.prices.map((coin) => (
           <PriceChip key={coin.symbol} coin={coin} />
         ))}
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          className="flex shrink-0 flex-col items-start justify-center rounded-xl border border-[#8FAE82]/40 bg-[#8FAE82]/10 px-3 py-2 text-[11px] font-semibold text-[#8FAE82]"
+        >
+          All coins
+          <span className="text-[10px] font-normal opacity-80">every listed coin ›</span>
+        </button>
       </div>
       <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[#A7A79A]">
         <span
           className={`h-1.5 w-1.5 rounded-full ${data.stale ? "bg-amber-400" : "animate-pulse bg-green-400"}`}
         />
         {data.stale ? "Delayed" : "Live"}
+        <button type="button" onClick={() => setShowAll(true)} className="ml-auto text-[#8FAE82]">All coins ›</button>
       </p>
+      {showAll && <AllCoinsSheet onClose={() => setShowAll(false)} />}
     </div>
   );
 }
