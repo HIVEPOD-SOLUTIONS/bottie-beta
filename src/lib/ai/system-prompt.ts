@@ -27,6 +27,62 @@ interface UserContext {
   walletOnly?: boolean;
   /** The phone is a Solana Seeker. */
   seeker?: boolean;
+  /**
+   * What the conversation is about right now: the latest messages plus the tools already used. When given, the reference sections
+   * for features nobody has mentioned are left out (the model still gets the full capability list), which keeps the prompt small
+   * and the first word fast. Absent means "send everything" (tests, anything that builds the prompt without a conversation).
+   */
+  topicText?: string;
+}
+
+/**
+ * A case-insensitive pattern matching any of these as the START of a word ("invest" matches "investing"). Short words and tickers
+ * end in a dollar sign, which here means "whole word only" ("eth$" matches "eth" but never "method" or "ether").
+ */
+const stems = (...alts: string[]) =>
+  new RegExp("(?<![a-z0-9])(?:" + alts.map((x) => (x.endsWith("$") ? x.slice(0, -1) + "(?![a-z0-9])" : x)).join("|") + ")", "i");
+
+/**
+ * Reference sections that only matter once the conversation touches them. `heading` is the start of the "## " title; `topic` is what
+ * brings the section in; `websiteOnly` sections are never sent to the native app (it has no screen or tool for them).
+ * Anything not listed here (personality, capabilities, funding, payment and wallet rules, bills, history, errors, quota, user context...)
+ * is always sent.
+ */
+const TOPIC_SECTIONS: ReadonlyArray<{ heading: string; topic: RegExp; websiteOnly?: boolean }> = [
+  { heading: "XRP wallet & payments", topic: stems("xrp", "ripple") },
+  { heading: "Live crypto market data", topic: stems("price", "market", "coin", "crypto", "bitcoin", "ethereum", "solana", "trend", "mover", "worth", "convert", "dominance", "btc$", "eth$", "sol$") },
+  { heading: "Bluvfi for Business", topic: stems("business", "treasur", "payee", "invoice", "vendor", "contractor"), websiteOnly: true },
+  { heading: "Cryptorefills", topic: stems("cryptorefill", "gift", "esim", "e-sim", "top up", "top-up", "topup", "refill", "airtime", "data plan", "voucher", "netflix", "spotify", "amazon", "steam", "phone", "mobile") },
+  { heading: "Investments", topic: stems("invest", "portfolio", "stock", "equit", "etf$", "share", "backpack", "nvda", "tsla", "aapl", "trade", "asset") },
+  { heading: "Doma Protocol", topic: stems("doma", "domain", "tokeniz", "orderbook", "listing", "offer", "[a-z0-9-]+[.]com") },
+  { heading: "Buying crypto with UPI", topic: stems("upi$", "inr$", "rupee", "india", "onramp", "on-ramp", "on ramp", "buy crypto") },
+  { heading: "Selling crypto for INR", topic: stems("inr$", "rupee", "india", "offramp", "off-ramp", "off ramp", "sell crypto", "bank account") },
+  { heading: "Unified x402", topic: stems("x402", "mpp$", "nano", "micropay", "micro-pay", "agent pay", "paykit", "pay-kit", "paid api") },
+  { heading: "Circle Gateway Nanopayments", topic: stems("x402", "mpp$", "nano", "gateway", "circle", "micropay", "micro-pay") },
+  { heading: "Solana Nanopayments", topic: stems("x402", "mpp$", "nano", "micropay", "micro-pay", "paykit", "pay-kit", "solana") },
+  { heading: "Gold trading", topic: stems("gold", "grail", "oro$") },
+  { heading: "Nosana GPU Cloud", topic: stems("nosana", "gpu$", "compute", "nos$") },
+  { heading: "SpherePay", topic: stems("sphere", "b2b", "kyb$", "eurc", "brl$", "sepa", "wire$", "payout", "onramp", "on-ramp", "offramp", "off-ramp") },
+  { heading: "Fuze Finance", topic: stems("fuze", "payout", "fiat", "bank", "wire$", "ach$", "stablecoin", "kyc$") },
+  { heading: "xStocks", topic: stems("xstock", "backed", "xchange", "stock", "tokenized", "tsla", "nvda", "aapl") },
+  { heading: "GetEquity", topic: stems("getequity", "equit", "safe$", "pre-ipo", "preipo", "private market", "fixed interest", "debt", "raise") },
+  { heading: "Savings goals", topic: stems("goal", "saving", "save$") },
+  { heading: "Banking offramp bank account management", topic: stems("bank", "offramp", "off-ramp", "withdraw", "account") },
+  { heading: "Banking payout suite", topic: stems("bank", "payout", "payee", "withdraw", "transfer") },
+];
+
+/** Drops the lines of the topic sections the conversation has not touched (a section runs from its "## " line to the next one). */
+function selectSections(ctx: UserContext, lines: string[]): string[] {
+  const text = ctx.topicText;
+  if (text === undefined && !isNativeApp(ctx)) return lines;
+  let skipping = false;
+  return lines.filter((line) => {
+    if (line.startsWith("## ")) {
+      const rule = TOPIC_SECTIONS.find((r) => line.slice(3).startsWith(r.heading));
+      skipping = !!rule && ((rule.websiteOnly === true && isNativeApp(ctx)) || (text !== undefined && !rule.topic.test(text)));
+    }
+    return !skipping;
+  });
 }
 
 const isNativeApp = (ctx: UserContext) => ctx.client === "expo-android";
@@ -1109,5 +1165,5 @@ export function buildSystemPrompt(ctx: UserContext): string {
     lines.push(``, `## Earlier conversation`, ctx.conversationRecap);
   }
 
-  return lines.join("\n");
+  return selectSections(ctx, lines).join("\n");
 }

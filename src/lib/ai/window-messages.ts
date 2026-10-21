@@ -1007,3 +1007,26 @@ export function windowMessages(messages: UIMessage[]): UIMessage[] {
   if (messages.length <= RECENT_WINDOW) return messages;
   return messages.slice(-RECENT_WINDOW);
 }
+
+/** How many of the latest messages say what the conversation is currently about. */
+const TOPIC_MESSAGES = 6;
+const TOPIC_MAX_CHARS = 12_000;
+
+/**
+ * What the conversation is about right now: the text of the latest messages, the names of the tools used in them ("buy_bitrefill_product"
+ * becomes "buy bitrefill product", so a follow-up like "yes, confirm" still keeps that provider's rules), and the earlier-conversation recap.
+ * buildSystemPrompt uses it to leave out the reference sections for features nobody has mentioned.
+ */
+export function conversationTopics(messages: UIMessage[], recap?: string): string {
+  const out: string[] = [];
+  for (const m of messages.slice(-TOPIC_MESSAGES)) {
+    for (const part of m.parts ?? []) {
+      const p = part as { type?: string; text?: string; toolName?: string };
+      if (p.type === "text" && typeof p.text === "string") out.push(p.text);
+      else if (typeof p.type === "string" && p.type.startsWith("tool-")) out.push(p.type.slice(5).split("_").join(" "));
+      else if (p.type === "dynamic-tool" && typeof p.toolName === "string") out.push(p.toolName.split("_").join(" "));
+    }
+  }
+  if (recap) out.push(recap);
+  return out.join(" ").slice(-TOPIC_MAX_CHARS);
+}

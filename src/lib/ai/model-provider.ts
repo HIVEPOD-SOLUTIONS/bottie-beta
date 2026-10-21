@@ -52,6 +52,9 @@ function buildQwenCandidates(): LanguageModel[] {
             m.role === "developer" ? { ...m, role: "system" } : m,
           );
         }
+        // Qwen3 models "think" before answering by default, which delays the first word by about 4-5 s in the chat.
+        // Turn that off (set QWEN_THINKING=true to bring it back); tool calls work the same without it.
+        if (process.env.QWEN_THINKING !== "true" && body.enable_thinking === undefined) body.enable_thinking = false;
         init = { ...init, body: JSON.stringify(body) };
       } catch {
         // leave body unchanged if parsing fails

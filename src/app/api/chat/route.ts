@@ -2,7 +2,7 @@ import { convertToModelMessages, streamText, stepCountIs, type UIMessage } from 
 import { getLanguageModelCandidates } from "@/lib/ai/model-provider";
 import { createTools } from "@/lib/ai/tools";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
-import { windowMessages, extractConversationRecap } from "@/lib/ai/window-messages";
+import { windowMessages, extractConversationRecap, conversationTopics } from "@/lib/ai/window-messages";
 import { verifyAuth } from "@/lib/auth";
 import { checkChatLimit, checkChatTokenBudget, checkToolBudget, recordChatTokens, refundChat } from "@/lib/user-rate-limiter";
 import { isUserPremium } from "@/lib/revenuecat-server";
@@ -281,6 +281,8 @@ export async function POST(req: Request) {
     portfolioValueUsd,
     billCount,
     conversationRecap: recap || undefined,
+    // Only the reference sections the conversation touches go to the model (smaller prompt, faster first word).
+    topicText: conversationTopics(windowed, recap),
     currentDate: new Date().toISOString().slice(0, 10),
     appVersion: typeof appVersion === "string" ? appVersion : undefined,
     client: typeof client === "string" ? client : undefined,
