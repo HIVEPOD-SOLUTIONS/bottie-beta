@@ -114,7 +114,38 @@ function repairToolMessages(msgs: any[]): any[] {
   return result;
 }
 
+/** How long the live XRP balance may delay a chat reply before the dashboard's polled value is used instead. */
+const XRP_BALANCE_WAIT_MS = 2_500;
+
+/** The user's XRPL sidebar wallet address and, when bluvfi-xrpl answers in time, its live balance. Never throws. */
+async function lookupXrpWallet(userId: string): Promise<{ address?: string; balance?: number }> {
+  try {
+    const [sidebarWallet] = await db.select().from(xrplSidebarWallets).where(eq(xrplSidebarWallets.userId, userId)).limit(1);
+    if (!sidebarWallet) return {};
+    try {
+      const wallet = await Promise.race([
+        getWalletRequest(sidebarWallet.walletRequestId, { includeLedgerBalance: true }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("bluvfi-xrpl timed out")), XRP_BALANCE_WAIT_MS)),
+      ]);
+      return { address: sidebarWallet.address, balance: resolveXrpBalance(wallet) };
+    } catch {
+      // bluvfi-xrpl is down or slow: the caller falls back to the dashboard's polled balance.
+      return { address: sidebarWallet.address };
+    }
+  } catch (err) {
+    // DB query failed — chat remains available.
+    console.warn("[chat] failed to resolve XRP wallet:", err);
+    return {};
+  }
+}
+
 export async function POST(req: Request) {
+  // Where a slow reply spends its time, logged once per request as "[chat] timing ..." (milliseconds since the request began).
+  const t0 = Date.now();
+  const marks: Record<string, number> = {};
+  const mark = (label: string) => {
+    marks[label] = Date.now() - t0;
+  };
   let userId: string;
   try {
     const auth = await verifyAuth();
@@ -126,8 +157,14 @@ export async function POST(req: Request) {
   // ── Per-user rate limiting (burst + daily) ──────────────────────────────
   // Checked after auth so we rate-limit by user identity, not just IP.
   // IP-based limits in proxy.ts are still the outer gate for unauthenticated abuse.
+  // The XRP wallet row and its live balance are only needed for the prompt, so start them now and let them run while
+  // the premium and limit checks below wait on their own round trips (awaited just before the prompt is built).
+  const xrpLookup = lookupXrpWallet(userId);
   const isPremium = await isUserPremium(userId);
-  const rateLimit = await checkChatLimit(userId, isPremium);
+  mark("premium");
+  // The token budget is a read-only peek, so it can share the limit check's round trip.
+  const [rateLimit, tokenBudget] = await Promise.all([checkChatLimit(userId, isPremium), checkChatTokenBudget(userId, isPremium)]);
+  mark("limits");
   if (!rateLimit.allowed) {
     return Response.json(
       { error: rateLimit.reason },
@@ -136,7 +173,6 @@ export async function POST(req: Request) {
   }
 
   // Cost budgets: LLM tokens used today, and an oversized-body guard. Rejections give the message back.
-  const tokenBudget = await checkChatTokenBudget(userId, isPremium);
   if (!tokenBudget.allowed) {
     await refundChat(userId);
     return Response.json({ error: tokenBudget.reason }, { status: 429, headers: tokenBudget.headers });
@@ -208,32 +244,15 @@ export async function POST(req: Request) {
     return new Response("Conversation too large", { status: 413 });
   }
 
-  // Resolve XRP wallet address from DB (cheap) and live balance from bluvfi-xrpl (may fail).
-  // The client sends xrpBalanceClient — the dashboard's polled value — as a fallback so the
-  // agent always sees a balance even when bluvfi-xrpl is temporarily unavailable.
-  let xrplAddress: string | undefined;
-  let xrpBalance: number | undefined;
-  try {
-    const [sidebarWallet] = await db
-      .select()
-      .from(xrplSidebarWallets)
-      .where(eq(xrplSidebarWallets.userId, userId))
-      .limit(1);
-    if (sidebarWallet) {
-      xrplAddress = sidebarWallet.address;
-      try {
-        const wallet = await getWalletRequest(sidebarWallet.walletRequestId, { includeLedgerBalance: true });
-        xrpBalance = resolveXrpBalance(wallet);
-      } catch {
-        // bluvfi-xrpl is down — fall back to the dashboard's polled balance as a hint.
-        if (typeof xrpBalanceClient === "number" && Number.isFinite(xrpBalanceClient)) {
-          xrpBalance = xrpBalanceClient;
-        }
-      }
-    }
-  } catch (err) {
-    // DB query failed — chat remains available.
-    console.warn("[chat] failed to resolve XRP wallet:", err);
+  // The XRP wallet address (DB) and live balance (bluvfi-xrpl) were looked up while the limit checks ran. The client sends
+  // xrpBalanceClient — the dashboard's polled value — as a fallback so the agent always sees a balance even when
+  // bluvfi-xrpl is slow or down.
+  const xrp = await xrpLookup;
+  mark("xrp");
+  const xrplAddress: string | undefined = xrp.address;
+  let xrpBalance: number | undefined = xrp.balance;
+  if (xrplAddress && xrpBalance === undefined && typeof xrpBalanceClient === "number" && Number.isFinite(xrpBalanceClient)) {
+    xrpBalance = xrpBalanceClient;
   }
 
   let modelMessages;
@@ -279,6 +298,7 @@ export async function POST(req: Request) {
   // key configured (e.g. Qwen down → OpenAI, or vice versa). Once a chunk has
   // actually been streamed to the user it's too late to switch providers
   // mid-response — that residual case still surfaces via onError below.
+  mark("prompt");
   let candidates;
   try {
     candidates = getLanguageModelCandidates();
@@ -298,7 +318,12 @@ export async function POST(req: Request) {
         tools,
         stopWhen: stepCountIs(10),
         // What the request actually cost, against the user's daily token budget.
-        onFinish: ({ totalUsage }) => {
+        onFinish: ({ totalUsage, steps }) => {
+          mark("done");
+          console.info(
+            "[chat] timing",
+            JSON.stringify({ ms: marks, model: (model as { modelId?: string }).modelId ?? name, steps: steps?.length ?? 1, tokens: totalUsage?.totalTokens ?? 0, promptChars: system.length }),
+          );
           void recordChatTokens(userId, totalUsage?.totalTokens ?? 0);
         },
         onError: (err) => {
@@ -313,6 +338,7 @@ export async function POST(req: Request) {
       // happened before any output was produced and it's safe to retry.
       const reader = response.body!.getReader();
       const first = await reader.read();
+      mark("firstChunk");
       if (first.done) throw new Error(`${name} returned an empty stream`);
 
       // DashScope quota errors (AllocationQuota.FreeTierOnly) arrive as the
