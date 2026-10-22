@@ -123,6 +123,11 @@ export async function refundChat(userId: string): Promise<void> {
 /** Ad bonuses are bounded: at most this many grants per user per rolling 24h, each at most MAX_BONUS messages. */
 const BONUS_GRANTS_PER_DAY = Number(process.env.CHAT_BONUS_GRANTS_PER_DAY) || 6;
 export const MAX_BONUS_PER_GRANT = 10;
+/**
+ * Each bonus message also gives back this many LLM tokens, so an ad helps a user who ran out of daily AI capacity (the token budget
+ * below) and not only one who ran out of messages. Bounded by the same grant cap: 6 grants x 10 messages x 10,000 = 600,000 tokens a day.
+ */
+export const BONUS_TOKENS_PER_MESSAGE = Number(process.env.CHAT_BONUS_TOKENS_PER_MESSAGE) || 10_000;
 
 /**
  * Grant bonus chat messages by reducing the user's daily count. Called after a rewarded ad is watched.
@@ -136,6 +141,7 @@ export async function grantChatBonus(userId: string, bonus: number, maxPerGrant 
   const grants = await hit(`chatbonus:daily:${userId}`, 24 * 60 * 60_000, BONUS_GRANTS_PER_DAY);
   if (!grants.allowed) return 0;
   await credit(`chat:daily:${userId}`, amount);
+  await credit(`chattokens:daily:${userId}`, amount * BONUS_TOKENS_PER_MESSAGE);
   return amount;
 }
 
@@ -272,7 +278,7 @@ export async function checkChatTokenBudget(userId: string, isPremium = false): P
     const retryAfter = Math.ceil((used.resetAt - Date.now()) / 1000);
     return {
       allowed: false,
-      reason: `You've used today's AI capacity. It resets in ${untilReset(used.resetAt)}.${isPremium ? "" : " Upgrade to Bluvfi Premium for more."}`,
+      reason: `You've used today's AI capacity. It resets in ${untilReset(used.resetAt)}.${isPremium ? "" : " Upgrade to Bluvfi Premium for more, or watch an ad for a bonus."}`,
       retryAfter,
       headers: { "X-RateLimit-Scope": "chat-tokens", "Retry-After": String(retryAfter) },
     };
